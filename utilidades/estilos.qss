@@ -1,0 +1,202 @@
+/* =========================================================
+   GLOBAL
+========================================================= */
+
+QWidget {
+    background-color: #f4f6f8;
+    color: #1f2937;
+    font-size: 13px;
+    font-family: Segoe UI;
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+#header {
+    font-size: 28px;
+    font-weight: bold;
+    padding: 10px;
+    color: #111827;
+}
+
+/* =========================================================
+   SIDEBAR
+========================================================= */
+
+#sidebar {
+    background-color: transparent;
+}
+
+/* =========================================================
+   CARDS
+========================================================= */
+
+#card {
+    background-color: white;
+    border-radius: 14px;
+    border: 1px solid #dbe2ea;
+    padding: 10px;
+}
+
+/* =========================================================
+   TÍTULOS DE CARD
+========================================================= */
+
+#cardTitle {
+    font-size: 16px;
+    font-weight: bold;
+    color: #111827;
+    padding-bottom: 8px;
+}
+
+/* =========================================================
+   LABEL DISPOSITIVO
+========================================================= */
+
+#deviceLabel {
+    font-size: 14px;
+    padding: 4px;
+    color: #2563eb;
+    font-weight: bold;
+}
+
+/* =========================================================
+   BOTONES
+========================================================= */
+
+QPushButton {
+    background-color: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 12px;
+    font-size: 13px;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #1d4ed8;
+}
+
+QPushButton:pressed {
+    background-color: #1e40af;
+}
+
+/* =========================================================
+   TREE
+========================================================= */
+
+QTreeWidget {
+    background-color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 6px;
+}
+
+QTreeWidget::item {
+    padding: 5px;
+}
+
+QTreeWidget::item:selected {
+    background-color: #dbeafe;
+    color: black;
+}
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+QScrollBar:vertical {
+    border: none;
+    background: #e5e7eb;
+    width: 10px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical {
+    background: #9ca3af;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #6b7280;
+}
+
+/* =========================================================
+   GRÁFICAS
+========================================================= */
+
+#graphFrame {
+    background-color: white;
+    border-radius: 14px;
+    border: 1px solid #dbe2ea;
+}
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+#topHeader {
+    background-color: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+
+/* FIX GLOBAL (sin romper texto) */
+QLabel {
+    background-color: transparent;
+    padding: 0;
+    margin: 0;
+}
+
+
+/* =========================================================
+   TÍTULO
+========================================================= */
+
+#mainTitle {
+    font-family: Arial;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+    margin: 0;
+    padding: 0;
+}
+
+/* =========================================================
+   SUBTÍTULO
+========================================================= */
+
+#subTitle {
+    font-family: Arial;
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: -18px;
+    padding: 0;
+}
+
+
+/* =========================================================
+   BOTONES TOOLBAR PRO
+========================================================= */
+
+#toolbarButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #374151;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 6px 6px;
+}
+
+/* Hover elegante */
+#toolbarButton:hover {
+    background-color: #f3f4f6;
+}
+
+/* Click */
+#toolbarButton:pressed {
+    background-color: #e5e7eb;
+}
