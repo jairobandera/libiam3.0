@@ -1,0 +1,25 @@
+:root {
+    --primary-color: #1976D2;
+    --primary-dark: #1565C0;
+    --primary-light: #BBDEFB;
+    --secondary-color: #388E3C;
+    --accent-color: #FF5722;
+    --bg-dark: #1E1E1E;
+    --bg-medium: #252526;
+    --bg-light: #2D2D30;
+    --bg-panel: #333337;
+    --text-primary: #FFFFFF;
+    --text-secondary: #B0B0B0;
+    --text-muted: #808080;
+    --border-color: #3E3E42;
+    --success-color: #4CAF50;
+    --warning-color: #FF9800;
+    --error-color: #F44336;
+}
+
+QMainWindow {
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 13px;
+}

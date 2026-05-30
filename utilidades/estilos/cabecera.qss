@@ -1,0 +1,41 @@
+QLabel {
+    background-color: transparent;
+    padding: 0;
+    margin: 0;
+}
+
+#topHeader {
+    background-color: #FFFFFF;
+    border-bottom: 1px solid #E5E7EB;
+}
+
+#mainTitle {
+    font-family: Arial;
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+}
+
+#subTitle {
+    font-family: Arial;
+    font-size: 11px;
+    color: #6B7280;
+}
+
+#toolbarButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #374151;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 6px;
+}
+
+#toolbarButton:hover {
+    background-color: #F3F4F6;
+}
+
+#toolbarButton:pressed {
+    background-color: #E5E7EB;
+}
