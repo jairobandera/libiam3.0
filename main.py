@@ -14,6 +14,8 @@ archivos_qss = [
     os.path.join(BASE_DIR, "utilidades", "estilos", "ventana.qss"),
     os.path.join(BASE_DIR, "utilidades", "estilos", "cabecera.qss"),
     os.path.join(BASE_DIR, "utilidades", "estilos", "panelizquierdo.qss"),
+    os.path.join(BASE_DIR, "utilidades", "estilos", "panelderecho.qss"),
+    os.path.join(BASE_DIR, "utilidades", "estilos", "barrabotones.qss"),
 ]
 
 estilos = ""
