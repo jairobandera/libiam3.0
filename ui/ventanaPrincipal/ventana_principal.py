@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
 
 from ui.cabecera.cabeceraPrincipal.cabecera import Cabecera
 from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
+from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
+from ui.ventanaPrincipal.barraBotones import BarraBotones
 
 
 class VentanaPrincipal(QWidget):
@@ -31,7 +33,7 @@ class VentanaPrincipal(QWidget):
         self.cabecera = Cabecera()
         layout.addWidget(self.cabecera)
 
-        # Layout horizontal para el contenido (panel izquierdo + area central)
+        # Layout horizontal para el contenido
         layout_contenido = QHBoxLayout()
         layout_contenido.setContentsMargins(0, 0, 0, 0)
         layout_contenido.setSpacing(0)
@@ -45,6 +47,17 @@ class VentanaPrincipal(QWidget):
         self.area_central.setObjectName("areaCentral")
         layout_contenido.addWidget(self.area_central, 1)
 
+        # Panel derecho (colapsable)
+        self.panel_derecho = PanelDerecho()
+        layout_contenido.addWidget(self.panel_derecho)
+
+        # Barra de botones derecha
+        self.barra_botones = BarraBotones(self.panel_derecho)
+        layout_contenido.addWidget(self.barra_botones)
+
         layout.addLayout(layout_contenido)
 
         self.setLayout(layout)
+
+        # Conectar panel izquierdo con panel derecho
+        self.panel_izquierdo.panel_derecho_ref = self.panel_derecho

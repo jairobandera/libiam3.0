@@ -167,6 +167,11 @@ class PanelIzquierdo(QFrame):
         self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
         self.lbl_registros.setText(f"Registros: {info['registros']}")
 
+        # Pasar datos al panel derecho si existe
+        if hasattr(self, "panel_derecho_ref"):
+            info["columnas_csv"] = list(df.columns)
+            self.panel_derecho_ref.cargar_datos_csv(info)
+
     def agregar_al_arbol(self, nombre_archivo, df):
 
         # Guardar el dataframe para uso futuro
@@ -199,3 +204,8 @@ class PanelIzquierdo(QFrame):
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
         self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
         self.lbl_registros.setText(f"Registros: {info['registros']}")
+
+        # Actualizar panel derecho con los datos del archivo seleccionado
+        if hasattr(self, "panel_derecho_ref"):
+            info["columnas_csv"] = list(df.columns)
+            self.panel_derecho_ref.cargar_datos_csv(info)
