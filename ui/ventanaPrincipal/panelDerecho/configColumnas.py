@@ -9,12 +9,13 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QWidget,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 from logica.mapeo_columnas import MapeoColumnas
 
 
 class ConfigColumnas(QFrame):
+    mapeoAplicado = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -294,8 +295,7 @@ class ConfigColumnas(QFrame):
     def aplicar_mapeo(self):
         """Guarda la configuracion actual del mapeo."""
         mapeo_completo = self.mapeo.obtener_mapeo_completo()
-        # Aca se guarda para uso futuro en la grafica
-        print("Mapeo aplicado:", mapeo_completo)
+        self.mapeoAplicado.emit(mapeo_completo)
 
     def resetear_mapeo(self):
         """Vuelve a la deteccion automatica."""

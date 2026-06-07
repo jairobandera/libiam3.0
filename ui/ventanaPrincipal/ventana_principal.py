@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.cabecera.cabeceraPrincipal.cabecera import Cabecera
+from ui.ventanaPrincipal.areaCentralGraficas import AreaCentralGraficas
 from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
 from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
 from ui.ventanaPrincipal.barraBotones import BarraBotones
@@ -42,9 +43,8 @@ class VentanaPrincipal(QWidget):
         self.panel_izquierdo = PanelIzquierdo()
         layout_contenido.addWidget(self.panel_izquierdo)
 
-        # Area central vacia (por ahora)
-        self.area_central = QWidget()
-        self.area_central.setObjectName("areaCentral")
+        # Area central de graficas
+        self.area_central = AreaCentralGraficas()
         layout_contenido.addWidget(self.area_central, 1)
 
         # Panel derecho (colapsable)
@@ -61,3 +61,13 @@ class VentanaPrincipal(QWidget):
 
         # Conectar panel izquierdo con panel derecho
         self.panel_izquierdo.panel_derecho_ref = self.panel_derecho
+
+        # Conectar carga de datos y seleccion de rango con las graficas
+        self.panel_izquierdo.archivoCargado.connect(self.area_central.cargar_dataframe)
+        self.panel_izquierdo.archivoSeleccionado.connect(self.area_central.cargar_dataframe)
+        self.panel_izquierdo.modoSeleccionRangoCambiado.connect(
+            self.area_central.set_modo_seleccion_rango
+        )
+        self.panel_derecho.config_columnas.mapeoAplicado.connect(
+            self.area_central.actualizar_mapeo
+        )
