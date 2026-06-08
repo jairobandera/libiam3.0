@@ -1,0 +1,199 @@
+/* Panel derecho completo */
+#panelDerecho {
+    background-color: #2D2D30;
+    border-left: 3px solid #3E3E42;
+}
+
+#panelDerecho:hover {
+    border-left-color: #1976D2;
+}
+
+/* Boton toggle del panel */
+#btnTogglePanel {
+    background-color: #252526;
+    color: #B0B0B0;
+    border: 1px solid #3E3E42;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+}
+
+#btnTogglePanel:hover {
+    background-color: #333337;
+    color: #FFFFFF;
+}
+
+#btnTogglePanel:pressed {
+    background-color: #1E1E1E;
+}
+
+/* Configuracion de columnas */
+#configColumnas {
+    background-color: #2D2D30;
+}
+
+/* Titulos */
+#tituloPanel {
+    font-family: Arial;
+    font-size: 14px;
+    font-weight: 600;
+    color: #FFFFFF;
+}
+
+#subtituloPanel {
+    font-family: Segoe UI;
+    font-size: 11px;
+    color: #808080;
+}
+
+/* Seccion de deteccion */
+#seccionDeteccion {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+}
+
+#lblDeteccion {
+    color: #B0B0B0;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#lblDeteccionOk {
+    color: #4CAF50;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#lblDeteccionWarn {
+    color: #FF9800;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#btnRedetectar {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#btnRedetectar:hover {
+    background-color: #333337;
+    border-color: #1976D2;
+}
+
+/* Seccion de mapeo */
+#seccionMapeo {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+}
+
+#tituloSeccionMapeo {
+    font-family: Arial;
+    font-size: 12px;
+    font-weight: 600;
+    color: #B0B0B0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+#lblTipoDato {
+    color: #B0B0B0;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#cmbTipoDato {
+    background-color: #333337;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#cmbTipoDato::drop-down {
+    border: none;
+    width: 20px;
+}
+
+/* Filas de mapeo */
+#filaMapeo {
+    background-color: transparent;
+}
+
+#lblEje {
+    color: #FFFFFF;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#filaMapeo QComboBox {
+    background-color: #333337;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#filaMapeo QCheckBox {
+    color: #B0B0B0;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+/* Botones de accion */
+#btnAplicarMapeo {
+    background-color: #1976D2;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: Segoe UI;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#btnAplicarMapeo:hover {
+    background-color: #1565C0;
+}
+
+#btnAplicarMapeo:pressed {
+    background-color: #0D47A1;
+}
+
+#btnResetMapeo {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#btnResetMapeo:hover {
+    background-color: #333337;
+    border-color: #1976D2;
+}
+
+/* Seccion de columnas CSV */
+#seccionColumnasCSV {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+}
+
+#lblColumnasCSV {
+    color: #B0B0B0;
+    font-family: Segoe UI;
+    font-size: 11px;
+}

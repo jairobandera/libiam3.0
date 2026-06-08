@@ -20,6 +20,7 @@ class VentanaPrincipal(QWidget):
 
     def init_ui(self):
 
+        # Layout principal vertical
         layout = QVBoxLayout()
 
         # Sin márgenes externos

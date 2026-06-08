@@ -1,0 +1,106 @@
+/* Panel izquierdo completo */
+#panelIzquierdo {
+    background-color: #2D2D30;
+    border-right: 1px solid #3E3E42;
+}
+
+/* Seccion de botones */
+#seccionBotones {
+    background-color: #2D2D30;
+    border-bottom: 1px solid #3E3E42;
+}
+
+/* Seccion del arbol de archivos */
+#seccionArbol {
+    background-color: #252526;
+    border-bottom: 1px solid #3E3E42;
+}
+
+/* Seccion de informacion (footer) */
+#seccionInfo {
+    background-color: #1E1E1E;
+}
+
+/* Titulos de secciones */
+#tituloSeccion {
+    font-family: Arial;
+    font-size: 12px;
+    font-weight: 600;
+    color: #B0B0B0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding-bottom: 4px;
+}
+
+/* Boton cargar CSV */
+#btnCargarCSV {
+    background-color: #1976D2;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-family: Segoe UI;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#btnCargarCSV:hover {
+    background-color: #1565C0;
+}
+
+#btnCargarCSV:pressed {
+    background-color: #0D47A1;
+}
+
+/* Boton seleccionar rango */
+#btnSeleccionarRango {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    padding: 10px 16px;
+    font-family: Segoe UI;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#btnSeleccionarRango:hover {
+    background-color: #333337;
+    border-color: #1976D2;
+}
+
+#btnSeleccionarRango:pressed {
+    background-color: #2D2D30;
+}
+
+/* Arbol de archivos */
+#arbolArchivos {
+    background-color: #252526;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    font-family: Segoe UI;
+    font-size: 12px;
+    padding: 4px;
+}
+
+#arbolArchivos::item {
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+#arbolArchivos::item:hover {
+    background-color: #333337;
+}
+
+#arbolArchivos::item:selected {
+    background-color: #1976D2;
+}
+
+/* Labels de informacion */
+#infoLabel {
+    color: #B0B0B0;
+    font-family: Segoe UI;
+    font-size: 12px;
+    padding: 2px 0;
+}

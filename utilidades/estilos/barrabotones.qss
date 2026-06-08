@@ -1,0 +1,43 @@
+/* Barra de botones lateral derecha */
+#barraBotones {
+    background-color: transparent;
+}
+
+/* Botones toggle */
+#btnToggleMapeo,
+#btnToggleFiltros,
+#btnToggleFormulas {
+    background-color: #333337;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    padding: 0;
+}
+
+#btnToggleMapeo:hover,
+#btnToggleFiltros:hover,
+#btnToggleFormulas:hover {
+    background-color: #1976D2;
+    border-color: #1976D2;
+}
+
+#btnToggleMapeo:pressed,
+#btnToggleFiltros:pressed,
+#btnToggleFormulas:pressed {
+    background-color: #0D47A1;
+}
+
+/* Estado activo (panel abierto) */
+#btnToggleMapeo[activo="true"],
+#btnToggleFiltros[activo="true"],
+#btnToggleFormulas[activo="true"] {
+    background-color: #1976D2;
+    border-color: #1976D2;
+}
+
+#btnToggleMapeo[activo="true"]:hover,
+#btnToggleFiltros[activo="true"]:hover,
+#btnToggleFormulas[activo="true"]:hover {
+    background-color: #1565C0;
+    border-color: #1565C0;
+}
