@@ -1,12 +1,13 @@
 from PySide6.QtWidgets import (
-    QWidget,
+    QWidget, 
     QVBoxLayout
 )
 
 from ui.cabecera.cabeceraPrincipal.cabecera import Cabecera
+from ui.cabecera.subCabecera.seleccionarRango import SeleccionarRango
 
 
-class VentanaPrincipal(QWidget):
+class VentanaPrincipal(QWidget): 
 
     def __init__(self):
 
@@ -21,14 +22,30 @@ class VentanaPrincipal(QWidget):
 
         layout = QVBoxLayout()
 
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        # Sin márgenes externos
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # Cabecera
+        # Sin separación entre cabecera y subcabecera
+        layout.setSpacing(0)
+
+        # CABECERA PRINCIPAL
+
         self.cabecera = Cabecera()
         layout.addWidget(self.cabecera)
 
-        # Espacio vacío debajo
+        # SUBCABECERA
+
+        self.subcabecera = SeleccionarRango()
+        layout.addWidget(self.subcabecera)
+
+        # ESPACIO PARA EL RESTO DEL PROGRAMA
+      
         layout.addStretch()
 
         self.setLayout(layout)
+
+
+#Explicacion 
+#QWidget: La base de toda la ventana y controles  
+#QVBoxLayout: Organizador vertical.
+#class VentanaPrincipal(QWidget) --> Crea una clase llamada VentanaPrincipal que hereda de QWidget.
