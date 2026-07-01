@@ -7,12 +7,15 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 import os
 from logica.cargador_csv import CargadorCSV
 
 
 class PanelIzquierdo(QFrame):
+    archivoCargado = Signal(str, object, object)
+    archivoSeleccionado = Signal(str, object, object)
+    modoSeleccionRangoCambiado = Signal(bool)
 
     def __init__(self):
         super().__init__()
@@ -64,6 +67,8 @@ class PanelIzquierdo(QFrame):
         self.btn_rango = QPushButton("Seleccionar rango")
         self.btn_rango.setObjectName("btnSeleccionarRango")
         self.btn_rango.setCursor(Qt.PointingHandCursor)
+        self.btn_rango.setCheckable(True)
+        self.btn_rango.toggled.connect(self.modoSeleccionRangoCambiado.emit)
 
         layout.addWidget(self.btn_cargar)
         layout.addWidget(self.btn_rango)
@@ -161,15 +166,17 @@ class PanelIzquierdo(QFrame):
 
         # Mostrar informacion del archivo
         info = self.cargador.obtener_info(nombre_archivo, df)
+        info["columnas_csv"] = list(df.columns)
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
         self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
         self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
         self.lbl_registros.setText(f"Registros: {info['registros']}")
 
+        self.archivoCargado.emit(nombre_archivo, df, info)
+
         # Pasar datos al panel derecho si existe
         if hasattr(self, "panel_derecho_ref"):
-            info["columnas_csv"] = list(df.columns)
             self.panel_derecho_ref.cargar_datos_csv(info)
 
     def agregar_al_arbol(self, nombre_archivo, df):
@@ -199,13 +206,15 @@ class PanelIzquierdo(QFrame):
         # Actualizar la informacion del archivo
         df = self.archivos_cargados[nombre_archivo]
         info = self.cargador.obtener_info(nombre_archivo, df)
+        info["columnas_csv"] = list(df.columns)
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
         self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
         self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
         self.lbl_registros.setText(f"Registros: {info['registros']}")
 
+        self.archivoSeleccionado.emit(nombre_archivo, df, info)
+
         # Actualizar panel derecho con los datos del archivo seleccionado
         if hasattr(self, "panel_derecho_ref"):
-            info["columnas_csv"] = list(df.columns)
             self.panel_derecho_ref.cargar_datos_csv(info)
