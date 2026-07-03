@@ -3,12 +3,16 @@ import os
 
 from PySide6.QtWidgets import QApplication
 
+from logica.config_db import init_db, get_session
 from ui.ventanaPrincipal.ventana_principal import VentanaPrincipal
 
 
 app = QApplication(sys.argv)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+engine = init_db()
+db_session = get_session(engine)
 
 archivos_qss = [
     os.path.join(BASE_DIR, "utilidades", "estilos", "ventana.qss"),
@@ -26,7 +30,7 @@ for archivo in archivos_qss:
 
 app.setStyleSheet(estilos)
 
-ventana = VentanaPrincipal()
+ventana = VentanaPrincipal(db_session=db_session)
 ventana.showMaximized()
 
 sys.exit(app.exec())

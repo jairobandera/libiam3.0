@@ -11,6 +11,7 @@ from PySide6.QtGui import QFont, QMouseEvent
 from ui.ventanaPrincipal.panelDerecho.configColumnas import ConfigColumnas
 from ui.ventanaPrincipal.panelDerecho.filtros import Filtros
 from ui.ventanaPrincipal.panelDerecho.formulas import Formulas
+from ui.ventanaPrincipal.panelDerecho.detectarCabeceras import DetectarCabeceras
 
 
 class PanelDerecho(QFrame):
@@ -21,15 +22,17 @@ class PanelDerecho(QFrame):
     ANCHO_MAXIMO = 800
     ZONA_ARRASTRE = 5
 
-    def __init__(self):
+    def __init__(self, db_session=None):
         super().__init__()
         self.setObjectName("panelDerecho")
+        self.db_session = db_session
         self.setFixedWidth(self.ANCHO_COLAPSADO)
         self.expandido = False
         self.redimensionando = False
         self.posicion_inicio_x = 0
         self.ancho_inicio = 0
         self.panel_activo = None
+        self.info_actual = None
         self.init_ui()
 
     def init_ui(self):
@@ -58,6 +61,16 @@ class PanelDerecho(QFrame):
         self.formulas = Formulas()
         self.stacked_widget.addWidget(self.formulas)
 
+        # Panel de detectar cabeceras
+        scroll_detectar = QScrollArea()
+        scroll_detectar.setWidgetResizable(True)
+        scroll_detectar.setFrameShape(QFrame.NoFrame)
+        scroll_detectar.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.detectar_cabeceras = DetectarCabeceras(db_session=self.db_session)
+        self.detectar_cabeceras.aliasesGuardados.connect(self._on_aliases_guardados)
+        scroll_detectar.setWidget(self.detectar_cabeceras)
+        self.stacked_widget.addWidget(scroll_detectar)
+
         layout.addWidget(self.stacked_widget)
         self.setLayout(layout)
 
@@ -69,6 +82,8 @@ class PanelDerecho(QFrame):
             self.stacked_widget.setCurrentIndex(1)
         elif panel_nombre == "formulas":
             self.stacked_widget.setCurrentIndex(2)
+        elif panel_nombre == "detectar_cabeceras":
+            self.stacked_widget.setCurrentIndex(3)
 
         self.panel_activo = panel_nombre
         self.expandido = True
@@ -137,4 +152,12 @@ class PanelDerecho(QFrame):
 
     def cargar_datos_csv(self, info):
         """Carga los datos detectados del CSV en el panel."""
+        self.info_actual = info
         self.config_columnas.cargar_datos(info)
+        self.detectar_cabeceras.cargar_datos(info)
+
+    def _on_aliases_guardados(self, secciones):
+        """Re-carga los datos del CSV actual después de guardar aliases nuevos."""
+        if self.info_actual is not None:
+            self.config_columnas.cargar_datos(self.info_actual)
+            self.detectar_cabeceras.cargar_datos(self.info_actual)

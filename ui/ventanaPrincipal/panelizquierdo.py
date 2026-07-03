@@ -17,12 +17,14 @@ class PanelIzquierdo(QFrame):
     archivoSeleccionado = Signal(str, object, object)
     modoSeleccionRangoCambiado = Signal(bool)
 
-    def __init__(self):
+    def __init__(self, db_session=None):
         super().__init__()
         self.setObjectName("panelIzquierdo")
         self.setFixedWidth(280)
-        self.cargador = CargadorCSV(self)
+        self.db_session = db_session
+        self.cargador = CargadorCSV(self, db_session=self.db_session)
         self.archivos_cargados = {}
+        self.alias_signal_conectado = False
         self.init_ui()
 
     def init_ui(self):
@@ -156,10 +158,21 @@ class PanelIzquierdo(QFrame):
     def cargar_csv(self):
 
         # Delegar la carga al cargador CSV
-        nombre_archivo, df = self.cargador.seleccionar_y_cargar()
+        resultado = self.cargador.seleccionar_y_cargar()
 
-        if nombre_archivo is None:
+        if resultado[0] is None:
             return
+
+        nombre_archivo, df, ruta_archivo = resultado
+
+        # Verificar si hay secciones definidas para este archivo
+        secciones = None
+        if hasattr(self, "panel_derecho_ref"):
+            secciones = self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes
+
+        # Si hay secciones, re-parsear el CSV
+        if secciones:
+            df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
 
         # Agregar archivo al arbol
         self.agregar_al_arbol(nombre_archivo, df)
@@ -167,6 +180,8 @@ class PanelIzquierdo(QFrame):
         # Mostrar informacion del archivo
         info = self.cargador.obtener_info(nombre_archivo, df)
         info["columnas_csv"] = list(df.columns)
+        info["df"] = df
+        info["ruta_archivo"] = ruta_archivo
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
         self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
@@ -176,7 +191,13 @@ class PanelIzquierdo(QFrame):
         self.archivoCargado.emit(nombre_archivo, df, info)
 
         # Pasar datos al panel derecho si existe
-        if hasattr(self, "panel_derecho_ref"):
+        if hasattr(self, "panel_derecho_ref") and not self.alias_signal_conectado:
+            self.panel_derecho_ref.cargar_datos_csv(info)
+            self.panel_derecho_ref.detectar_cabeceras.aliasesGuardados.connect(
+                lambda _: self._re_detectar_archivo_actual(nombre_archivo, df, ruta_archivo)
+            )
+            self.alias_signal_conectado = True
+        elif hasattr(self, "panel_derecho_ref"):
             self.panel_derecho_ref.cargar_datos_csv(info)
 
     def agregar_al_arbol(self, nombre_archivo, df):
@@ -207,6 +228,8 @@ class PanelIzquierdo(QFrame):
         df = self.archivos_cargados[nombre_archivo]
         info = self.cargador.obtener_info(nombre_archivo, df)
         info["columnas_csv"] = list(df.columns)
+        info["df"] = df
+        info["ruta_archivo"] = self.cargador.ruta_archivo_actual
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
         self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
@@ -216,5 +239,37 @@ class PanelIzquierdo(QFrame):
         self.archivoSeleccionado.emit(nombre_archivo, df, info)
 
         # Actualizar panel derecho con los datos del archivo seleccionado
+        if hasattr(self, "panel_derecho_ref") and not self.alias_signal_conectado:
+            self.panel_derecho_ref.cargar_datos_csv(info)
+            self.panel_derecho_ref.detectar_cabeceras.aliasesGuardados.connect(
+                lambda _: self._re_detectar_archivo_actual(nombre_archivo, df, info.get("ruta_archivo"))
+            )
+            self.alias_signal_conectado = True
+        elif hasattr(self, "panel_derecho_ref"):
+            self.panel_derecho_ref.cargar_datos_csv(info)
+
+    def _re_detectar_archivo_actual(self, nombre_archivo, df, ruta_archivo, secciones=None):
+        """Re-detecta el archivo actualmente seleccionado con los nuevos aliases."""
+        # Obtener secciones del panel derecho directamente
+        if hasattr(self, "panel_derecho_ref"):
+            secciones = self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes
+
+        # Si hay secciones, re-parsear el CSV
+        if secciones:
+            df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
+            self.archivos_cargados[nombre_archivo] = df
+
+        info = self.cargador.obtener_info(nombre_archivo, df)
+        info["columnas_csv"] = list(df.columns)
+        info["df"] = df
+        info["ruta_archivo"] = ruta_archivo
+        self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
+        self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
+        self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
+        self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
+        self.lbl_registros.setText(f"Registros: {info['registros']}")
+
+        self.archivoCargado.emit(nombre_archivo, df, info)
+
         if hasattr(self, "panel_derecho_ref"):
             self.panel_derecho_ref.cargar_datos_csv(info)
