@@ -122,7 +122,7 @@ class ConfigColumnas(QFrame):
         self.scroll_filas.setFixedHeight(500)
         self.scroll_filas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # Botones de accion
+        # Boton de accion
         layout_botones = QHBoxLayout()
         layout_botones.setSpacing(8)
 
@@ -131,13 +131,7 @@ class ConfigColumnas(QFrame):
         self.btn_aplicar.setCursor(Qt.PointingHandCursor)
         self.btn_aplicar.clicked.connect(self.aplicar_mapeo)
 
-        self.btn_reset = QPushButton("Reset")
-        self.btn_reset.setObjectName("btnResetMapeo")
-        self.btn_reset.setCursor(Qt.PointingHandCursor)
-        self.btn_reset.clicked.connect(self.resetear_mapeo)
-
         layout_botones.addWidget(self.btn_aplicar, 1)
-        layout_botones.addWidget(self.btn_reset, 1)
 
         layout.addWidget(lbl_titulo_mapeo)
         layout.addLayout(layout_tipo)
@@ -310,8 +304,3 @@ class ConfigColumnas(QFrame):
         print(f"[DEBUG] aplicar_mapeo: mapeo_emitido={mapeo_completo}")
         self.mapeoAplicado.emit(mapeo_completo)
         print("[DEBUG] aplicar_mapeo: señal emitida")
-
-    def resetear_mapeo(self):
-        """Vuelve a la deteccion automatica."""
-        self.mapeo.resetear_mapeo()
-        self.generar_filas_mapeo(self.cmb_tipo_dato.currentText())

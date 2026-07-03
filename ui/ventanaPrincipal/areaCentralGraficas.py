@@ -472,6 +472,26 @@ class AreaCentralGraficas(QFrame):
     def _es_numerica(self, columna):
         return np.issubdtype(self.df_grafica[columna].dtype, np.number)
 
+    def _obtener_labels_columnas(self):
+        """Retorna un dict columna -> 'Tipo Eje' basado en el mapeo actual."""
+        labels = {}
+        if self.mapeo_actual:
+            for tipo, ejes in self.mapeo_actual.items():
+                if not isinstance(ejes, dict):
+                    continue
+                for eje, config in ejes.items():
+                    if isinstance(config, dict):
+                        columna = config.get("columna")
+                    else:
+                        columna = config
+                    if columna:
+                        eje_str = eje.replace("eje_", "").upper() if eje != "ninguno" else ""
+                        if eje_str:
+                            labels[columna] = f"{tipo} {eje_str}"
+                        else:
+                            labels[columna] = tipo
+        return labels
+
     def _crear_graficas(self):
         """Crea todas las grficas una sola vez al cargar el CSV."""
         print("[DEBUG] _crear_graficas: iniciando creacion")
@@ -498,6 +518,7 @@ class AreaCentralGraficas(QFrame):
 
         self.stack.setCurrentWidget(self.scroll)
 
+        labels = self._obtener_labels_columnas()
         x = self.df_grafica[self.columna_x].to_numpy(dtype=float)
         for columna in columnas:
             y = self.df_grafica[columna].to_numpy(dtype=float)
@@ -506,14 +527,16 @@ class AreaCentralGraficas(QFrame):
                 print(f"[DEBUG] _crear_graficas: columna {columna} sin datos validos, saltando")
                 continue
 
-            grafica = GraficaSenal(str(columna))
+            label = labels.get(columna)
+            titulo = f"{label} - {columna}" if label else str(columna)
+            grafica = GraficaSenal(titulo)
             grafica.set_datos(x[mascara], y[mascara])
             grafica.set_modo_seleccion_rango(self.modo_seleccion_rango)
             grafica.rangoSeleccionado.connect(self._abrir_rango_modal)
             self.layout_graficas.addWidget(grafica)
             self.graficas.append(grafica)
             self.graficas_por_columna[columna] = grafica
-            print(f"[DEBUG] _crear_graficas: grafica creada para columna={columna}")
+            print(f"[DEBUG] _crear_graficas: grafica creada para columna={columna}, titulo={titulo}")
 
         self.layout_graficas.addStretch()
         print(f"[DEBUG] _crear_graficas: fin. graficas_por_columna={list(self.graficas_por_columna.keys())}")

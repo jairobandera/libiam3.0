@@ -137,9 +137,13 @@ class DetectarCabeceras(QFrame):
         return frame
 
     def cargar_datos(self, info):
+        print(f"[DEBUG] DetectarCabeceras.cargar_datos: info keys={list(info.keys()) if info else 'None'}")
         self.df_actual = info.get("df", None)
         self.ruta_archivo_actual = info.get("ruta_archivo", None)
         deteccion = info.get("deteccion", {})
+
+        print(f"[DEBUG] DetectarCabeceras.cargar_datos: df_actual={'si' if self.df_actual is not None else 'no'}, ruta={self.ruta_archivo_actual}")
+        print(f"[DEBUG] DetectarCabeceras.cargar_datos: deteccion={deteccion}")
 
         self.cabeceras_detectadas = []
         self.cabeceras_sin_asignar = []
@@ -174,7 +178,7 @@ class DetectarCabeceras(QFrame):
 
         no_reconocidas = deteccion.get("no_reconocidas", [])
         for col in no_reconocidas:
-            if col not in columnas_mapeadas:
+            if col not in columnas_mapeadas and str(col).lower().strip() not in ("nan", "", "none"):
                 self.cabeceras_sin_asignar.append(col)
 
         self.renderizar_detectadas()
@@ -284,7 +288,10 @@ class DetectarCabeceras(QFrame):
         tipo = cmb_tipo.currentText()
         eje = cmb_eje.currentText()
 
+        print(f"[DEBUG] guardar_alias: columna={nombre_columna}, tipo={tipo}, eje={eje}")
+
         if tipo == "Seleccionar tipo..." or eje == "Seleccionar eje...":
+            print("[DEBUG] guardar_alias: tipo o eje no seleccionado, saliendo")
             return
 
         eje_map = {
@@ -346,12 +353,18 @@ class DetectarCabeceras(QFrame):
         self.aliasesGuardados.emit(self.secciones_pendientes)
 
     def abrir_editor_csv(self):
-        if self.df_actual is not None:
+        print(f"[DEBUG] abrir_editor_csv: df_actual={'si' if self.df_actual is not None else 'no'}, ruta={self.ruta_archivo_actual}")
+        if self.df_actual is not None and self.ruta_archivo_actual:
+            import pandas as pd
+            df_raw = pd.read_csv(self.ruta_archivo_actual, sep=None, engine="python", header=None)
             from ui.ventanaPrincipal.panelDerecho.ventanaEditorCSV import VentanaEditorCSV
-            editor = VentanaEditorCSV(self.df_actual, self.db_session, self.ruta_archivo_actual, self)
+            editor = VentanaEditorCSV(df_raw, self.db_session, self.ruta_archivo_actual, self)
             editor.aliasesGuardados.connect(self._on_aliases_guardados)
             editor.show()
+        else:
+            print("[DEBUG] abrir_editor_csv: df_actual o ruta_archivo es None")
 
     def _on_aliases_guardados(self, secciones):
+        print(f"[DEBUG] DetectarCabeceras._on_aliases_guardados: secciones={secciones}")
         self.secciones_pendientes = secciones
         self.aliasesGuardados.emit(secciones)

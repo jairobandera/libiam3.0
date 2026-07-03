@@ -203,7 +203,8 @@ class CargadorCSV:
                         break
 
             if not encontrado:
-                no_reconocidas.append(col)
+                if str(col).lower().strip() not in ("nan", "", "none"):
+                    no_reconocidas.append(col)
 
         # Detectar cabeceras extra que no son columnas del DataFrame
         cabeceras_extra_detectadas = []

@@ -157,7 +157,7 @@ class PanelDerecho(QFrame):
         self.detectar_cabeceras.cargar_datos(info)
 
     def _on_aliases_guardados(self, secciones):
-        """Re-carga los datos del CSV actual después de guardar aliases nuevos."""
-        if self.info_actual is not None:
-            self.config_columnas.cargar_datos(self.info_actual)
-            self.detectar_cabeceras.cargar_datos(self.info_actual)
+        """Guarda las secciones pendientes. La re-detección la maneja PanelIzquierdo."""
+        print(f"[DEBUG] PanelDerecho._on_aliases_guardados: secciones={secciones}")
+        if hasattr(self, 'detectar_cabeceras') and self.detectar_cabeceras is not None:
+            self.detectar_cabeceras.secciones_pendientes = secciones

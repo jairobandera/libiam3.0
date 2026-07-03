@@ -1,6 +1,6 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "libiam_config.db")
@@ -16,6 +16,8 @@ class AliasColumna(Base):
     tipo = Column(String, nullable=False)
     eje = Column(String, nullable=False, default="ninguno")
 
+    cabeceras_asignadas = relationship("CabeceraAsignada", back_populates="alias")
+
 
 class SeccionArchivo(Base):
     __tablename__ = "seccion_archivo"
@@ -25,6 +27,18 @@ class SeccionArchivo(Base):
     fila_inicio = Column(Integer, nullable=False)
     fila_fin = Column(Integer, nullable=False)
     columnas = Column(String, nullable=False)
+    activo = Column(Boolean, nullable=False, default=True)
+
+
+class CabeceraAsignada(Base):
+    __tablename__ = "cabecera_asignada"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ruta_archivo = Column(String, nullable=False)
+    alias_id = Column(Integer, ForeignKey("alias_columna.id"), nullable=False)
+    activo = Column(Boolean, nullable=False, default=True)
+
+    alias = relationship("AliasColumna", back_populates="cabeceras_asignadas")
 
 
 def _crear_engine():
@@ -34,6 +48,7 @@ def _crear_engine():
 def init_db():
     engine = _crear_engine()
     Base.metadata.create_all(engine)
+    _migrar_db(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
 
@@ -42,6 +57,17 @@ def init_db():
 
     session.close()
     return engine
+
+
+def _migrar_db(engine):
+    """Agrega columnas nuevas a tablas existentes si no existen."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(seccion_archivo)"))
+        columnas = [row[1] for row in result]
+        if "activo" not in columnas:
+            conn.execute(text("ALTER TABLE seccion_archivo ADD COLUMN activo BOOLEAN DEFAULT 1"))
+            conn.commit()
 
 
 def _seed_inicial(session):
@@ -189,18 +215,30 @@ def guardar_seccion_archivo(session, ruta_archivo, fila_inicio, fila_fin, column
     ).first()
     if existente:
         existente.columnas = columnas
+        existente.activo = True
     else:
         session.add(SeccionArchivo(
             ruta_archivo=ruta_archivo,
             fila_inicio=fila_inicio,
             fila_fin=fila_fin,
             columnas=columnas,
+            activo=True,
         ))
     session.commit()
 
 
+def desactivar_secciones_archivo(session, ruta_archivo):
+    """Marca todas las secciones de un archivo como inactivas (activo=False)."""
+    session.query(SeccionArchivo).filter_by(
+        ruta_archivo=ruta_archivo
+    ).update({"activo": False})
+    session.commit()
+
+
 def listar_secciones_archivo(session, ruta_archivo):
-    return session.query(SeccionArchivo).filter_by(ruta_archivo=ruta_archivo).order_by(SeccionArchivo.fila_inicio).all()
+    return session.query(SeccionArchivo).filter_by(
+        ruta_archivo=ruta_archivo, activo=True
+    ).order_by(SeccionArchivo.fila_inicio).all()
 
 
 def eliminar_seccion_archivo(session, seccion_id):
@@ -209,3 +247,55 @@ def eliminar_seccion_archivo(session, seccion_id):
         session.delete(seccion)
         session.commit()
     return seccion is not None
+
+
+def guardar_cabecera_asignada(session, ruta_archivo, nombre, tipo, eje):
+    """Guarda un alias en alias_columna y lo vincula al archivo en cabecera_asignada."""
+    agregar_alias(session, nombre, tipo, eje)
+
+    alias = session.query(AliasColumna).filter_by(nombre=nombre.lower()).first()
+
+    existente = session.query(CabeceraAsignada).filter_by(
+        ruta_archivo=ruta_archivo, alias_id=alias.id
+    ).first()
+
+    if existente:
+        existente.activo = True
+    else:
+        session.add(CabeceraAsignada(ruta_archivo=ruta_archivo, alias_id=alias.id, activo=True))
+    session.commit()
+
+
+def desactivar_cabeceras_archivo(session, ruta_archivo):
+    """Marca todas las cabeceras asignadas de un archivo como inactivas."""
+    session.query(CabeceraAsignada).filter_by(
+        ruta_archivo=ruta_archivo
+    ).update({"activo": False})
+    session.commit()
+
+
+def desactivar_cabecera(session, cabecera_id):
+    """Marca una cabecera asignada individual como inactiva."""
+    cab = session.query(CabeceraAsignada).filter_by(id=cabecera_id).first()
+    if cab:
+        cab.activo = False
+        session.commit()
+    return cab is not None
+
+
+def listar_cabeceras_asignadas(session, ruta_archivo):
+    """Retorna las cabeceras asignadas activas para un archivo, con datos del alias."""
+    resultado = []
+    cabeceras = session.query(CabeceraAsignada).filter_by(
+        ruta_archivo=ruta_archivo, activo=True
+    ).all()
+
+    for cab in cabeceras:
+        if cab.alias:
+            resultado.append({
+                "id": cab.id,
+                "nombre": cab.alias.nombre,
+                "tipo": cab.alias.tipo,
+                "eje": cab.alias.eje,
+            })
+    return resultado
