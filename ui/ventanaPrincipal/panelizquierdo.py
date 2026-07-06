@@ -369,11 +369,8 @@ class PanelIzquierdo(QFrame):
         for cab in cabeceras_extra:
             if cab["tipo"] in ("Frame", "Tiempo"):
                 continue
-            eje_str = cab["eje"].replace("eje_", "").upper() if cab["eje"] != "ninguno" else ""
-            if eje_str:
-                detectadas_no_graficadas.append(f"{cab['tipo']} {eje_str} ({cab['nombre']})")
-            else:
-                detectadas_no_graficadas.append(f"{cab['tipo']} ({cab['nombre']})")
+            if cab["nombre"] not in detectadas_no_graficadas:
+                detectadas_no_graficadas.append(cab["nombre"])
 
         mensaje = ""
 
