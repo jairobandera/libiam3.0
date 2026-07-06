@@ -15,9 +15,10 @@ from ui.ventanaPrincipal.barraBotones import BarraBotones
 
 class VentanaPrincipal(QWidget):
 
-    def __init__(self):
+    def __init__(self, db_session=None):
         super().__init__()
 
+        self.db_session = db_session
         self.setWindowTitle("LIBiAM 3.0")
         self.resize(1600, 900)
 
@@ -44,7 +45,7 @@ class VentanaPrincipal(QWidget):
         layout_contenido.setSpacing(0)
 
         # Panel izquierdo
-        self.panel_izquierdo = PanelIzquierdo()
+        self.panel_izquierdo = PanelIzquierdo(db_session=self.db_session)
         layout_contenido.addWidget(self.panel_izquierdo)
 
         # Área central de gráficas
@@ -52,7 +53,7 @@ class VentanaPrincipal(QWidget):
         layout_contenido.addWidget(self.area_central, 1)
 
         # Panel derecho colapsable
-        self.panel_derecho = PanelDerecho()
+        self.panel_derecho = PanelDerecho(db_session=self.db_session)
         layout_contenido.addWidget(self.panel_derecho)
 
         # Barra de botones derecha

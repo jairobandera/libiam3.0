@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import pyqtgraph as pg
 
 from PySide6.QtCore import Qt, Signal
@@ -303,6 +304,7 @@ class AreaCentralGraficas(QFrame):
         self.mapeo_actual = None
         self.modo_seleccion_rango = False
         self.graficas = []
+        self.graficas_por_columna = {}
 
         self._init_ui()
 
@@ -345,16 +347,24 @@ class AreaCentralGraficas(QFrame):
         self.setLayout(layout)
 
     def cargar_dataframe(self, nombre_archivo, df, info):
+        print(f"[DEBUG] cargar_dataframe: archivo={nombre_archivo}")
         self.nombre_archivo = nombre_archivo
         self.df_original = df
         self.df_grafica, self.columna_x = self._preparar_dataframe(df)
         self.mapeo_actual = self._mapeo_desde_info(info)
-        self._graficar()
+        print(f"[DEBUG] cargar_dataframe: columna_x={self.columna_x}")
+        print(f"[DEBUG] cargar_dataframe: mapeo_actual={self.mapeo_actual}")
+        self._crear_graficas()
+        self._actualizar_visibilidad()
 
     def actualizar_mapeo(self, mapeo):
+        print(f"[DEBUG] actualizar_mapeo: recibido mapeo={mapeo}")
         self.mapeo_actual = mapeo
         if self.df_grafica is not None:
-            self._graficar()
+            print("[DEBUG] actualizar_mapeo: llamando a _actualizar_visibilidad")
+            self._actualizar_visibilidad()
+        else:
+            print("[DEBUG] actualizar_mapeo: df_grafica es None, no se grafica")
 
     def set_modo_seleccion_rango(self, activo):
         self.modo_seleccion_rango = activo
@@ -362,6 +372,12 @@ class AreaCentralGraficas(QFrame):
             grafica.set_modo_seleccion_rango(activo)
 
     def _preparar_dataframe(self, df):
+        # Convertir columnas a numerico, forzando errores a NaN
+        # Esto maneja cabeceras intercaladas que pandas lee como datos
+        df = df.copy()
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
         frame_col = self._buscar_columna(df, "frame")
         subframe_col = self._buscar_columna(df, "subframe", "sub_frame")
 
@@ -403,9 +419,30 @@ class AreaCentralGraficas(QFrame):
 
         return resultado
 
-    def _obtener_columnas_a_graficar(self):
+    def _obtener_todas_columnas_mapeo(self):
+        """Retorna todas las columnas del mapeo, sin importar si estan activas o no."""
         columnas = []
+        if self.mapeo_actual:
+            for ejes in self.mapeo_actual.values():
+                if not isinstance(ejes, dict):
+                    continue
+                for config in ejes.values():
+                    if isinstance(config, dict):
+                        columna = config.get("columna")
+                    else:
+                        columna = config
+                    if columna and columna not in columnas:
+                        columnas.append(columna)
 
+        columnas_validas = [
+            col for col in columnas
+            if col in self.df_grafica.columns and col != self.columna_x and self._es_numerica(col)
+        ]
+        return columnas_validas
+
+    def _obtener_columnas_a_graficar(self):
+        """Retorna solo las columnas marcadas como activas en el mapeo."""
+        columnas = []
         if self.mapeo_actual:
             for ejes in self.mapeo_actual.values():
                 if not isinstance(ejes, dict):
@@ -420,12 +457,10 @@ class AreaCentralGraficas(QFrame):
                     if activo and columna and columna not in columnas:
                         columnas.append(columna)
 
-        columnas_validas = [
-            col for col in columnas
-            if col in self.df_grafica.columns and col != self.columna_x and self._es_numerica(col)
-        ]
-
-        if columnas_validas:
+            columnas_validas = [
+                col for col in columnas
+                if col in self.df_grafica.columns and col != self.columna_x and self._es_numerica(col)
+            ]
             return columnas_validas
 
         columnas_numericas = [
@@ -437,42 +472,109 @@ class AreaCentralGraficas(QFrame):
     def _es_numerica(self, columna):
         return np.issubdtype(self.df_grafica[columna].dtype, np.number)
 
-    def _graficar(self):
+    def _obtener_labels_columnas(self):
+        """Retorna un dict columna -> 'Tipo Eje' basado en el mapeo actual."""
+        labels = {}
+        if self.mapeo_actual:
+            for tipo, ejes in self.mapeo_actual.items():
+                if not isinstance(ejes, dict):
+                    continue
+                for eje, config in ejes.items():
+                    if isinstance(config, dict):
+                        columna = config.get("columna")
+                    else:
+                        columna = config
+                    if columna:
+                        eje_str = eje.replace("eje_", "").upper() if eje != "ninguno" else ""
+                        if eje_str:
+                            labels[columna] = f"{tipo} {eje_str}"
+                        else:
+                            labels[columna] = tipo
+        return labels
+
+    def _crear_graficas(self):
+        """Crea todas las grficas una sola vez al cargar el CSV."""
+        print("[DEBUG] _crear_graficas: iniciando creacion")
         self._limpiar_graficas()
 
         if self.df_grafica is None or self.columna_x not in self.df_grafica.columns:
+            print("[DEBUG] _crear_graficas: df_grafica None o columna_x no encontrada")
             self._mostrar_placeholder("No hay datos disponibles para graficar.")
             return
 
-        columnas = self._obtener_columnas_a_graficar()
+        columnas = self._obtener_todas_columnas_mapeo()
+        print(f"[DEBUG] _crear_graficas: columnas del mapeo={columnas}")
         if not columnas:
+            columnas = [
+                col for col in self.df_grafica.select_dtypes(include=[np.number]).columns
+                if col != self.columna_x and str(col).lower().strip() not in {"subframe", "sub_frame"}
+            ]
+            print(f"[DEBUG] _crear_graficas: fallback columnas numericas={columnas}")
+
+        if not columnas:
+            print("[DEBUG] _crear_graficas: no hay columnas, mostrando placeholder")
             self._mostrar_placeholder("No se encontraron columnas numericas para graficar.")
             return
 
         self.stack.setCurrentWidget(self.scroll)
 
+        labels = self._obtener_labels_columnas()
         x = self.df_grafica[self.columna_x].to_numpy(dtype=float)
         for columna in columnas:
             y = self.df_grafica[columna].to_numpy(dtype=float)
             mascara = np.isfinite(x) & np.isfinite(y)
             if not mascara.any():
+                print(f"[DEBUG] _crear_graficas: columna {columna} sin datos validos, saltando")
                 continue
 
-            grafica = GraficaSenal(str(columna))
+            label = labels.get(columna)
+            titulo = f"{label} - {columna}" if label else str(columna)
+            grafica = GraficaSenal(titulo)
             grafica.set_datos(x[mascara], y[mascara])
             grafica.set_modo_seleccion_rango(self.modo_seleccion_rango)
             grafica.rangoSeleccionado.connect(self._abrir_rango_modal)
             self.layout_graficas.addWidget(grafica)
             self.graficas.append(grafica)
+            self.graficas_por_columna[columna] = grafica
+            print(f"[DEBUG] _crear_graficas: grafica creada para columna={columna}, titulo={titulo}")
 
         self.layout_graficas.addStretch()
+        print(f"[DEBUG] _crear_graficas: fin. graficas_por_columna={list(self.graficas_por_columna.keys())}")
+
+    def _actualizar_visibilidad(self):
+        """Muestra u oculta las graficas existentes segun el mapeo actual."""
+        print(f"[DEBUG] _actualizar_visibilidad: graficas_por_columna={list(self.graficas_por_columna.keys())}")
+        if not self.graficas_por_columna:
+            print("[DEBUG] _actualizar_visibilidad: no hay graficas creadas, saliendo")
+            return
+
+        columnas_activas = set(self._obtener_columnas_a_graficar())
+        print(f"[DEBUG] _actualizar_visibilidad: columnas_activas={columnas_activas}")
+
+        hay_visibles = False
+        for columna, grafica in self.graficas_por_columna.items():
+            visible = columna in columnas_activas
+            print(f"[DEBUG] _actualizar_visibilidad: columna={columna}, visible={visible}")
+            grafica.setVisible(visible)
+            if visible:
+                hay_visibles = True
+
+        if hay_visibles:
+            print("[DEBUG] _actualizar_visibilidad: hay graficas visibles, mostrando scroll")
+            self.stack.setCurrentWidget(self.scroll)
+        else:
+            print("[DEBUG] _actualizar_visibilidad: ninguna visible, mostrando placeholder")
+            self._mostrar_placeholder("No hay columnas activas para graficar.")
 
     def _limpiar_graficas(self):
         self.graficas = []
+        self.graficas_por_columna = {}
         while self.layout_graficas.count():
             item = self.layout_graficas.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
 
     def _mostrar_placeholder(self, texto):
         self.lbl_estado.setText(texto)

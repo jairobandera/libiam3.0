@@ -6,10 +6,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QTreeWidget,
     QTreeWidgetItem,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 import os
+import pandas as pd
 from logica.cargador_csv import CargadorCSV
+from logica.config_db import listar_secciones_archivo
 
 
 class PanelIzquierdo(QFrame):
@@ -17,12 +20,15 @@ class PanelIzquierdo(QFrame):
     archivoSeleccionado = Signal(str, object, object)
     modoSeleccionRangoCambiado = Signal(bool)
 
-    def __init__(self):
+    def __init__(self, db_session=None):
         super().__init__()
         self.setObjectName("panelIzquierdo")
         self.setFixedWidth(280)
-        self.cargador = CargadorCSV(self)
+        self.db_session = db_session
+        self.cargador = CargadorCSV(self, db_session=self.db_session)
         self.archivos_cargados = {}
+        self.archivo_actual = {}
+        self.alias_signal_conectado = False
         self.init_ui()
 
     def init_ui(self):
@@ -156,17 +162,49 @@ class PanelIzquierdo(QFrame):
     def cargar_csv(self):
 
         # Delegar la carga al cargador CSV
-        nombre_archivo, df = self.cargador.seleccionar_y_cargar()
+        resultado = self.cargador.seleccionar_y_cargar()
 
-        if nombre_archivo is None:
+        if resultado[0] is None:
             return
 
+        nombre_archivo, df, ruta_archivo = resultado
+
+        # Trackear archivo actual
+        self.archivo_actual = {"nombre": nombre_archivo, "df": df, "ruta": ruta_archivo}
+
+        # Limpiar secciones del archivo anterior y cargar las de este archivo desde la BD
+        secciones = []
+        if hasattr(self, "panel_derecho_ref"):
+            self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes = []
+
+        if self.db_session:
+            secciones_db = listar_secciones_archivo(self.db_session, ruta_archivo)
+            if secciones_db:
+                secciones = [
+                    {
+                        "fila_inicio": sec.fila_inicio,
+                        "fila_fin": sec.fila_fin,
+                        "columnas": sec.columnas.split(","),
+                    }
+                    for sec in secciones_db
+                ]
+                if hasattr(self, "panel_derecho_ref"):
+                    self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes = secciones
+                print(f"[DEBUG] cargar_csv: {len(secciones)} secciones cargadas desde BD para {nombre_archivo}")
+
+        # Si hay secciones, re-parsear el CSV
+        if secciones:
+            df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
+            self.archivo_actual["df"] = df
+
         # Agregar archivo al arbol
-        self.agregar_al_arbol(nombre_archivo, df)
+        self.agregar_al_arbol(nombre_archivo, df, ruta_archivo)
 
         # Mostrar informacion del archivo
         info = self.cargador.obtener_info(nombre_archivo, df)
         info["columnas_csv"] = list(df.columns)
+        info["df"] = df
+        info["ruta_archivo"] = ruta_archivo
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
         self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
@@ -175,14 +213,22 @@ class PanelIzquierdo(QFrame):
 
         self.archivoCargado.emit(nombre_archivo, df, info)
 
+        # Mostrar resumen de deteccion al usuario
+        self._mostrar_resumen_deteccion(info)
+
         # Pasar datos al panel derecho si existe
         if hasattr(self, "panel_derecho_ref"):
             self.panel_derecho_ref.cargar_datos_csv(info)
+            if not self.alias_signal_conectado:
+                self.panel_derecho_ref.detectar_cabeceras.aliasesGuardados.connect(
+                    lambda _: self._re_detectar_archivo_actual()
+                )
+                self.alias_signal_conectado = True
 
-    def agregar_al_arbol(self, nombre_archivo, df):
+    def agregar_al_arbol(self, nombre_archivo, df, ruta_archivo=None):
 
-        # Guardar el dataframe para uso futuro
-        self.archivos_cargados[nombre_archivo] = df
+        # Guardar el dataframe y ruta para uso futuro
+        self.archivos_cargados[nombre_archivo] = {"df": df, "ruta": ruta_archivo}
 
         # Si es el primer archivo, limpiar el item vacio
         if self.arbol.topLevelItemCount() == 1:
@@ -204,9 +250,42 @@ class PanelIzquierdo(QFrame):
             return
 
         # Actualizar la informacion del archivo
-        df = self.archivos_cargados[nombre_archivo]
+        datos_archivo = self.archivos_cargados[nombre_archivo]
+        df = datos_archivo["df"]
+        ruta_archivo = datos_archivo.get("ruta")
+
+        # Trackear archivo actual
+        self.archivo_actual = {"nombre": nombre_archivo, "df": df, "ruta": ruta_archivo}
+
+        # Limpiar secciones del archivo anterior y cargar las de este archivo desde la BD
+        secciones = []
+        if hasattr(self, "panel_derecho_ref"):
+            self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes = []
+
+        if self.db_session and ruta_archivo:
+            secciones_db = listar_secciones_archivo(self.db_session, ruta_archivo)
+            if secciones_db:
+                secciones = [
+                    {
+                        "fila_inicio": sec.fila_inicio,
+                        "fila_fin": sec.fila_fin,
+                        "columnas": sec.columnas.split(","),
+                    }
+                    for sec in secciones_db
+                ]
+                if hasattr(self, "panel_derecho_ref"):
+                    self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes = secciones
+                print(f"[DEBUG] al_seleccionar_archivo: {len(secciones)} secciones cargadas desde BD para {nombre_archivo}")
+
+        if secciones and ruta_archivo:
+            df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
+            self.archivo_actual["df"] = df
+            self.archivos_cargados[nombre_archivo]["df"] = df
+
         info = self.cargador.obtener_info(nombre_archivo, df)
         info["columnas_csv"] = list(df.columns)
+        info["df"] = df
+        info["ruta_archivo"] = ruta_archivo
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
         self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
@@ -218,3 +297,104 @@ class PanelIzquierdo(QFrame):
         # Actualizar panel derecho con los datos del archivo seleccionado
         if hasattr(self, "panel_derecho_ref"):
             self.panel_derecho_ref.cargar_datos_csv(info)
+
+    def _re_detectar_archivo_actual(self):
+        """Re-detecta el archivo actualmente seleccionado con los nuevos aliases."""
+        if not self.archivo_actual:
+            print("[DEBUG] _re_detectar_archivo_actual: no hay archivo actual")
+            return
+
+        nombre_archivo = self.archivo_actual["nombre"]
+        df = self.archivo_actual["df"]
+        ruta_archivo = self.archivo_actual["ruta"]
+
+        print(f"[DEBUG] _re_detectar_archivo_actual: archivo={nombre_archivo}, ruta={ruta_archivo}")
+
+        # Obtener secciones del panel derecho directamente
+        secciones = None
+        if hasattr(self, "panel_derecho_ref"):
+            secciones = self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes
+
+        # Re-parsear el CSV: con secciones si hay, o crudo si no hay
+        if secciones and ruta_archivo:
+            df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
+        elif ruta_archivo:
+            df = pd.read_csv(ruta_archivo, sep=None, engine="python")
+
+        self.archivo_actual["df"] = df
+        self.archivos_cargados[nombre_archivo]["df"] = df
+
+        info = self.cargador.obtener_info(nombre_archivo, df)
+        info["columnas_csv"] = list(df.columns)
+        info["df"] = df
+        info["ruta_archivo"] = ruta_archivo
+        self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
+        self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
+        self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
+        self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
+        self.lbl_registros.setText(f"Registros: {info['registros']}")
+
+        self.archivoCargado.emit(nombre_archivo, df, info)
+
+        if hasattr(self, "panel_derecho_ref"):
+            self.panel_derecho_ref.cargar_datos_csv(info)
+
+    def _mostrar_resumen_deteccion(self, info):
+        """Muestra un popup con el resumen de variables detectadas y no reconocidas."""
+        deteccion = info.get("deteccion", {})
+        mapeo = deteccion.get("mapeo", {})
+        no_reconocidas = deteccion.get("no_reconocidas", [])
+        cabeceras_extra = deteccion.get("cabeceras_extra", [])
+
+        reconocidas = []
+        for tipo, ejes in mapeo.items():
+            if tipo in ("Frame", "Tiempo"):
+                continue
+            if isinstance(ejes, dict):
+                for eje, columna in ejes.items():
+                    eje_str = eje.replace("eje_", "").upper() if eje != "ninguno" else ""
+                    if eje_str:
+                        reconocidas.append(f"{tipo} {eje_str} ({columna})")
+                    else:
+                        reconocidas.append(f"{tipo} ({columna})")
+            else:
+                reconocidas.append(f"{tipo} ({ejes})")
+
+        no_reconocidas = [
+            col for col in no_reconocidas
+            if str(col).lower().strip() not in ("nan", "", "none")
+        ]
+
+        detectadas_no_graficadas = []
+        for cab in cabeceras_extra:
+            if cab["tipo"] in ("Frame", "Tiempo"):
+                continue
+            if cab["nombre"] not in detectadas_no_graficadas:
+                detectadas_no_graficadas.append(cab["nombre"])
+
+        mensaje = ""
+
+        if reconocidas:
+            mensaje += "<b>Se graficaron las siguientes variables automáticamente:</b><br>"
+            mensaje += "<br>".join(f"• {r}" for r in reconocidas)
+            mensaje += "<br><br>"
+
+        if detectadas_no_graficadas:
+            mensaje += "<b>Se detectaron variables que NO se graficaron y requieren asignación manual de secciones:</b><br>"
+            mensaje += "<br>".join(f"• {d}" for d in detectadas_no_graficadas)
+            mensaje += "<br><br>Estas variables están en el archivo pero fuera de la cabecera principal.<br>"
+            mensaje += "Para graficarlas, abrí el panel «Detectar Cabeceras»,<br>"
+            mensaje += "usá el botón «Abrir CSV en editor» y marcá las secciones correspondientes."
+            mensaje += "<br><br>"
+
+        if no_reconocidas:
+            mensaje += "<b>Se detectaron columnas no reconocidas que requieren asignación manual:</b><br>"
+            mensaje += "<br>".join(f"• {col}" for col in no_reconocidas)
+            mensaje += "<br><br>Para asignarlas, abrí el panel «Detectar Cabeceras»<br>"
+            mensaje += "y usá el botón «Abrir CSV en editor»."
+
+        if not reconocidas and not detectadas_no_graficadas and not no_reconocidas:
+            mensaje = "No se detectaron variables en el archivo."
+
+        if mensaje:
+            QMessageBox.information(self, "Detección de cabeceras", mensaje)
