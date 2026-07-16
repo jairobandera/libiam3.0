@@ -62,9 +62,20 @@ class BarraBotones(QFrame):
         self.btn_formulas.setProperty("activo", "false")
         self.btn_formulas.clicked.connect(lambda: self.toggle_panel("formulas"))
 
+        # Boton toggle Detectar Cabeceras
+        self.btn_detectar_cabeceras = QPushButton()
+        self.btn_detectar_cabeceras.setObjectName("btnToggleDetectarCabeceras")
+        self.btn_detectar_cabeceras.setFixedSize(70, 35)
+        self.btn_detectar_cabeceras.setIcon(self.icon_expandir)
+        self.btn_detectar_cabeceras.setIconSize(QSize(20, 20))
+        self.btn_detectar_cabeceras.setCursor(Qt.PointingHandCursor)
+        self.btn_detectar_cabeceras.setProperty("activo", "false")
+        self.btn_detectar_cabeceras.clicked.connect(lambda: self.toggle_panel("detectar_cabeceras"))
+
         layout.addWidget(self.btn_mapeo)
         layout.addWidget(self.btn_filtros)
         layout.addWidget(self.btn_formulas)
+        layout.addWidget(self.btn_detectar_cabeceras)
         layout.addStretch()
 
         self.setLayout(layout)
@@ -91,6 +102,8 @@ class BarraBotones(QFrame):
             self.btn_filtros.setIcon(self.icon_colapsar if expandido else self.icon_expandir)
         elif panel_nombre == "formulas":
             self.btn_formulas.setIcon(self.icon_colapsar if expandido else self.icon_expandir)
+        elif panel_nombre == "detectar_cabeceras":
+            self.btn_detectar_cabeceras.setIcon(self.icon_colapsar if expandido else self.icon_expandir)
 
     def establecer_activo(self, panel_nombre, activo):
         valor = "true" if activo else "false"
@@ -106,3 +119,7 @@ class BarraBotones(QFrame):
             self.btn_formulas.setProperty("activo", valor)
             self.btn_formulas.style().unpolish(self.btn_formulas)
             self.btn_formulas.style().polish(self.btn_formulas)
+        elif panel_nombre == "detectar_cabeceras":
+            self.btn_detectar_cabeceras.setProperty("activo", valor)
+            self.btn_detectar_cabeceras.style().unpolish(self.btn_detectar_cabeceras)
+            self.btn_detectar_cabeceras.style().polish(self.btn_detectar_cabeceras)

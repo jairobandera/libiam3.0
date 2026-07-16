@@ -38,6 +38,7 @@ python main.py
 | Panel derecho colapsable | `ui/ventanaPrincipal/panelDerecho/panelDerecho.py` | **Implementado** | Panel con animacion, redimensionable por arrastre |
 | Configuracion de columnas | `ui/ventanaPrincipal/panelDerecho/configColumnas.py` | **Implementado** | UI de mapeo con dropdowns, checkboxes, deteccion automatica |
 | Logica de mapeo | `logica/mapeo_columnas.py` | **Implementado** | Clase `MapeoColumnas` con mapeo automatico + usuario + ejes activos |
+| Area central de graficas | `ui/ventanaPrincipal/areaCentralGraficas.py` | **Implementado** | Graficas por senal con pyqtgraph, zoom y seleccion de rango |
 | Barra de botones derecha | `ui/ventanaPrincipal/barraBotones.py` | **Implementado** | 3 toggles (Mapeo, Filtros, Formulas) con hover azul y estado activo |
 | Placeholder Filtros | `ui/ventanaPrincipal/panelDerecho/filtros.py` | **Implementado** | Panel "En construccion" con mismo estilo que Mapeo |
 | Placeholder Formulas | `ui/ventanaPrincipal/panelDerecho/formulas.py` | **Implementado** | Panel "En construccion" con mismo estilo que Mapeo |
@@ -71,6 +72,16 @@ python main.py
 - Botones "Aplicar Mapeo" y "Reset"
 - Area de mapeo con altura fija de 500px y scroll
 
+**Area Central de Graficas:**
+- Visualizacion automatica al cargar o seleccionar un CSV
+- Una grafica independiente por senal activa (Fx, Fy, Fz, Mx, etc.)
+- Uso de `Frame` como eje X principal
+- Promedio por `Frame` cuando el CSV contiene `SubFrame`
+- Zoom horizontal con scroll sobre cada grafica
+- Seleccion de rango con dos clicks sobre una grafica
+- Previsualizacion dinamica del rango antes del segundo click
+- Apertura de ventana modal con el rango seleccionado
+
 **Barra de Botones:**
 - 3 botones toggle verticales con 12px de espaciado
 - Hover azul (`#1976D2`) en todos los botones
@@ -85,7 +96,7 @@ python main.py
 
 ## Estructura del Diccionario de Mapeo
 
-El metodo `MapeoColumnas.obtener_mapeo_completo()` devuelve un diccionario que se utilizara como entrada para las graficas futuras:
+El metodo `MapeoColumnas.obtener_mapeo_completo()` devuelve un diccionario que se utiliza como entrada para actualizar las graficas:
 
 ```python
 mapeo = {
@@ -117,8 +128,7 @@ for tipo, ejes in mapeo.items():
     for eje, config in ejes.items():
         if config["activo"]:
             columna = config["columna"]
-            datos = dataframe[columna]  # Extraer serie para graficar
-            # ... logica de graficacion con pyqtgraph
+            datos = dataframe[columna]  # Extraer serie para graficar con pyqtgraph
 ```
 
 ## Estructura del Proyecto
@@ -136,6 +146,7 @@ libiam3.0/
 │   │       └── {proyecto,guardar,exportar,ayuda}.py  # EMPTY placeholders
 │   └── ventanaPrincipal/           # Ventana principal
 │       ├── ventana_principal.py    # Layout (modificado)
+│       ├── areaCentralGraficas.py  # Graficas y seleccion de rango (implementado)
 │       ├── panelizquierdo.py       # Panel lateral izquierdo (implementado)
 │       ├── barraBotones.py         # Barra de toggles derecha (implementado)
 │       └── panelDerecho/           # Panel derecho colapsable
@@ -159,6 +170,6 @@ libiam3.0/
 
 ## Estado del Proyecto
 
-La estructura UI esta completa con panel izquierdo (carga de CSV), panel derecho colapsable con 3 secciones (Mapeo, Filtros, Formulas) y barra de toggles con estados visuales. La logica de mapeo de columnas devuelve un diccionario estructurado listo para ser consumido por el modulo de graficacion.
+La estructura UI esta completa con panel izquierdo (carga de CSV), area central de graficas, panel derecho colapsable con 3 secciones (Mapeo, Filtros, Formulas) y barra de toggles con estados visuales. La logica de mapeo de columnas actualiza las senales graficadas y permite activar/desactivar ejes.
 
-**Proxima fase:** Implementacion de graficacion con pyqtgraph utilizando el diccionario de mapeo como entrada para extraer y visualizar las series de datos seleccionadas.
+**Proximas fases sugeridas:** implementar filtros, formulas y analisis de los rangos seleccionados.

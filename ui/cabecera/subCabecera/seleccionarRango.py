@@ -11,10 +11,13 @@ from PySide6.QtWidgets import (
     QLineEdit
 )
 
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QDoubleValidator
 
-
 class SeleccionarRango(QFrame):
+
+    # Señal para notificar cuando se solicita un rango manual
+    rangoManualSolicitado = Signal(str, str, float, float)
 
     def __init__(self):
 
@@ -103,6 +106,7 @@ class SeleccionarRango(QFrame):
         )
 
         self.actualizar_senales()
+        self.btn_aplicar.clicked.connect(self.aplicar_rango)
 
     def actualizar_senales(self):
 
@@ -112,4 +116,34 @@ class SeleccionarRango(QFrame):
 
         self.combo_senal.addItems(
             self.variables[categoria]
+        )
+    def aplicar_rango(self):
+
+        desde_txt = self.input_desde.text().strip()
+        hasta_txt = self.input_hasta.text().strip()
+
+        if not desde_txt or not hasta_txt:
+            return
+
+        try:
+            desde = float(desde_txt)
+            hasta = float(hasta_txt)
+        except ValueError:
+            return
+
+        if desde == hasta:
+            return
+
+        #Aca corrige el orden por las dudas si el usaurio ingresó al reves.
+        if desde > hasta:
+            desde, hasta = hasta, desde
+
+        categoria = self.combo_variable.currentText()
+        senal = self.combo_senal.currentText()
+
+        self.rangoManualSolicitado.emit(
+            categoria,
+            senal,
+            desde,
+            hasta
         )

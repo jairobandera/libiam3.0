@@ -9,12 +9,13 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QWidget,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 from logica.mapeo_columnas import MapeoColumnas
 
 
 class ConfigColumnas(QFrame):
+    mapeoAplicado = Signal(object)
 
     def __init__(self):
         super().__init__()
@@ -121,7 +122,7 @@ class ConfigColumnas(QFrame):
         self.scroll_filas.setFixedHeight(500)
         self.scroll_filas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # Botones de accion
+        # Boton de accion
         layout_botones = QHBoxLayout()
         layout_botones.setSpacing(8)
 
@@ -130,13 +131,7 @@ class ConfigColumnas(QFrame):
         self.btn_aplicar.setCursor(Qt.PointingHandCursor)
         self.btn_aplicar.clicked.connect(self.aplicar_mapeo)
 
-        self.btn_reset = QPushButton("Reset")
-        self.btn_reset.setObjectName("btnResetMapeo")
-        self.btn_reset.setCursor(Qt.PointingHandCursor)
-        self.btn_reset.clicked.connect(self.resetear_mapeo)
-
         layout_botones.addWidget(self.btn_aplicar, 1)
-        layout_botones.addWidget(self.btn_reset, 1)
 
         layout.addWidget(lbl_titulo_mapeo)
         layout.addLayout(layout_tipo)
@@ -185,14 +180,15 @@ class ConfigColumnas(QFrame):
             self.lbl_deteccion.setObjectName("lblDeteccionOk")
         else:
             self.lbl_deteccion.setText(
-                "No se pudieron detectar columnas automaticamente. Usa el mapeo manual."
+                "No se pudieron detectar columnas automaticamente. Usa el panel Detectar Cabeceras."
             )
             self.lbl_deteccion.setObjectName("lblDeteccionWarn")
 
         # Actualizar dropdown de tipo de dato
         self.cmb_tipo_dato.clear()
         self.cmb_tipo_dato.addItem("Todos")
-        for tipo in tipos:
+        tipos_graficables = [t for t in tipos if t not in ("Frame", "Tiempo")]
+        for tipo in tipos_graficables:
             self.cmb_tipo_dato.addItem(tipo)
 
         # Actualizar lista de columnas
@@ -204,7 +200,7 @@ class ConfigColumnas(QFrame):
         self.generar_filas_mapeo("Todos")
 
     def generar_filas_mapeo(self, tipo_filtro):
-        """Genera las filas de mapeo segun el tipo de dato seleccionado."""
+        """Genera las filas de mapeo con checkbox y nombre."""
         # Limpiar filas existentes
         while self.layout_filas.count():
             hijo = self.layout_filas.takeAt(0)
@@ -213,20 +209,40 @@ class ConfigColumnas(QFrame):
 
         tipos = self.mapeo.obtener_tipos_detectados()
 
-        if tipo_filtro == "Todos":
-            tipos_a_mostrar = tipos
-        else:
-            tipos_a_mostrar = [tipo_filtro] if tipo_filtro in tipos else []
-
-        for tipo in tipos_a_mostrar:
+        for tipo in tipos:
             ejes = self.mapeo.obtener_ejes_para_tipo(tipo)
 
             for eje, columna_auto in ejes.items():
                 fila = self.crear_fila_mapeo(tipo, eje, columna_auto)
+                fila.tipo_dato = tipo
                 self.layout_filas.addWidget(fila)
 
+        # Aplicar filtro visual
+        self._aplicar_filtro_visual(tipo_filtro)
+
+    def _aplicar_filtro_visual(self, tipo_filtro):
+        """Muestra u oculta filas segun el tipo seleccionado."""
+        for i in range(self.layout_filas.count()):
+            hijo = self.layout_filas.itemAt(i)
+            if hijo and hijo.widget():
+                frame = hijo.widget()
+                tipo_fila = getattr(frame, "tipo_dato", "")
+                if tipo_filtro == "Todos" or tipo_fila == tipo_filtro:
+                    frame.setVisible(True)
+                else:
+                    frame.setVisible(False)
+
+    def filtrar_por_tipo(self, tipo):
+        """Filtra las filas de mapeo segun el tipo de dato seleccionado."""
+        self._aplicar_filtro_visual(tipo)
+
+    def _toggle_eje(self, tipo, eje, activo):
+        """Activa/desactiva un eje internamente. Solo se aplica al presionar 'Aplicar Mapeo'."""
+        print(f"[DEBUG] _toggle_eje: tipo={tipo}, eje={eje}, activo={activo}")
+        self.mapeo.toggle_eje(tipo, eje, activo)
+
     def crear_fila_mapeo(self, tipo, eje, columna_auto):
-        """Crea una fila de mapeo con checkbox, label y dropdown."""
+        """Crea una fila de mapeo con checkbox y label."""
         frame = QFrame()
         frame.setObjectName("filaMapeo")
 
@@ -238,8 +254,8 @@ class ConfigColumnas(QFrame):
         checkbox = QCheckBox()
         checkbox.setObjectName(f"chk_{tipo}_{eje}")
         checkbox.setChecked(self.mapeo.es_eje_activo(tipo, eje))
-        checkbox.stateChanged.connect(
-            lambda state, t=tipo, e=eje: self.mapeo.toggle_eje(t, e, state == Qt.Checked)
+        checkbox.toggled.connect(
+            lambda checked, t=tipo, e=eje: self._toggle_eje(t, e, checked)
         )
 
         # Label del eje
@@ -247,27 +263,13 @@ class ConfigColumnas(QFrame):
         label_eje.setObjectName("lblEje")
         label_eje.setMinimumWidth(80)
 
-        # Dropdown de columnas
-        dropdown = QComboBox()
-        dropdown.setObjectName(f"cmb_{tipo}_{eje}")
-        dropdown.addItem("---")
-
-        for col in self.mapeo.obtener_columnas_csv():
-            dropdown.addItem(col)
-
-        # Seleccionar columna detectada si existe
-        if columna_auto:
-            idx = dropdown.findText(columna_auto)
-            if idx >= 0:
-                dropdown.setCurrentIndex(idx)
-
-        dropdown.currentTextChanged.connect(
-            lambda texto, t=tipo, e=eje: self.mapeo.aplicar_mapeo_usuario(t, e, texto if texto != "---" else None)
-        )
+        # Label del nombre de columna
+        label_columna = QLabel(columna_auto if columna_auto else "---")
+        label_columna.setObjectName("lblColumnaCSV")
 
         layout.addWidget(checkbox)
         layout.addWidget(label_eje)
-        layout.addWidget(dropdown, 1)
+        layout.addWidget(label_columna, 1)
 
         frame.setLayout(layout)
         return frame
@@ -282,22 +284,23 @@ class ConfigColumnas(QFrame):
         nombre_eje = ejes_nombres.get(eje, eje)
         return f"{tipo}{nombre_eje}"
 
-    def filtrar_por_tipo(self, tipo):
-        """Filtra las filas de mapeo segun el tipo de dato seleccionado."""
-        self.generar_filas_mapeo(tipo)
-
     def re_detectar(self):
         """Re-ejecuta la deteccion automatica."""
-        # La deteccion ya se hizo al cargar, solo regeneramos las filas
         self.generar_filas_mapeo(self.cmb_tipo_dato.currentText())
 
     def aplicar_mapeo(self):
-        """Guarda la configuracion actual del mapeo."""
+        """Guarda la configuracion actual del mapeo completo."""
+        print("[DEBUG] aplicar_mapeo: Boton presionado")
         mapeo_completo = self.mapeo.obtener_mapeo_completo()
-        # Aca se guarda para uso futuro en la grafica
-        print("Mapeo aplicado:", mapeo_completo)
+        tipo_filtro = self.cmb_tipo_dato.currentText()
+        print(f"[DEBUG] aplicar_mapeo: tipo_filtro={tipo_filtro}")
 
-    def resetear_mapeo(self):
-        """Vuelve a la deteccion automatica."""
-        self.mapeo.resetear_mapeo()
-        self.generar_filas_mapeo(self.cmb_tipo_dato.currentText())
+        if tipo_filtro != "Todos":
+            mapeo_completo = {
+                tipo: ejes for tipo, ejes in mapeo_completo.items()
+                if tipo == tipo_filtro
+            }
+
+        print(f"[DEBUG] aplicar_mapeo: mapeo_emitido={mapeo_completo}")
+        self.mapeoAplicado.emit(mapeo_completo)
+        print("[DEBUG] aplicar_mapeo: señal emitida")
