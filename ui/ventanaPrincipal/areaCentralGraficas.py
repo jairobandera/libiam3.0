@@ -153,7 +153,7 @@ class GraficaSenal(pg.PlotWidget):
         return x_click
 
     #Dibuja el rango definitivo seleccionado por el usuario sobre la gráfica
-    #Dibuha la region transparente, dibuja las dos lineas verticales de los extremos, agrega esa region a la grafica.
+    #Dibuja la region transparente, dibuja las dos lineas verticales de los extremos, agrega esa region a la grafica.
     def _mostrar_rango(self, x_inicio, x_fin):
         self._limpiar_rango()
         self.region_rango = pg.LinearRegionItem(
