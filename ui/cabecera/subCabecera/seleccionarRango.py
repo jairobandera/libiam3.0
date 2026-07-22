@@ -12,12 +12,12 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QDoubleValidator
+from PySide6.QtGui import QIntValidator
 
 class SeleccionarRango(QFrame):
 
     # Señal para notificar cuando se solicita un rango manual
-    rangoManualSolicitado = Signal(str, str, float, float)
+    rangoManualSolicitado = Signal(str, str, int, int)
 
     def __init__(self):
 
@@ -67,10 +67,10 @@ class SeleccionarRango(QFrame):
         layout.addWidget(QLabel("Desde:"))
 
         self.input_desde = QLineEdit()
-        self.input_desde.setPlaceholderText("Ej: 0.000")
+        self.input_desde.setPlaceholderText("Ej: 30")
         self.input_desde.setFixedWidth(90)
 
-        validador_desde = QDoubleValidator()
+        validador_desde = QIntValidator()
         self.input_desde.setValidator(validador_desde)
 
         layout.addWidget(self.input_desde)
@@ -80,10 +80,10 @@ class SeleccionarRango(QFrame):
         layout.addWidget(QLabel("Hasta:"))
 
         self.input_hasta = QLineEdit()
-        self.input_hasta.setPlaceholderText("Ej: 10.500")
+        self.input_hasta.setPlaceholderText("Ej: 80")
         self.input_hasta.setFixedWidth(90)
 
-        validador_hasta = QDoubleValidator()
+        validador_hasta = QIntValidator()
         self.input_hasta.setValidator(validador_hasta)
 
         layout.addWidget(self.input_hasta)
@@ -126,8 +126,8 @@ class SeleccionarRango(QFrame):
             return
 
         try:
-            desde = float(desde_txt)
-            hasta = float(hasta_txt)
+            desde = int(desde_txt)
+            hasta = int(hasta_txt)
         except ValueError:
             return
 

@@ -55,8 +55,28 @@ def init_db():
     if session.query(AliasColumna).count() == 0:
         _seed_inicial(session)
 
+    _asegurar_aliases_iniciales(session)
+
     session.close()
     return engine
+
+
+def _asegurar_aliases_iniciales(session):
+    """Agrega aliases incorporados en versiones nuevas sin pisar los aprendidos."""
+    aliases_requeridos = [
+        ("cx", "COP", "eje_x"),
+        ("cy", "COP", "eje_y"),
+        ("cz", "COP", "eje_z"),
+    ]
+    existentes = {
+        alias.nombre for alias in session.query(AliasColumna).filter(
+            AliasColumna.nombre.in_([nombre for nombre, _, _ in aliases_requeridos])
+        )
+    }
+    for nombre, tipo, eje in aliases_requeridos:
+        if nombre not in existentes:
+            session.add(AliasColumna(nombre=nombre, tipo=tipo, eje=eje))
+    session.commit()
 
 
 def _migrar_db(engine):

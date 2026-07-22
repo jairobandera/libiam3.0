@@ -10,6 +10,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 
+from logica import app_info
+from ui.cabecera.cabeceraPrincipal.acerca_de import AcercaDeDialog
+
 
 class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior en si
 
@@ -45,7 +48,7 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         text_layout = QVBoxLayout() #Titulo y subtitulo
         text_layout.setSpacing(0)
 
-        titulo = QLabel("LIBiAM 3.0")
+        titulo = QLabel(app_info.NOMBRE)
         titulo.setObjectName("mainTitle")
 
         subtitulo = QLabel(
@@ -64,23 +67,26 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         right_layout.setAlignment(Qt.AlignVCenter)
 
         botones = [
-            ("Proyecto", "utilidades/icons/home.svg"),
+            ("Inicio", "utilidades/icons/home.svg"),
             ("Guardar", "utilidades/icons/save.svg"),
             ("Exportar", "utilidades/icons/export.svg"),
-            ("Ayuda", "utilidades/icons/help.svg"),
+            ("Acerca de", "utilidades/icons/help.svg"),
         ]
 
         for texto, icono in botones: #Genera botones dinamicamente.
 
             btn = QToolButton()
             btn.setText(texto)
-            btn.setIcon(QIcon(icono)) #Carga el icono del botón.
+            btn.setIcon(QIcon(os.path.join(BASE_DIR, icono))) #Carga el icono del botón.
             btn.setIconSize(QSize(20, 20))  #Tamaño del icono.
             btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon) #Icono y texto.
             btn.setObjectName("toolbarButton")
             btn.setCursor(Qt.PointingHandCursor)
 
             btn.setMinimumWidth(70) #Evita que el texto se corte.
+
+            if texto == "Acerca de":
+                btn.clicked.connect(self._mostrar_acerca_de)
 
             right_layout.addWidget(btn)
 
@@ -89,3 +95,6 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         layout.addLayout(right_layout)
 
         self.setLayout(layout)
+
+    def _mostrar_acerca_de(self):
+        AcercaDeDialog(self.window()).exec()

@@ -2,8 +2,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QTableWidget,
-    QTableWidgetItem,
+    QAbstractItemView,
+    QTableView,
     QPushButton,
     QLabel,
     QComboBox,
@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QStyle,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QIcon
 
 PALETA_COLORES = [
@@ -33,6 +33,8 @@ PALETA_COLORES = [
 ]
 
 COLOR_FONDO_TABLA = QColor(45, 45, 48)
+COLOR_CABECERA = QColor(30, 75, 180)
+COLOR_ASIGNADA = QColor(200, 170, 0)
 
 from logica.config_db import (
     agregar_alias,
@@ -45,6 +47,88 @@ from logica.config_db import (
     desactivar_cabecera,
     listar_cabeceras_asignadas,
 )
+
+
+class ModeloCSV(QAbstractTableModel):
+    """Modelo virtualizado: Qt solicita únicamente las celdas visibles."""
+
+    def __init__(self, df, parent=None):
+        super().__init__(parent)
+        self.df = df
+        self.secciones = []
+        self.celdas_asignadas = set()
+        self._cache_filas_cabecera = {}
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.df)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.df.columns)
+
+    @staticmethod
+    def _valor_a_str(valor):
+        texto = str(valor).strip()
+        return "" if texto.lower() in {"nan", "none"} else texto
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+
+        fila, columna = index.row(), index.column()
+        if role == Qt.DisplayRole:
+            return self._valor_a_str(self.df.iat[fila, columna])
+        if role == Qt.TextAlignmentRole:
+            return Qt.AlignCenter
+        if role == Qt.BackgroundRole:
+            if (fila, columna) in self.celdas_asignadas:
+                return COLOR_ASIGNADA
+            for indice, seccion in enumerate(self.secciones):
+                if seccion["fila_inicio"] <= fila <= seccion["fila_fin"]:
+                    return PALETA_COLORES[indice % len(PALETA_COLORES)]
+            if self.es_fila_cabecera(fila):
+                return COLOR_CABECERA
+            return COLOR_FONDO_TABLA
+        if role == Qt.ForegroundRole:
+            return Qt.black if (fila, columna) in self.celdas_asignadas else Qt.white
+        return None
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role != Qt.DisplayRole:
+            return None
+        if orientation == Qt.Horizontal:
+            return str(self.df.columns[section])
+        return str(section)
+
+    def es_fila_cabecera(self, fila):
+        if fila in self._cache_filas_cabecera:
+            return self._cache_filas_cabecera[fila]
+
+        celdas_texto = 0
+        celdas_total = len(self.df.columns)
+        for columna in range(celdas_total):
+            valor = self._valor_a_str(self.df.iat[fila, columna])
+            if not valor:
+                continue
+            try:
+                float(valor)
+            except ValueError:
+                celdas_texto += 1
+
+        resultado = celdas_texto > celdas_total / 2
+        self._cache_filas_cabecera[fila] = resultado
+        return resultado
+
+    def actualizar_resaltado(self, secciones=None, celdas_asignadas=None):
+        if secciones is not None:
+            self.secciones = list(secciones)
+        if celdas_asignadas is not None:
+            self.celdas_asignadas = set(celdas_asignadas)
+        if self.rowCount() and self.columnCount():
+            self.dataChanged.emit(
+                self.index(0, 0),
+                self.index(self.rowCount() - 1, self.columnCount() - 1),
+                [Qt.BackgroundRole, Qt.ForegroundRole],
+            )
 
 
 class VentanaEditorCSV(QDialog):
@@ -62,6 +146,7 @@ class VentanaEditorCSV(QDialog):
         self.secciones_pendientes = []
         self.fila_seleccionada = None
         self.click_numero = 0
+        self.celdas_asignadas = set()
         self.init_ui()
 
     def init_ui(self):
@@ -99,21 +184,19 @@ class VentanaEditorCSV(QDialog):
 
         layout.addLayout(paneles_layout)
 
-        self.tabla = QTableWidget()
-        self.tabla.setRowCount(len(self.df))
-        self.tabla.setColumnCount(len(self.df.columns))
-        self.tabla.setHorizontalHeaderLabels([str(c) for c in self.df.columns])
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.tabla = QTableView()
+        self.modelo_tabla = ModeloCSV(self.df, self.tabla)
+        self.tabla.setModel(self.modelo_tabla)
+        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.tabla.horizontalHeader().setDefaultSectionSize(120)
+        self.tabla.horizontalHeader().setStretchLastSection(True)
         self.tabla.verticalHeader().setVisible(True)
-        self.tabla.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tabla.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tabla.setSelectionMode(QTableWidget.SingleSelection)
-        self.tabla.cellClicked.connect(self._al_click_fila)
-
-        self._llenar_tabla()
-        self._resaltar_cabeceras()
-
-        self.tabla.cellDoubleClicked.connect(self._al_doble_click_celda)
+        self.tabla.verticalHeader().setDefaultSectionSize(24)
+        self.tabla.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tabla.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tabla.clicked.connect(self._al_click_fila)
+        self.tabla.doubleClicked.connect(self._al_doble_click_celda)
 
         layout.addWidget(self.tabla, 1)
 
@@ -251,42 +334,16 @@ class VentanaEditorCSV(QDialog):
             return ""
         return s
 
-    def _llenar_tabla(self):
-        for fila in range(len(self.df)):
-            self.tabla.setVerticalHeaderItem(fila, QTableWidgetItem(str(fila)))
-            for col in range(len(self.df.columns)):
-                valor = self.df.iloc[fila, col]
-                item = QTableWidgetItem(self._valor_a_str(valor))
-                item.setTextAlignment(Qt.AlignCenter)
-                item.setBackground(COLOR_FONDO_TABLA)
-                item.setForeground(Qt.white)
-                self.tabla.setItem(fila, col, item)
-
     def _es_fila_cabecera(self, fila_idx):
-        celdas_texto = 0
-        celdas_total = len(self.df.columns)
-
-        for col in range(celdas_total):
-            valor = self.df.iloc[fila_idx, col]
-            if str(valor).strip() == "":
-                continue
-            try:
-                float(str(valor))
-            except ValueError:
-                celdas_texto += 1
-
-        return celdas_texto > celdas_total / 2
+        return self.modelo_tabla.es_fila_cabecera(fila_idx)
 
     def _resaltar_cabeceras(self):
-        for fila in range(len(self.df)):
-            if self._es_fila_cabecera(fila):
-                for col in range(len(self.df.columns)):
-                    item = self.tabla.item(fila, col)
-                    if item:
-                        item.setBackground(QColor(30, 75, 180))
-                        item.setForeground(Qt.white)
+        self.modelo_tabla.actualizar_resaltado(
+            self.secciones_pendientes, self.celdas_asignadas
+        )
 
-    def _al_click_fila(self, fila, col):
+    def _al_click_fila(self, indice, col=None):
+        fila = indice.row() if isinstance(indice, QModelIndex) else int(indice)
         self.fila_seleccionada = fila
 
         if self.click_numero == 0:
@@ -306,7 +363,11 @@ class VentanaEditorCSV(QDialog):
             self.txt_fila_fin.clear()
             self.click_numero = 1
 
-    def _al_doble_click_celda(self, fila, col):
+    def _al_doble_click_celda(self, indice, col=None):
+        if isinstance(indice, QModelIndex):
+            fila, col = indice.row(), indice.column()
+        else:
+            fila, col = int(indice), int(col)
         nombre_columna = self.df.columns[col]
         valor_celda = self._valor_a_str(self.df.iloc[fila, col])
 
@@ -341,12 +402,12 @@ class VentanaEditorCSV(QDialog):
             "nombre": valor_celda,
             "tipo": tipo,
             "eje": eje_map[eje],
+            "fila": fila,
+            "columna_indice": col,
         })
 
-        item = self.tabla.item(fila, col)
-        if item:
-            item.setBackground(QColor(200, 170, 0))
-            item.setForeground(Qt.black)
+        self.celdas_asignadas.add((fila, col))
+        self._reaplicar_resaltado()
 
         self._actualizar_lista_cambios()
 
@@ -528,6 +589,11 @@ class VentanaEditorCSV(QDialog):
             if self.ruta_archivo and "id" in cambio:
                 desactivar_cabecera(self.db_session, cambio["id"])
                 print(f"[DEBUG] _eliminar_cambio: cabecera desactivada en BD id={cambio['id']}")
+            if "fila" in cambio and "columna_indice" in cambio:
+                self.celdas_asignadas.discard(
+                    (cambio["fila"], cambio["columna_indice"])
+                )
+                self._reaplicar_resaltado()
             self._actualizar_lista_cambios()
 
     def _quitar_todos_cambios(self):
@@ -537,6 +603,8 @@ class VentanaEditorCSV(QDialog):
             desactivar_cabeceras_archivo(self.db_session, self.ruta_archivo)
             print(f"[DEBUG] _quitar_todos_cambios: cabeceras desactivadas en BD")
         self.cambios_pendientes.clear()
+        self.celdas_asignadas.clear()
+        self._reaplicar_resaltado()
         self._actualizar_lista_cambios()
 
     def _mostrar_ayuda(self):
@@ -559,24 +627,10 @@ class VentanaEditorCSV(QDialog):
         )
 
     def _reaplicar_resaltado(self):
-        """Limpia todo el resaltado y lo vuelve a aplicar desde cero."""
-        for fila in range(len(self.df)):
-            for col in range(len(self.df.columns)):
-                item = self.tabla.item(fila, col)
-                if item:
-                    item.setBackground(COLOR_FONDO_TABLA)
-                    item.setForeground(Qt.white)
-
-        self._resaltar_cabeceras()
-
-        for i, sec in enumerate(self.secciones_pendientes):
-            color = PALETA_COLORES[i % len(PALETA_COLORES)]
-            for fila in range(sec["fila_inicio"], sec["fila_fin"] + 1):
-                for col in range(len(self.df.columns)):
-                    item = self.tabla.item(fila, col)
-                    if item:
-                        item.setBackground(color)
-                        item.setForeground(Qt.white)
+        """Actualiza solo las celdas visibles mediante el modelo virtualizado."""
+        self.modelo_tabla.actualizar_resaltado(
+            self.secciones_pendientes, self.celdas_asignadas
+        )
 
     def _cargar_secciones_existentes(self):
         if self.ruta_archivo:
@@ -598,6 +652,7 @@ class VentanaEditorCSV(QDialog):
                     "eje": cab["eje"],
                 })
             self._actualizar_lista_cambios()
+            self._reaplicar_resaltado()
 
     def _guardar_y_cerrar(self):
         print(f"[DEBUG] _guardar_y_cerrar: cambios_pendientes={len(self.cambios_pendientes)}, secciones={len(self.secciones_pendientes)}")

@@ -5,6 +5,7 @@ import numpy as np
 from PySide6.QtWidgets import QFileDialog
 
 from logica.config_db import cargar_aliases, buscar_alias, listar_secciones_archivo
+from logica.lector_csv import leer_csv_crudo, leer_csv_rapido
 
 
 class CargadorCSV:
@@ -31,7 +32,7 @@ class CargadorCSV:
             return None, None
 
         nombre_archivo = os.path.basename(ruta_archivo)
-        df = pd.read_csv(ruta_archivo, sep=None, engine="python")
+        df, _ = leer_csv_rapido(ruta_archivo)
         self.ruta_archivo_actual = ruta_archivo
 
         return nombre_archivo, df, ruta_archivo
@@ -49,10 +50,12 @@ class CargadorCSV:
         Retorna un DataFrame unificado con todas las columnas de todas las secciones.
         """
         if not secciones:
-            return pd.read_csv(ruta_archivo, sep=None, engine="python")
+            df, _ = leer_csv_rapido(ruta_archivo)
+            return df
 
         # Leer el CSV completo como texto para poder acceder por filas
-        df_raw = pd.read_csv(ruta_archivo, sep=None, engine="python", header=None)
+        df_raw = leer_csv_crudo(ruta_archivo)
+        _, metadatos = leer_csv_rapido(ruta_archivo)
 
         # Verificar si la fila 0 está cubierta por alguna sección
         fila_0_cubierta = any(sec["fila_inicio"] == 0 for sec in secciones)
@@ -99,6 +102,7 @@ class CargadorCSV:
         # Unir todos los sub-DataFrames
         if sub_dataframes:
             df_unificado = pd.concat(sub_dataframes, ignore_index=True)
+            df_unificado.attrs.update(metadatos)
             return df_unificado
 
         return pd.DataFrame()
@@ -112,33 +116,32 @@ class CargadorCSV:
         Retorna una lista de nombres de columna unicos encontrados en todo el archivo.
         """
         cabeceras_encontradas = set()
+        if df.empty:
+            return []
 
-        for _, fila in df.iterrows():
-            celdas_texto = 0
-            celdas_total = len(fila)
+        # Los CSV bien interpretados quedan con columnas numéricas y no hace
+        # falta recorrer decenas de miles de filas en Python. Solo se revisan
+        # las columnas que todavía contienen texto.
+        conteo_texto = np.zeros(len(df), dtype=np.int16)
+        mascaras_texto = {}
+        for columna in df.columns:
+            serie = df[columna]
+            if pd.api.types.is_numeric_dtype(serie):
+                continue
 
-            for valor in fila:
-                if pd.isna(valor):
-                    continue
-                str_val = str(valor).strip()
-                if not str_val:
-                    continue
-                # Verificar si la celda parece texto (no es puramente numerica)
-                try:
-                    float(str_val)
-                    # Es numerico puro
-                except ValueError:
-                    # Contiene texto (puede tener numeros como Fx1)
-                    celdas_texto += 1
+            como_texto = serie.astype("string").str.strip()
+            mascara_valida = como_texto.notna() & como_texto.ne("")
+            mascara_texto = mascara_valida & pd.to_numeric(serie, errors="coerce").isna()
+            mascaras_texto[columna] = mascara_texto.to_numpy()
+            conteo_texto += mascara_texto.to_numpy(dtype=np.int16)
 
-            # Si la mayoria son texto, es una fila de cabecera
-            if celdas_texto > celdas_total / 2:
-                for valor in fila:
-                    if pd.isna(valor):
-                        continue
-                    str_val = str(valor).strip()
-                    if str_val:
-                        cabeceras_encontradas.add(str_val)
+        filas_cabecera = np.flatnonzero(conteo_texto > len(df.columns) / 2)
+        for posicion in filas_cabecera:
+            for columna, mascara in mascaras_texto.items():
+                if mascara[posicion]:
+                    valor = str(df.iloc[posicion][columna]).strip()
+                    if valor:
+                        cabeceras_encontradas.add(valor)
 
         return list(cabeceras_encontradas)
 
@@ -230,10 +233,22 @@ class CargadorCSV:
     def detectar_subframes(self, df):
         """Detecta si el CSV tiene estructura de subframes."""
         for col in df.columns:
-            col_lower = col.lower().strip()
-            if "subframe" in col_lower or "sub_frame" in col_lower:
+            col_normalizada = re.sub(r"[^a-z0-9]+", "", str(col).lower())
+            if "subframe" in col_normalizada:
                 cantidad_unica = df[col].nunique()
-                max_por_frame = df.groupby("Frame")[col].nunique().max() if "Frame" in df.columns else cantidad_unica
+                frame_col = next(
+                    (
+                        columna
+                        for columna in df.columns
+                        if re.sub(r"[^a-z0-9]+", "", str(columna).lower()) == "frame"
+                    ),
+                    None,
+                )
+                max_por_frame = (
+                    df.groupby(frame_col)[col].nunique().max()
+                    if frame_col is not None
+                    else cantidad_unica
+                )
                 return {
                     "tiene_subframes": True,
                     "columna": col,
@@ -248,6 +263,8 @@ class CargadorCSV:
         cabeceras = self.escanear_cabeceras(df)
         deteccion = self.detectar_tipos_datos(df, cabeceras_extra=cabeceras)
         subframes = self.detectar_subframes(df)
+        frecuencia_muestreo = df.attrs.get("frecuencia_muestreo")
+        unidades = dict(df.attrs.get("unidades", {}))
 
         tipos_str = ", ".join(deteccion["tipos_presentes"]) if deteccion["tipos_presentes"] else "Sin reconocer"
 
@@ -256,6 +273,11 @@ class CargadorCSV:
             subframe_info = f"Si (max {subframes['max_por_frame']} por frame)"
         else:
             subframe_info = "No"
+
+        frecuencia_grafica = frecuencia_muestreo
+        if frecuencia_muestreo and subframes["tiene_subframes"]:
+            divisor = max(1, subframes.get("max_por_frame", 1))
+            frecuencia_grafica = frecuencia_muestreo / divisor
 
         return {
             "nombre": nombre_archivo,
@@ -266,4 +288,7 @@ class CargadorCSV:
             "deteccion": deteccion,
             "subframes": subframes,
             "cabeceras_encontradas": cabeceras,
+            "unidades": unidades,
+            "frecuencia_muestreo": frecuencia_muestreo,
+            "frecuencia_grafica": frecuencia_grafica,
         }

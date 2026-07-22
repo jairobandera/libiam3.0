@@ -5,8 +5,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
 )
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QFont, QMouseEvent
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QMouseEvent
 
 from ui.ventanaPrincipal.panelDerecho.configColumnas import ConfigColumnas
 from ui.ventanaPrincipal.panelDerecho.filtros import Filtros
@@ -26,13 +26,15 @@ class PanelDerecho(QFrame):
         super().__init__()
         self.setObjectName("panelDerecho")
         self.db_session = db_session
-        self.setFixedWidth(self.ANCHO_COLAPSADO)
+        self.setFixedWidth(self.ANCHO_EXPANDIDO)
+        self.hide()
         self.expandido = False
         self.redimensionando = False
         self.posicion_inicio_x = 0
         self.ancho_inicio = 0
         self.panel_activo = None
         self.info_actual = None
+        self.ancho_expandido_actual = self.ANCHO_EXPANDIDO
         self.init_ui()
 
     def init_ui(self):
@@ -54,8 +56,13 @@ class PanelDerecho(QFrame):
         self.stacked_widget.addWidget(scroll_mapeo)
 
         # Panel de filtros
+        scroll_filtros = QScrollArea()
+        scroll_filtros.setWidgetResizable(True)
+        scroll_filtros.setFrameShape(QFrame.NoFrame)
+        scroll_filtros.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.filtros = Filtros()
-        self.stacked_widget.addWidget(self.filtros)
+        scroll_filtros.setWidget(self.filtros)
+        self.stacked_widget.addWidget(scroll_filtros)
 
         # Panel de formulas
         self.formulas = Formulas()
@@ -75,7 +82,7 @@ class PanelDerecho(QFrame):
         self.setLayout(layout)
 
     def expandir_panel(self, panel_nombre):
-        """Expande el panel y muestra el contenido correspondiente."""
+        """Muestra el panel sin redimensionar las gráficas cuadro a cuadro."""
         if panel_nombre == "mapeo":
             self.stacked_widget.setCurrentIndex(0)
         elif panel_nombre == "filtros":
@@ -86,38 +93,43 @@ class PanelDerecho(QFrame):
             self.stacked_widget.setCurrentIndex(3)
 
         self.panel_activo = panel_nombre
-        self.expandido = True
-        self.animar_ancho(self.ANCHO_EXPANDIDO)
+        if not self.expandido:
+            self.expandido = True
+            self.setFixedWidth(self.ancho_expandido_actual)
+            self.show()
 
     def colapsar_panel(self):
-        """Colapsa el panel."""
+        """Oculta el panel en una sola actualización de la interfaz."""
+        if self.width() >= self.ANCHO_MINIMO:
+            self.ancho_expandido_actual = self.width()
         self.expandido = False
         self.panel_activo = None
-        self.animar_ancho(self.ANCHO_COLAPSADO)
+        self.hide()
 
     def toggle_panel(self):
-        """Expande o colapsa el panel con animacion."""
-        self.expandido = not self.expandido
-
+        """Expande o colapsa el panel de forma inmediata."""
         if self.expandido:
-            self.animar_ancho(self.ANCHO_EXPANDIDO)
+            self.colapsar_panel()
         else:
-            self.animar_ancho(self.ANCHO_COLAPSADO)
+            self.expandido = True
+            self.setFixedWidth(self.ancho_expandido_actual)
+            self.show()
 
     def animar_ancho(self, ancho_final):
-        """Anima el cambio de ancho del panel."""
-        self.animacion = QPropertyAnimation(self, b"minimumWidth")
-        self.animacion.setDuration(250)
-        self.animacion.setStartValue(self.width())
-        self.animacion.setEndValue(ancho_final)
-        self.animacion.setEasingCurve(QEasingCurve.InOutCubic)
-        self.animacion.valueChanged.connect(self.actualizar_ancho)
-        self.animacion.finished.connect(lambda: self.setFixedWidth(ancho_final))
-        self.animacion.start()
+        """Mantiene compatibilidad con llamadas anteriores, sin animación."""
+        if ancho_final <= self.ANCHO_COLAPSADO:
+            self.colapsar_panel()
+            return
+        self.ancho_expandido_actual = max(
+            self.ANCHO_MINIMO, min(self.ANCHO_MAXIMO, int(ancho_final))
+        )
+        self.expandido = True
+        self.setFixedWidth(self.ancho_expandido_actual)
+        self.show()
 
     def actualizar_ancho(self, valor):
-        """Actualiza el ancho durante la animacion."""
-        self.setFixedWidth(int(valor))
+        """Actualiza el ancho solicitado sin generar una animación intermedia."""
+        self.animar_ancho(int(valor))
 
     def mousePressEvent(self, event: QMouseEvent):
         """Detecta click en la zona de arrastre del borde izquierdo."""
@@ -146,6 +158,8 @@ class PanelDerecho(QFrame):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         """Finaliza el arrastre."""
+        if self.redimensionando:
+            self.ancho_expandido_actual = self.width()
         self.redimensionando = False
         self.setCursor(Qt.ArrowCursor)
         event.accept()
@@ -154,6 +168,7 @@ class PanelDerecho(QFrame):
         """Carga los datos detectados del CSV en el panel."""
         self.info_actual = info
         self.config_columnas.cargar_datos(info)
+        self.filtros.cargar_datos(info)
         self.detectar_cabeceras.cargar_datos(info)
 
     def _on_aliases_guardados(self, secciones):
