@@ -40,6 +40,7 @@ class BarraBotones(QFrame):
         self.btn_mapeo.setIconSize(QSize(20, 20))
         self.btn_mapeo.setCursor(Qt.PointingHandCursor)
         self.btn_mapeo.setProperty("activo", "false")
+        self.btn_mapeo.setToolTip("Mapeo de columnas")
         self.btn_mapeo.clicked.connect(lambda: self.toggle_panel("mapeo"))
 
         # Boton toggle Filtros
@@ -50,6 +51,7 @@ class BarraBotones(QFrame):
         self.btn_filtros.setIconSize(QSize(20, 20))
         self.btn_filtros.setCursor(Qt.PointingHandCursor)
         self.btn_filtros.setProperty("activo", "false")
+        self.btn_filtros.setToolTip("Filtros")
         self.btn_filtros.clicked.connect(lambda: self.toggle_panel("filtros"))
 
         # Boton toggle Formulas
@@ -60,6 +62,7 @@ class BarraBotones(QFrame):
         self.btn_formulas.setIconSize(QSize(20, 20))
         self.btn_formulas.setCursor(Qt.PointingHandCursor)
         self.btn_formulas.setProperty("activo", "false")
+        self.btn_formulas.setToolTip("Rangos para cálculos")
         self.btn_formulas.clicked.connect(lambda: self.toggle_panel("formulas"))
 
         # Boton toggle Detectar Cabeceras
@@ -70,6 +73,7 @@ class BarraBotones(QFrame):
         self.btn_detectar_cabeceras.setIconSize(QSize(20, 20))
         self.btn_detectar_cabeceras.setCursor(Qt.PointingHandCursor)
         self.btn_detectar_cabeceras.setProperty("activo", "false")
+        self.btn_detectar_cabeceras.setToolTip("Detectar cabeceras")
         self.btn_detectar_cabeceras.clicked.connect(lambda: self.toggle_panel("detectar_cabeceras"))
 
         layout.addWidget(self.btn_mapeo)

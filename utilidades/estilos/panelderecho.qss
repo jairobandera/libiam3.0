@@ -32,6 +32,10 @@
     background-color: #2D2D30;
 }
 
+#filtrosPanel {
+    background-color: #2D2D30;
+}
+
 /* Titulos */
 #tituloPanel {
     font-family: Arial;
@@ -91,6 +95,65 @@
     background-color: #252526;
     border: 1px solid #3E3E42;
     border-radius: 6px;
+}
+
+#seccionFiltro {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+}
+
+#seccionFiltro QLabel {
+    background-color: transparent;
+}
+
+#cmbSenalFiltro,
+#cmbFiltro,
+#spinFiltro {
+    min-height: 26px;
+    background-color: #333337;
+    color: #FFFFFF;
+    border: 1px solid #4A4A4F;
+    border-radius: 4px;
+    padding: 3px 7px;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#cmbSenalFiltro:focus,
+#cmbFiltro:focus,
+#spinFiltro:focus {
+    border-color: #42A5F5;
+}
+
+#cmbSenalFiltro::drop-down,
+#cmbFiltro::drop-down {
+    border: none;
+    width: 22px;
+}
+
+#lblFrecuenciaFiltro {
+    color: #90CAF9;
+    background-color: #1E2A35;
+    border: 1px solid #2C4F6B;
+    border-radius: 4px;
+    padding: 7px;
+    font-family: Segoe UI;
+    font-size: 11px;
+}
+
+#resumenFiltro {
+    color: #DDE7EF;
+    background-color: #30343A;
+    border-left: 3px solid #42A5F5;
+    padding: 8px;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#resumenFiltro[valido="false"] {
+    color: #FFCDD2;
+    border-left-color: #EF5350;
 }
 
 #tituloSeccionMapeo {
@@ -170,6 +233,11 @@
     background-color: #0D47A1;
 }
 
+#btnAplicarMapeo:disabled {
+    background-color: #454549;
+    color: #898989;
+}
+
 #btnResetMapeo {
     background-color: transparent;
     color: #FFFFFF;
@@ -183,6 +251,11 @@
 #btnResetMapeo:hover {
     background-color: #333337;
     border-color: #1976D2;
+}
+
+#btnResetMapeo:disabled {
+    color: #707070;
+    border-color: #454549;
 }
 
 /* Seccion de columnas CSV */

@@ -6,7 +6,8 @@
 /* Botones toggle */
 #btnToggleMapeo,
 #btnToggleFiltros,
-#btnToggleFormulas {
+#btnToggleFormulas,
+#btnToggleDetectarCabeceras {
     background-color: #333337;
     color: #FFFFFF;
     border: 1px solid #3E3E42;
@@ -16,28 +17,32 @@
 
 #btnToggleMapeo:hover,
 #btnToggleFiltros:hover,
-#btnToggleFormulas:hover {
+#btnToggleFormulas:hover,
+#btnToggleDetectarCabeceras:hover {
     background-color: #1976D2;
     border-color: #1976D2;
 }
 
 #btnToggleMapeo:pressed,
 #btnToggleFiltros:pressed,
-#btnToggleFormulas:pressed {
+#btnToggleFormulas:pressed,
+#btnToggleDetectarCabeceras:pressed {
     background-color: #0D47A1;
 }
 
 /* Estado activo (panel abierto) */
 #btnToggleMapeo[activo="true"],
 #btnToggleFiltros[activo="true"],
-#btnToggleFormulas[activo="true"] {
+#btnToggleFormulas[activo="true"],
+#btnToggleDetectarCabeceras[activo="true"] {
     background-color: #1976D2;
     border-color: #1976D2;
 }
 
 #btnToggleMapeo[activo="true"]:hover,
 #btnToggleFiltros[activo="true"]:hover,
-#btnToggleFormulas[activo="true"]:hover {
+#btnToggleFormulas[activo="true"]:hover,
+#btnToggleDetectarCabeceras[activo="true"]:hover {
     background-color: #1565C0;
     border-color: #1565C0;
 }

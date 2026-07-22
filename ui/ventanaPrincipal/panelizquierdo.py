@@ -10,9 +10,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 import os
-import pandas as pd
 from logica.cargador_csv import CargadorCSV
 from logica.config_db import listar_secciones_archivo
+from logica.lector_csv import leer_csv_rapido
 
 
 class PanelIzquierdo(QFrame):
@@ -319,7 +319,7 @@ class PanelIzquierdo(QFrame):
         if secciones and ruta_archivo:
             df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
         elif ruta_archivo:
-            df = pd.read_csv(ruta_archivo, sep=None, engine="python")
+            df, _ = leer_csv_rapido(ruta_archivo)
 
         self.archivo_actual["df"] = df
         self.archivos_cargados[nombre_archivo]["df"] = df

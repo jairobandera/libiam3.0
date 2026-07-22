@@ -11,6 +11,7 @@ from ui.ventanaPrincipal.areaCentralGraficas import AreaCentralGraficas
 from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
 from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
 from ui.ventanaPrincipal.barraBotones import BarraBotones
+from logica import app_info
 
 
 class VentanaPrincipal(QWidget):
@@ -19,7 +20,7 @@ class VentanaPrincipal(QWidget):
         super().__init__()
 
         self.db_session = db_session
-        self.setWindowTitle("LIBiAM 3.0")
+        self.setWindowTitle(app_info.NOMBRE)
         self.resize(1600, 900)
 
         self.init_ui()
@@ -80,4 +81,33 @@ class VentanaPrincipal(QWidget):
 
         self.subcabecera.rangoManualSolicitado.connect(
             self.area_central.seleccionar_rango_manual
+        )
+
+        self.panel_derecho.filtros.filtroSolicitado.connect(
+            self.area_central.aplicar_filtro
+        )
+        self.panel_derecho.filtros.restaurarSolicitado.connect(
+            self.area_central.restaurar_datos_originales
+        )
+        self.area_central.filtroEstadoCambiado.connect(
+            self.panel_derecho.filtros.actualizar_estado
+        )
+        self.area_central.senalesDisponiblesCambiaron.connect(
+            self.panel_derecho.filtros.cargar_senales
+        )
+
+        self.area_central.rangosCambiados.connect(
+            self.panel_derecho.formulas.cargar_rangos
+        )
+        self.area_central.rangoRechazado.connect(
+            self.panel_derecho.formulas.mostrar_error_rango
+        )
+        self.area_central.rangoAjustado.connect(
+            self.panel_derecho.formulas.mostrar_aviso_rango
+        )
+        self.panel_derecho.formulas.eliminarRangosSolicitado.connect(
+            self.area_central.eliminar_rangos
+        )
+        self.panel_derecho.formulas.limpiarRangosSolicitado.connect(
+            self.area_central.limpiar_rangos
         )

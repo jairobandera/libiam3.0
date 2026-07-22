@@ -372,8 +372,8 @@ class DetectarCabeceras(QFrame):
     def abrir_editor_csv(self):
         print(f"[DEBUG] abrir_editor_csv: df_actual={'si' if self.df_actual is not None else 'no'}, ruta={self.ruta_archivo_actual}")
         if self.df_actual is not None and self.ruta_archivo_actual:
-            import pandas as pd
-            df_raw = pd.read_csv(self.ruta_archivo_actual, sep=None, engine="python", header=None)
+            from logica.lector_csv import leer_csv_crudo
+            df_raw = leer_csv_crudo(self.ruta_archivo_actual)
             from ui.ventanaPrincipal.panelDerecho.ventanaEditorCSV import VentanaEditorCSV
             editor = VentanaEditorCSV(df_raw, self.db_session, self.ruta_archivo_actual, self)
             editor.aliasesGuardados.connect(self._on_aliases_guardados)

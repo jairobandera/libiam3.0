@@ -1,21 +1,56 @@
+import math
+import re
+
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
-    QDialog,
     QFrame,
+    QInputDialog,
     QLabel,
-    QPushButton,
+    QMessageBox,
     QScrollArea,
     QStackedWidget,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
+from logica.filtros_senales import (
+    ErrorConfiguracionFiltro,
+    aplicar_butterworth,
+)
+from logica.rangos import GestorRangos, RangoSuperpuestoError
+
+
+class EjeDecimal(pg.AxisItem):
+    """Eje sin factores como ``×1e-06``; muestra el valor decimal real."""
+
+    def tickStrings(self, values, scale, spacing):
+        if self.logMode:
+            return self.logTickStrings(values, scale, spacing)
+
+        paso = abs(float(spacing) * float(scale))
+        if not math.isfinite(paso) or paso <= 0:
+            decimales = 6
+        else:
+            decimales = max(0, min(12, math.ceil(-math.log10(paso))))
+
+        limite_cero = 0.5 * (10 ** -decimales) if decimales else 0.5
+        textos = []
+        for valor in values:
+            escalado = float(valor) * float(scale)
+            if abs(escalado) < limite_cero:
+                escalado = 0.0
+            textos.append(f"{escalado:.{decimales}f}")
+        return textos
+
+
 class ViewBoxZoom(pg.ViewBox):
-    """ViewBox con zoom horizontal centrado en la posicion del cursor."""
+    """ViewBox con zoom horizontal centrado en la posición del cursor."""
 
     def wheelEvent(self, ev, axis=None):
         delta = ev.delta() if hasattr(ev, "delta") else ev.angleDelta().y()
@@ -26,63 +61,105 @@ class ViewBoxZoom(pg.ViewBox):
 
 
 class GraficaSenal(pg.PlotWidget):
-    rangoSeleccionado = Signal(object, str, object, object, float, float)
+    """Gráfica que propone rangos enteros; el área central los valida."""
 
-    #Deja el objeto listo para trabajar, inicializando todos los atributos que se necesitará mas adelante.
-    def __init__(self, nombre_senal, parent=None):
-        super().__init__(parent=parent, viewBox=ViewBoxZoom())
+    rangoPropuesto = Signal(object, int, int)
+
+    def __init__(
+        self,
+        nombre_senal,
+        unidad=None,
+        etiqueta_x="Frame",
+        columna=None,
+        parent=None,
+    ):
+        eje_izquierdo = EjeDecimal(orientation="left")
+        eje_izquierdo.enableAutoSIPrefix(False)
+        super().__init__(
+            parent=parent,
+            viewBox=ViewBoxZoom(),
+            axisItems={"left": eje_izquierdo},
+        )
         self.nombre_senal = nombre_senal
+        self.columna = columna
+        self.unidad = unidad
         self.x = None
         self.y = None
+        self.y_original = None
+        self.y_filtrada = None
         self.modo_seleccion_rango = False
         self.x_inicio = None
         self.linea_inicio = None
         self.linea_preview = None
         self.region_preview = None
-        self.region_rango = None
-        
-        # Configuración inicial de la gráfica (como el tamaño, color de fondo, titulo, etc)
+        self.regiones_rangos = {}
+
         self.setMinimumHeight(210)
         self.setBackground("#1E1E1E")
         self.setTitle(nombre_senal, color="#FFFFFF", size="11pt")
-        self.setLabel("bottom", "Frame")
-        self.setLabel("left", nombre_senal)
+        self.setLabel("bottom", etiqueta_x)
+        self.setLabel("left", unidad or "Sin unidad")
+        self.getAxis("left").enableAutoSIPrefix(False)
+        self.getAxis("left").setStyle(
+            tickTextWidth=82,
+            autoExpandTextSpace=True,
+            autoReduceTextSpace=False,
+        )
+        self.getAxis("left").setWidth(100)
         self.showGrid(x=True, y=True, alpha=0.25)
         self.setMouseEnabled(x=True, y=False)
         self.getViewBox().setMenuEnabled(False)
+        self.plotItem.setDownsampling(auto=True, mode="peak")
+        self.plotItem.setClipToView(True)
+        self.leyenda = self.addLegend(offset=(-10, 10))
+        self.leyenda.hide()
         self.scene().sigMouseClicked.connect(self._manejar_click)
         self.scene().sigMouseMoved.connect(self._manejar_mouse_movido)
 
-    #Responsable de cargar los datos de la señal en la gráfica, limpiando cualquier selección previa y ajustando el rango de visualización.
-    def set_datos(self, x, y):
+    def set_datos(self, x, y_original, y_filtrada=None):
         self.x = np.asarray(x, dtype=float)
-        self.y = np.asarray(y, dtype=float)
-        self.clear() #Deja grafica limpia
-        #Reinicia variables.
-        self.linea_inicio = None 
+        self.y_original = np.asarray(y_original, dtype=float)
+        self.y_filtrada = (
+            np.asarray(y_filtrada, dtype=float)
+            if y_filtrada is not None
+            else None
+        )
+        self.y = self.y_filtrada if self.y_filtrada is not None else self.y_original
+        self.clear()
+        self.linea_inicio = None
         self.linea_preview = None
         self.region_preview = None
-        self.region_rango = None
+        self.regiones_rangos = {}
         self.x_inicio = None
 
-        self.plot(self.x, self.y, pen=pg.mkPen("#4FC3F7", width=1.5))
+        color_original = pg.mkColor("#4FC3F7")
+        if self.y_filtrada is not None:
+            color_original.setAlpha(165)
+        self.plot(
+            self.x,
+            self.y_original,
+            pen=pg.mkPen(color_original, width=1.2),
+            name="Original",
+        )
+        if self.y_filtrada is not None:
+            self.plot(
+                self.x,
+                self.y_filtrada,
+                pen=pg.mkPen("#FFB300", width=2.2),
+                name="Filtrada",
+            )
+            self.leyenda.show()
+        else:
+            self.leyenda.hide()
         self.enableAutoRange(axis="y", enable=True)
         self.autoRange()
-    
-    #Permite activar o desactivar el modo de selección de rango en la gráfica. Cuando está activo, el cursor cambia a una cruz y se pueden seleccionar rangos de datos haciendo clic y arrastrando. 
-    #Si se desactiva, se limpia cualquier selección previa y se restablece el cursor a su estado normal.
+
     def set_modo_seleccion_rango(self, activo):
         self.modo_seleccion_rango = activo
         self.setCursor(Qt.CrossCursor if activo else Qt.ArrowCursor)
         if not activo:
-            self.x_inicio = None
-            self._limpiar_preview()
-            if self.linea_inicio is not None:
-                self.removeItem(self.linea_inicio)
-                self.linea_inicio = None
+            self._cancelar_propuesta()
 
-    #Maneja el movimiento del mouse sobre la gráfica cuando el modo de selección de rango está activo. 
-    #Si se ha iniciado una selección (es decir, si x_inicio no es None), calcula la posición actual del mouse en el eje x y actualiza la vista previa del rango seleccionado.
     def _manejar_mouse_movido(self, posicion):
         if not self.modo_seleccion_rango or self.x_inicio is None:
             return
@@ -96,21 +173,18 @@ class GraficaSenal(pg.PlotWidget):
         x_fin = max(self.x_inicio, x_actual)
         self._mostrar_preview(x_inicio, x_fin, x_actual)
 
-    #Maneja los clics del mouse sobre la gráfica cuando el modo de selección de rango está activo.
     def _manejar_click(self, event):
         if not self.modo_seleccion_rango or event.button() != Qt.LeftButton:
             return
-        
+
         view_box = self.plotItem.vb
         if not view_box.sceneBoundingRect().contains(event.scenePos()):
             return
-
-        x_click = self._normalizar_x_click(float(view_box.mapSceneToView(event.scenePos()).x()))
         if self.x is None or len(self.x) == 0:
             return
 
+        x_click = self._normalizar_x_click(float(view_box.mapSceneToView(event.scenePos()).x()))
         if self.x_inicio is None:
-            self._limpiar_rango()
             self.x_inicio = x_click
             self.linea_inicio = pg.InfiniteLine(
                 pos=x_click,
@@ -122,62 +196,35 @@ class GraficaSenal(pg.PlotWidget):
             event.accept()
             return
 
-        x_fin = x_click
-        x_inicio = min(self.x_inicio, x_fin)
-        x_fin = max(self.x_inicio, x_fin)
-        self.x_inicio = None
-        self._limpiar_preview()
-
-        if x_inicio == x_fin:
-            event.accept()
-            return
-
-        self._mostrar_rango(x_inicio, x_fin)
-        self.rangoSeleccionado.emit(self, self.nombre_senal, self.x, self.y, x_inicio, x_fin)
+        x_inicio, x_fin = self.x_inicio, x_click
+        self._cancelar_propuesta()
+        if x_inicio != x_fin:
+            self.rangoPropuesto.emit(self, x_inicio, x_fin)
         event.accept()
 
-    #Verifica que el valor X para que nunca salga de los limites de la señal.
+    @staticmethod
+    def _redondear_entero(valor):
+        # round() usa redondeo bancario para .5; aquí se necesita el entero
+        # más cercano de forma intuitiva para seleccionar frames.
+        return int(math.floor(valor + 0.5)) if valor >= 0 else int(math.ceil(valor - 0.5))
+
     def _normalizar_x_click(self, x_click):
         x_finito = self.x[np.isfinite(self.x)] if self.x is not None else np.array([])
         if len(x_finito) == 0:
-            return x_click
+            return self._redondear_entero(x_click)
 
-        x_min = float(np.min(x_finito))
-        if x_click < x_min:
-            return x_min
+        x_min = self._redondear_entero(float(np.min(x_finito)))
+        x_max = self._redondear_entero(float(np.max(x_finito)))
+        return max(x_min, min(x_max, self._redondear_entero(x_click)))
 
-        x_max = float(np.max(x_finito))
-        if x_click > x_max:
-            return x_max
-
-        return x_click
-
-    #Dibuja el rango definitivo seleccionado por el usuario sobre la gráfica
-    #Dibuja la region transparente, dibuja las dos lineas verticales de los extremos, agrega esa region a la grafica.
-    def _mostrar_rango(self, x_inicio, x_fin):
-        self._limpiar_rango()
-        self.region_rango = pg.LinearRegionItem(
-            values=[x_inicio, x_fin],
-            movable=False,
-            brush=(25, 118, 210, 90),
-        )
-        self.region_rango.setZValue(-10)
-        for linea in self.region_rango.lines:
-            linea.setPen(pg.mkPen("#FFB74D", width=2))
-        self.addItem(self.region_rango)
-
-    #Muestra y actualiza la vista previa de la selección de rango mientras el usuario mueve el mouse después del primer clic. 
-    #Dibuja una región semitransparente y una línea vertical punteada que sigue la posición actual del cursor.
     def _mostrar_preview(self, x_inicio, x_fin, x_actual):
         if self.region_preview is None:
             self.region_preview = pg.LinearRegionItem(
-                values=[x_inicio, x_fin],
-                movable=False,
-                brush=(25, 118, 210, 45),
+                values=[x_inicio, x_fin], movable=False, brush=(255, 183, 77, 45)
             )
             self.region_preview.setZValue(-20)
             for linea in self.region_preview.lines:
-                linea.setPen(pg.mkPen("#64B5F6", width=1))
+                linea.setPen(pg.mkPen("#FFB74D", width=1))
             self.addItem(self.region_preview)
         else:
             self.region_preview.setRegion([x_inicio, x_fin])
@@ -187,14 +234,17 @@ class GraficaSenal(pg.PlotWidget):
                 pos=x_actual,
                 angle=90,
                 movable=False,
-                pen=pg.mkPen("#64B5F6", width=1.5, style=Qt.DashLine),
+                pen=pg.mkPen("#FFB74D", width=1.5, style=Qt.DashLine),
             )
             self.addItem(self.linea_preview)
         else:
             self.linea_preview.setPos(x_actual)
 
-    #Elimina de la gráfica todos los elementos temporales que se utilizan para mostrar la vista previa de una selección de rango.
-    def _limpiar_preview(self):
+    def _cancelar_propuesta(self):
+        self.x_inicio = None
+        if self.linea_inicio is not None:
+            self.removeItem(self.linea_inicio)
+            self.linea_inicio = None
         if self.linea_preview is not None:
             self.removeItem(self.linea_preview)
             self.linea_preview = None
@@ -202,167 +252,69 @@ class GraficaSenal(pg.PlotWidget):
             self.removeItem(self.region_preview)
             self.region_preview = None
 
-    #El método limpiar_seleccion_rango() elimina cualquier selección de rango existente y deja la gráfica preparada para comenzar una nueva selección desde cero.
-    def limpiar_seleccion_rango(self):
-        self.x_inicio = None
-        self._limpiar_preview()
-        self._limpiar_rango()
+    def mostrar_rangos(self, rangos):
+        for region in self.regiones_rangos.values():
+            self.removeItem(region)
+        self.regiones_rangos = {}
 
-    #El método _limpiar_rango() elimina todos los elementos gráficos asociados a un rango seleccionado
-    def _limpiar_rango(self):
-        if self.linea_inicio is not None:
-            self.removeItem(self.linea_inicio)
-            self.linea_inicio = None
-        self._limpiar_preview()
-        if self.region_rango is not None:
-            self.removeItem(self.region_rango)
-            self.region_rango = None
+        for rango in rangos:
+            color = pg.mkColor(rango.color)
+            color_brush = pg.mkColor(rango.color)
+            color_brush.setAlpha(55)
+            region = pg.LinearRegionItem(
+                values=[rango.desde, rango.hasta], movable=False, brush=color_brush
+            )
+            region.setZValue(-10)
+            for linea in region.lines:
+                linea.setPen(pg.mkPen(color, width=2))
+            self.addItem(region)
+            self.regiones_rangos[rango.numero] = region
 
-    #NUEVO!
-    #El método seleccionar_rango() permite seleccionar un rango de forma manual.
-    def seleccionar_rango(self, x_inicio, x_fin):
+    def proponer_rango(self, x_inicio, x_fin):
         if self.x is None or len(self.x) == 0:
             return
+        x_inicio = self._normalizar_x_click(float(x_inicio))
+        x_fin = self._normalizar_x_click(float(x_fin))
+        if x_inicio != x_fin:
+            self.rangoPropuesto.emit(self, x_inicio, x_fin)
 
-        x_inicio = self._normalizar_x_click(x_inicio)
-        x_fin = self._normalizar_x_click(x_fin)
 
-        if x_inicio > x_fin:
-            x_inicio, x_fin = x_fin, x_inicio
-
-        if x_inicio == x_fin:
-            return
-
-        self._mostrar_rango(x_inicio, x_fin)
-
-        self.rangoSeleccionado.emit(self,self.nombre_senal,self.x,self.y,x_inicio,x_fin)
-#-----------------------------------------------------------------------------------------------
-
-#-----------------------------------------------------------------------------------------------
-class VentanaRangoModal(QDialog):
-    #Construir la ventana modal que muestra una visualización ampliada del rango seleccionado, preparando todos sus componentes (título, gráfica y botón de cierre).
-    def __init__(self, nombre_senal, x, y, x_inicio, x_fin, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(f"{nombre_senal} | Frame {x_inicio:.2f} - {x_fin:.2f}")
-        self.setModal(True)
-        self.resize(900, 520)
-
-        layout = QVBoxLayout()
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
-
-        titulo = QLabel(f"{nombre_senal} | Rango seleccionado")
-        titulo.setStyleSheet("font-size: 15px; font-weight: 600; color: #FFFFFF;")
-        layout.addWidget(titulo)
-
-        x_rango, y_rango = self._recortar_rango(x, y, x_inicio, x_fin)
-
-        grafica = pg.PlotWidget(viewBox=ViewBoxZoom())
-        grafica.setBackground("#1E1E1E")
-        grafica.setLabel("bottom", "Frame")
-        grafica.setLabel("left", nombre_senal)
-        grafica.showGrid(x=True, y=True, alpha=0.25)
-        grafica.setMouseEnabled(x=True, y=False)
-        grafica.getViewBox().setMenuEnabled(False)
-
-        if len(x_rango) > 0:
-            grafica.plot(x_rango, y_rango, pen=pg.mkPen("#4FC3F7", width=1.8))
-            grafica.autoRange()
-            grafica.setXRange(x_inicio, x_fin, padding=0)
-            self._marcar_limites(grafica, x_inicio, x_fin)
-
-        layout.addWidget(grafica, 1)
-
-        btn_cerrar = QPushButton("Cerrar")
-        btn_cerrar.setCursor(Qt.PointingHandCursor)
-        btn_cerrar.clicked.connect(self.accept)
-        layout.addWidget(btn_cerrar)
-
-        self.setLayout(layout)
-
-    #Extraer los datos correspondientes al rango seleccionado, eliminando valores inválidos y asegurando que el rango incluya correctamente sus límites.
-    def _recortar_rango(self, x, y, x_inicio, x_fin):
-        mascara_finita = np.isfinite(x) & np.isfinite(y)
-        x = x[mascara_finita]
-        y = y[mascara_finita]
-
-        if len(x) == 0:
-            return x, y
-
-        orden = np.argsort(x)
-        x = x[orden]
-        y = y[orden]
-
-        mascara = (x >= x_inicio) & (x <= x_fin)
-        x_rango = x[mascara]
-        y_rango = y[mascara]
-
-        puntos_x = []
-        puntos_y = []
-        x_min = float(x[0])
-        x_max = float(x[-1])
-
-        if x_min <= x_inicio <= x_max and not np.any(np.isclose(x_rango, x_inicio)):
-            puntos_x.append(x_inicio)
-            puntos_y.append(float(np.interp(x_inicio, x, y))) #IMPORTANTE: Interpolación lineal para obtener el valor de y correspondiente a x_inicio
-
-        puntos_x.extend(x_rango.tolist())
-        puntos_y.extend(y_rango.tolist())
-
-        if x_min <= x_fin <= x_max and not np.any(np.isclose(x_rango, x_fin)):
-            puntos_x.append(x_fin)
-            puntos_y.append(float(np.interp(x_fin, x, y))) #IMPORTANTE: Interpolación lineal para obtener el valor de y correspondiente a x_fin
-
-        if not puntos_x:
-            return np.array([]), np.array([])
-
-        orden_rango = np.argsort(puntos_x)
-        return np.asarray(puntos_x)[orden_rango], np.asarray(puntos_y)[orden_rango]
-
-    #Dibuja sobre la gráfica del diálogo una región sombreada que indica visualmente cuáles son los límites del rango seleccionado.
-    def _marcar_limites(self, grafica, x_inicio, x_fin):
-        region = pg.LinearRegionItem(
-            values=[x_inicio, x_fin],
-            movable=False,
-            brush=(25, 118, 210, 45),
-        )
-        region.setZValue(-10)
-        for linea in region.lines:
-            linea.setPen(pg.mkPen("#FFB74D", width=2))
-        grafica.addItem(region)
-#------------------------------------------------------------------------------------------------------
-
-#------------------------------------------------------------------------------------------------------
 class AreaCentralGraficas(QFrame):
-    # Su responsabilidad es inicializar todos los atributos que la clase necesitará para administrar las gráficas y luego llamar al método que construye la interfaz gráfica.
+    rangosCambiados = Signal(object)
+    rangoRechazado = Signal(str)
+    rangoAjustado = Signal(str)
+    filtroEstadoCambiado = Signal(bool, str)
+    senalesDisponiblesCambiaron = Signal(object)
+
     def __init__(self):
         super().__init__()
         self.setObjectName("areaCentralGraficas")
         self.nombre_archivo = None
         self.df_original = None
+        self.df_grafica_original = None
         self.df_grafica = None
         self.columna_x = None
         self.mapeo_actual = None
         self.modo_seleccion_rango = False
         self.graficas = []
         self.graficas_por_columna = {}
-
+        self.unidades = {}
+        self.frecuencia_grafica = None
+        self.gestores_rangos = {}
+        self.columnas_filtradas = set()
         self._init_ui()
 
-    # Su responsabilidad es construir la interfaz gráfica del área central, creando todos los componentes visuales (layouts, placeholder, área de scroll y contenedor de gráficas) y organizándolos dentro del QFrame.
     def _init_ui(self):
         layout = QVBoxLayout()
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(0)
 
         self.stack = QStackedWidget()
-
         self.placeholder = QWidget()
         layout_placeholder = QVBoxLayout()
         layout_placeholder.setContentsMargins(0, 0, 0, 0)
         layout_placeholder.addStretch()
-
-        self.lbl_estado = QLabel("Carga un archivo .CSV para visualizar las senales")
+        self.lbl_estado = QLabel("Carga un archivo .CSV para visualizar las señales")
         self.lbl_estado.setObjectName("estadoGraficas")
         self.lbl_estado.setAlignment(Qt.AlignCenter)
         self.lbl_estado.setStyleSheet("color: #B0B0B0; font-size: 15px;")
@@ -374,7 +326,6 @@ class AreaCentralGraficas(QFrame):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
         self.contenedor = QWidget()
         self.layout_graficas = QVBoxLayout()
         self.layout_graficas.setContentsMargins(0, 0, 0, 0)
@@ -384,114 +335,114 @@ class AreaCentralGraficas(QFrame):
 
         self.stack.addWidget(self.placeholder)
         self.stack.addWidget(self.scroll)
-
         layout.addWidget(self.stack, 1)
         self.setLayout(layout)
-      
-    # Recibir el DataFrame cargado desde el CSV, prepararlo para ser graficado, obtener el mapeo de las señales, crear las gráficas y actualizar cuáles deben mostrarse al usuario
+
     def cargar_dataframe(self, nombre_archivo, df, info):
-        print(f"[DEBUG] cargar_dataframe: archivo={nombre_archivo}")
         self.nombre_archivo = nombre_archivo
         self.df_original = df
-        self.df_grafica, self.columna_x = self._preparar_dataframe(df)
+        preparado, self.columna_x = self._preparar_dataframe(df)
+        self.df_grafica_original = preparado.copy()
+        self.df_grafica = preparado.copy()
         self.mapeo_actual = self._mapeo_desde_info(info)
-        print(f"[DEBUG] cargar_dataframe: columna_x={self.columna_x}")
-        print(f"[DEBUG] cargar_dataframe: mapeo_actual={self.mapeo_actual}")
+        self.unidades = dict((info or {}).get("unidades", df.attrs.get("unidades", {})))
+        self.frecuencia_grafica = (info or {}).get("frecuencia_grafica")
+        self.gestores_rangos = {}
+        self.columnas_filtradas = set()
+        self.rangosCambiados.emit([])
         self._crear_graficas()
         self._actualizar_visibilidad()
 
-    # Guardar el nuevo mapeo de señales y actualizar la visibilidad de las gráficas ya existentes.
     def actualizar_mapeo(self, mapeo):
-        print(f"[DEBUG] actualizar_mapeo: recibido mapeo={mapeo}")
         self.mapeo_actual = mapeo
-        if self.df_grafica is not None:
-            print("[DEBUG] actualizar_mapeo: llamando a _actualizar_visibilidad")
-            self._actualizar_visibilidad()
-        else:
-            print("[DEBUG] actualizar_mapeo: df_grafica es None, no se grafica")
+        columnas_nuevas = set(self._obtener_todas_columnas_mapeo())
+        if not columnas_nuevas.issubset(self.graficas_por_columna):
+            self._crear_graficas()
+        self._actualizar_visibilidad()
 
-    # Activar o desactivar el modo de selección de rango en todas las gráficas que existen en el área central.
     def set_modo_seleccion_rango(self, activo):
         self.modo_seleccion_rango = activo
         for grafica in self.graficas:
             grafica.set_modo_seleccion_rango(activo)
 
-    # Es responsable de limpiar, adaptar y preparar el DataFrame para que pueda ser representado correctamente en las gráficas, determinando además cuál será la columna utilizada como eje X.
-    def _preparar_dataframe(self, df):
-        # Convertir columnas a numerico, forzando errores a NaN
-        # Esto maneja cabeceras intercaladas que pandas lee como datos
-        df = df.copy()
-        for col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+    @staticmethod
+    def _normalizar_identificador(valor):
+        return re.sub(r"[^a-z0-9]+", "", str(valor).lower())
 
-        frame_col = self._buscar_columna(df, "frame")
-        subframe_col = self._buscar_columna(df, "subframe", "sub_frame") #Si cambia el nombre del encabezado? Si hay dos encabezados?
+    def _preparar_dataframe(self, df):
+        df_preparado = df.copy()
+        df_preparado.attrs.update(df.attrs)
+        for columna in df_preparado.columns:
+            if not pd.api.types.is_numeric_dtype(df_preparado[columna]):
+                df_preparado[columna] = pd.to_numeric(df_preparado[columna], errors="coerce")
+
+        frame_col = self._buscar_columna(df_preparado, "frame")
+        subframe_col = self._buscar_columna(df_preparado, "subframe", "sub frame", "sub_frame")
 
         if frame_col and subframe_col:
-            columnas_numericas = list(df.select_dtypes(include=[np.number]).columns)
-            columnas_promedio = [col for col in columnas_numericas if col != frame_col]
+            columnas_numericas = list(df_preparado.select_dtypes(include=[np.number]).columns)
+            columnas_promedio = [
+                columna
+                for columna in columnas_numericas
+                if columna not in {frame_col, subframe_col}
+            ]
             if columnas_promedio:
-                return df.groupby(frame_col, as_index=False)[columnas_promedio].mean(), frame_col #ACA PROMEDIO!!
+                agrupado = df_preparado.groupby(frame_col, as_index=False, sort=False)[
+                    columnas_promedio
+                ].mean()
+                agrupado.attrs.update(df.attrs)
+                return agrupado, frame_col
 
         if frame_col:
-            return df.copy(), frame_col
+            return df_preparado, frame_col
 
-        tiempo_col = self._buscar_columna(df, "time", "time_s", "tiempo")
+        tiempo_col = self._buscar_columna(df_preparado, "time", "time_s", "tiempo")
         if tiempo_col:
-            return df.copy(), tiempo_col
+            return df_preparado, tiempo_col
 
-        df_indice = df.copy()
-        df_indice["Indice"] = np.arange(len(df_indice), dtype=float)
-        return df_indice, "Indice"
+        df_preparado["Indice"] = np.arange(len(df_preparado), dtype=float)
+        return df_preparado, "Indice"
 
-    # Busca dentro del DataFrame una columna cuyo nombre coincida con alguno de los nombres recibidos como parámetro
     def _buscar_columna(self, df, *nombres):
-        nombres_normalizados = {nombre.lower().strip() for nombre in nombres}
+        nombres_normalizados = {self._normalizar_identificador(nombre) for nombre in nombres}
         for columna in df.columns:
-            if str(columna).lower().strip() in nombres_normalizados:
+            if self._normalizar_identificador(columna) in nombres_normalizados:
                 return columna
         return None
 
-    # Transforma la información recibida desde el detector de cabeceras al formato que utiliza el sistema para gestionar qué señales existen y si deben mostrarse o no.
     def _mapeo_desde_info(self, info):
         deteccion = info.get("deteccion", {}) if info else {}
         mapeo = deteccion.get("mapeo", {})
         resultado = {}
-
         for tipo, ejes in mapeo.items():
             if not isinstance(ejes, dict):
                 continue
-            resultado[tipo] = {}
-            for eje, columna in ejes.items():
-                resultado[tipo][eje] = {"columna": columna, "activo": True}
-
+            resultado[tipo] = {
+                eje: {"columna": columna, "activo": True}
+                for eje, columna in ejes.items()
+            }
         return resultado
 
-    # Genera la lista de todas las columnas válidas del mapeo que pueden utilizarse para crear las gráficas.
     def _obtener_todas_columnas_mapeo(self):
-        """Retorna todas las columnas del mapeo, sin importar si estan activas o no."""
         columnas = []
         if self.mapeo_actual:
             for ejes in self.mapeo_actual.values():
                 if not isinstance(ejes, dict):
                     continue
                 for config in ejes.values():
-                    if isinstance(config, dict):
-                        columna = config.get("columna")
-                    else:
-                        columna = config
+                    columna = config.get("columna") if isinstance(config, dict) else config
                     if columna and columna not in columnas:
                         columnas.append(columna)
-
-        columnas_validas = [
-            col for col in columnas
-            if col in self.df_grafica.columns and col != self.columna_x and self._es_numerica(col)
+        return [
+            columna
+            for columna in columnas
+            if self.df_grafica is not None
+            and columna in self.df_grafica.columns
+            and columna != self.columna_x
+            and self._es_numerica(columna)
         ]
-        return columnas_validas
 
-    #Determina qué señales deben visualizarse actualmente según el estado del mapeo.
     def _obtener_columnas_a_graficar(self):
-        """Retorna solo las columnas marcadas como activas en el mapeo."""
         columnas = []
         if self.mapeo_actual:
             for ejes in self.mapeo_actual.values():
@@ -502,125 +453,344 @@ class AreaCentralGraficas(QFrame):
                         columna = config.get("columna")
                         activo = config.get("activo", True)
                     else:
-                        columna = config
-                        activo = True
+                        columna, activo = config, True
                     if activo and columna and columna not in columnas:
                         columnas.append(columna)
-
-            columnas_validas = [
-                col for col in columnas
-                if col in self.df_grafica.columns and col != self.columna_x and self._es_numerica(col)
+            return [
+                columna
+                for columna in columnas
+                if columna in self.df_grafica.columns
+                and columna != self.columna_x
+                and self._es_numerica(columna)
             ]
-            return columnas_validas
 
-        columnas_numericas = [
-            col for col in self.df_grafica.select_dtypes(include=[np.number]).columns
-            if col != self.columna_x and str(col).lower().strip() not in {"subframe", "sub_frame"}
+        return [
+            columna
+            for columna in self.df_grafica.select_dtypes(include=[np.number]).columns
+            if columna != self.columna_x
+            and self._normalizar_identificador(columna) != "subframe"
         ]
-        return columnas_numericas
 
-    #Verificar si una columna del DataFrame contiene datos numéricos.
     def _es_numerica(self, columna):
-        return np.issubdtype(self.df_grafica[columna].dtype, np.number)
+        return pd.api.types.is_numeric_dtype(self.df_grafica[columna])
 
-    #Generar las etiquetas (títulos) que se mostrarán en las gráficas a partir del mapeo actual, asociando cada columna con su tipo de señal y eje correspondiente.
     def _obtener_labels_columnas(self):
-        """Retorna un dict columna -> 'Tipo Eje' basado en el mapeo actual."""
         labels = {}
         if self.mapeo_actual:
             for tipo, ejes in self.mapeo_actual.items():
                 if not isinstance(ejes, dict):
                     continue
                 for eje, config in ejes.items():
-                    if isinstance(config, dict):
-                        columna = config.get("columna")
-                    else:
-                        columna = config
-                    if columna:
-                        eje_str = eje.replace("eje_", "").upper() if eje != "ninguno" else ""
-                        if eje_str:
-                            labels[columna] = f"{tipo} {eje_str}"
-                        else:
-                            labels[columna] = tipo
+                    columna = config.get("columna") if isinstance(config, dict) else config
+                    if not columna:
+                        continue
+                    eje_str = eje.replace("eje_", "").upper() if eje != "ninguno" else ""
+                    labels[columna] = f"{tipo} {eje_str}".strip()
         return labels
 
-    #Este método es el encargado de crear todas las gráficas a partir del DataFrame preparado. Se ejecuta cuando se carga un archivo CSV y genera una instancia de GraficaSenal para cada columna que deba visualizarse.
     def _crear_graficas(self):
-        """Crea todas las grficas una sola vez al cargar el CSV."""
-        print("[DEBUG] _crear_graficas: iniciando creacion")
         self._limpiar_graficas()
-
         if self.df_grafica is None or self.columna_x not in self.df_grafica.columns:
-            print("[DEBUG] _crear_graficas: df_grafica None o columna_x no encontrada")
             self._mostrar_placeholder("No hay datos disponibles para graficar.")
             return
 
-        columnas = self._obtener_todas_columnas_mapeo()
-        print(f"[DEBUG] _crear_graficas: columnas del mapeo={columnas}")
+        columnas = self._obtener_todas_columnas_mapeo() or self._obtener_columnas_a_graficar()
         if not columnas:
-            columnas = [
-                col for col in self.df_grafica.select_dtypes(include=[np.number]).columns
-                if col != self.columna_x and str(col).lower().strip() not in {"subframe", "sub_frame"}
-            ]
-            print(f"[DEBUG] _crear_graficas: fallback columnas numericas={columnas}")
-
-        if not columnas:
-            print("[DEBUG] _crear_graficas: no hay columnas, mostrando placeholder")
-            self._mostrar_placeholder("No se encontraron columnas numericas para graficar.")
+            self._mostrar_placeholder("No se encontraron columnas numéricas para graficar.")
             return
 
         self.stack.setCurrentWidget(self.scroll)
-
         labels = self._obtener_labels_columnas()
-        x = self.df_grafica[self.columna_x].to_numpy(dtype=float)
+        x = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
         for columna in columnas:
-            y = self.df_grafica[columna].to_numpy(dtype=float)
-            mascara = np.isfinite(x) & np.isfinite(y)
+            y_original = self.df_grafica_original[columna].to_numpy(dtype=float)
+            mascara = np.isfinite(x) & np.isfinite(y_original)
             if not mascara.any():
-                print(f"[DEBUG] _crear_graficas: columna {columna} sin datos validos, saltando")
                 continue
+
+            y_filtrada = None
+            if columna in self.columnas_filtradas:
+                y_filtrada = self.df_grafica[columna].to_numpy(dtype=float)
 
             label = labels.get(columna)
             titulo = f"{label} - {columna}" if label else str(columna)
-            grafica = GraficaSenal(titulo)
-            grafica.set_datos(x[mascara], y[mascara])
+            grafica = GraficaSenal(
+                titulo,
+                unidad=self.unidades.get(columna),
+                etiqueta_x=str(self.columna_x),
+                columna=columna,
+            )
+            grafica.set_datos(
+                x[mascara],
+                y_original[mascara],
+                y_filtrada[mascara] if y_filtrada is not None else None,
+            )
             grafica.set_modo_seleccion_rango(self.modo_seleccion_rango)
-            grafica.rangoSeleccionado.connect(self._abrir_rango_modal)
+            grafica.rangoPropuesto.connect(self._registrar_rango)
+            gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+            grafica.mostrar_rangos(gestor.listar())
             self.layout_graficas.addWidget(grafica)
             self.graficas.append(grafica)
             self.graficas_por_columna[columna] = grafica
-            print(f"[DEBUG] _crear_graficas: grafica creada para columna={columna}, titulo={titulo}")
 
         self.layout_graficas.addStretch()
-        print(f"[DEBUG] _crear_graficas: fin. graficas_por_columna={list(self.graficas_por_columna.keys())}")
 
-    # El método _actualizar_visibilidad() recorre todas las gráficas que ya fueron creadas y decide si cada una debe mostrarse o esconderse de acuerdo con las columnas que están activas en el mapeo.
     def _actualizar_visibilidad(self):
-        """Muestra u oculta las graficas existentes segun el mapeo actual."""
-        print(f"[DEBUG] _actualizar_visibilidad: graficas_por_columna={list(self.graficas_por_columna.keys())}")
         if not self.graficas_por_columna:
-            print("[DEBUG] _actualizar_visibilidad: no hay graficas creadas, saliendo")
+            self.senalesDisponiblesCambiaron.emit([])
             return
-
         columnas_activas = set(self._obtener_columnas_a_graficar())
-        print(f"[DEBUG] _actualizar_visibilidad: columnas_activas={columnas_activas}")
-
         hay_visibles = False
         for columna, grafica in self.graficas_por_columna.items():
             visible = columna in columnas_activas
-            print(f"[DEBUG] _actualizar_visibilidad: columna={columna}, visible={visible}")
             grafica.setVisible(visible)
-            if visible:
-                hay_visibles = True
-
+            hay_visibles = hay_visibles or visible
         if hay_visibles:
-            print("[DEBUG] _actualizar_visibilidad: hay graficas visibles, mostrando scroll")
             self.stack.setCurrentWidget(self.scroll)
         else:
-            print("[DEBUG] _actualizar_visibilidad: ninguna visible, mostrando placeholder")
             self._mostrar_placeholder("No hay columnas activas para graficar.")
+        self._emitir_senales_disponibles(columnas_activas)
 
-    #Eliminar todas las gráficas existentes y limpiar las estructuras de datos asociadas, dejando el área de gráficos preparada para cargar un nuevo conjunto de señales.
+    def _emitir_senales_disponibles(self, columnas_activas=None):
+        if columnas_activas is None:
+            columnas_activas = set(self._obtener_columnas_a_graficar())
+        self.senalesDisponiblesCambiaron.emit(
+            [
+                {
+                    "columna": columna,
+                    "nombre": grafica.nombre_senal,
+                    "visible": columna in columnas_activas,
+                }
+                for columna, grafica in self.graficas_por_columna.items()
+            ]
+        )
+
+    def _actualizar_datos_graficas(self):
+        if self.df_grafica is None:
+            return
+        x = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
+        for columna, grafica in self.graficas_por_columna.items():
+            y_original = self.df_grafica_original[columna].to_numpy(dtype=float)
+            mascara = np.isfinite(x) & np.isfinite(y_original)
+            y_filtrada = (
+                self.df_grafica[columna].to_numpy(dtype=float)
+                if columna in self.columnas_filtradas
+                else None
+            )
+            grafica.set_datos(
+                x[mascara],
+                y_original[mascara],
+                y_filtrada[mascara] if y_filtrada is not None else None,
+            )
+            grafica.set_modo_seleccion_rango(self.modo_seleccion_rango)
+            gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+            grafica.mostrar_rangos(gestor.listar())
+
+    def _registrar_rango(self, grafica, desde, hasta):
+        columna = grafica.columna
+        gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+        nombre, ok = QInputDialog.getText(
+            grafica,
+            "Nombre del rango",
+            f"Nombre para el rango {desde}–{hasta} (opcional):",
+        )
+        if not ok:
+            return
+        nombre = nombre.strip()
+        if nombre:
+            existentes = [r.nombre for r in gestor.listar() if r.nombre]
+            if nombre in existentes:
+                QMessageBox.warning(
+                    grafica,
+                    "Nombre repetido",
+                    f"Ya existe un rango con el nombre «{nombre}».",
+                )
+                return
+        try:
+            rango, fue_ajustado = gestor.agregar_ajustado(desde, hasta, nombre)
+        except (RangoSuperpuestoError, ValueError) as exc:
+            mensaje = f"{grafica.nombre_senal}: {exc}"
+            self.rangoRechazado.emit(mensaje)
+            QToolTip.showText(QCursor.pos(), mensaje, grafica)
+            return
+
+        grafica.mostrar_rangos(gestor.listar())
+        self._emitir_rangos()
+        if fue_ajustado:
+            mensaje = (
+                f"El rango se ajustó automáticamente a "
+                f"{rango.desde}–{rango.hasta} para no superponerse."
+            )
+            self.rangoAjustado.emit(mensaje)
+            QToolTip.showText(QCursor.pos(), mensaje, grafica)
+
+    @staticmethod
+    def _id_rango(columna, numero):
+        return f"{columna}::{int(numero)}"
+
+    def _rangos_para_panel(self):
+        resultado = []
+        for columna, grafica in self.graficas_por_columna.items():
+            gestor = self.gestores_rangos.get(columna)
+            if gestor is None:
+                continue
+            for rango in gestor.listar():
+                datos = rango.como_dict()
+                datos.update(
+                    {
+                        "id": self._id_rango(columna, rango.numero),
+                        "columna": columna,
+                        "senal": grafica.nombre_senal,
+                        "fuente": (
+                            "filtrada"
+                            if columna in self.columnas_filtradas
+                            else "original"
+                        ),
+                    }
+                )
+                resultado.append(datos)
+        return resultado
+
+    def _emitir_rangos(self):
+        self.rangosCambiados.emit(self._rangos_para_panel())
+
+    def eliminar_rangos(self, identificadores):
+        por_columna = {}
+        for identificador in identificadores or []:
+            if isinstance(identificador, str) and "::" in identificador:
+                columna, numero = identificador.rsplit("::", 1)
+                por_columna.setdefault(columna, []).append(int(numero))
+            elif len(self.gestores_rangos) == 1:
+                columna = next(iter(self.gestores_rangos))
+                por_columna.setdefault(columna, []).append(int(identificador))
+
+        for columna, numeros in por_columna.items():
+            gestor = self.gestores_rangos.get(columna)
+            if gestor is None:
+                continue
+            gestor.eliminar(numeros)
+            grafica = self.graficas_por_columna.get(columna)
+            if grafica is not None:
+                grafica.mostrar_rangos(gestor.listar())
+        self._emitir_rangos()
+
+    def limpiar_rangos(self):
+        for columna, gestor in self.gestores_rangos.items():
+            gestor.limpiar()
+            grafica = self.graficas_por_columna.get(columna)
+            if grafica is not None:
+                grafica.mostrar_rangos([])
+        self.rangosCambiados.emit([])
+
+    def seleccionar_rango_manual(self, categoria, senal, desde, hasta):
+        grafica = None
+        if self.mapeo_actual and categoria in self.mapeo_actual:
+            eje = f"eje_{senal[-1].lower()}" if senal else ""
+            config = self.mapeo_actual[categoria].get(eje)
+            if isinstance(config, dict):
+                grafica = self.graficas_por_columna.get(config.get("columna"))
+        if grafica is None and self.graficas:
+            grafica = self.graficas[0]
+        if grafica is not None:
+            grafica.proponer_rango(desde, hasta)
+
+    def obtener_datos_rango(self, columna, desde, hasta):
+        """Devuelve los datos activos para cálculos (filtrados si están visibles)."""
+        if self.df_grafica is None or columna not in self.df_grafica.columns:
+            return pd.DataFrame()
+        desde, hasta = sorted((int(desde), int(hasta)))
+        eje_x = self.df_grafica[self.columna_x]
+        mascara = eje_x.between(desde, hasta, inclusive="both")
+        return self.df_grafica.loc[mascara, [self.columna_x, columna]].copy()
+
+    def aplicar_filtro(self, configuracion):
+        if self.df_grafica_original is None:
+            self.filtroEstadoCambiado.emit(False, "Primero cargá un archivo CSV.")
+            return
+
+        frecuencia = float(configuracion.get("frecuencia_muestreo") or 0)
+        tipo = str(configuracion.get("tipo") or "lowpass")
+        frecuencias_corte = configuracion.get(
+            "frecuencias_corte",
+            configuracion.get("frecuencia_corte"),
+        )
+        orden = int(configuracion.get("orden") or 4)
+        columnas_solicitadas = configuracion.get("columnas")
+        if columnas_solicitadas is None:
+            columnas_solicitadas = self._obtener_columnas_a_graficar()
+        columnas = [
+            columna
+            for columna in columnas_solicitadas
+            if columna in self.graficas_por_columna
+            and columna in self.df_grafica_original.columns
+        ]
+        resultado = (
+            self.df_grafica.copy()
+            if self.df_grafica is not None
+            else self.df_grafica_original.copy()
+        )
+
+        if not columnas:
+            self.filtroEstadoCambiado.emit(False, "No hay señales seleccionadas para filtrar.")
+            return
+
+        try:
+            for columna in columnas:
+                resultado[columna] = aplicar_butterworth(
+                    self.df_grafica_original[columna].to_numpy(dtype=float),
+                    frecuencia,
+                    tipo,
+                    frecuencias_corte,
+                    orden,
+                )
+        except ErrorConfiguracionFiltro as exc:
+            self.filtroEstadoCambiado.emit(False, str(exc))
+            return
+
+        self.df_grafica = resultado
+        self.columnas_filtradas.update(columnas)
+        self._actualizar_datos_graficas()
+        self._emitir_rangos()
+        descripcion = self._describir_filtro(tipo, frecuencias_corte)
+        cantidad = len(columnas)
+        destino = "una señal" if cantidad == 1 else f"{cantidad} señales"
+        self.filtroEstadoCambiado.emit(
+            True,
+            f"Se aplicó {descripcion} a {destino}. La curva original sigue visible.",
+        )
+
+    @staticmethod
+    def _describir_filtro(tipo, frecuencias_corte):
+        if tipo == "highpass":
+            return f"un filtro por encima de {float(frecuencias_corte):g} Hz"
+        if tipo == "bandpass":
+            inferior, superior = frecuencias_corte
+            return f"un filtro entre {float(inferior):g} y {float(superior):g} Hz"
+        return f"un filtro por debajo de {float(frecuencias_corte):g} Hz"
+
+    def restaurar_datos_originales(self, columnas=None):
+        if self.df_grafica_original is None:
+            self.filtroEstadoCambiado.emit(False, "No hay datos cargados.")
+            return
+
+        columnas_objetivo = set(columnas or self.columnas_filtradas)
+        columnas_a_restaurar = columnas_objetivo & self.columnas_filtradas
+        if not columnas_a_restaurar:
+            self.filtroEstadoCambiado.emit(
+                True,
+                "Las señales seleccionadas ya muestran únicamente los datos originales.",
+            )
+            return
+
+        for columna in columnas_a_restaurar:
+            self.df_grafica[columna] = self.df_grafica_original[columna]
+        self.columnas_filtradas.difference_update(columnas_a_restaurar)
+        self._actualizar_datos_graficas()
+        self._emitir_rangos()
+        cantidad = len(columnas_a_restaurar)
+        destino = "la señal seleccionada" if cantidad == 1 else f"{cantidad} señales"
+        self.filtroEstadoCambiado.emit(True, f"Se quitó el filtro de {destino}.")
+
     def _limpiar_graficas(self):
         self.graficas = []
         self.graficas_por_columna = {}
@@ -631,40 +801,6 @@ class AreaCentralGraficas(QFrame):
                 widget.setParent(None)
                 widget.deleteLater()
 
-    #Cambia el texto del mensaje informativo y muestra la pantalla de espera (placeholder) en lugar del área donde normalmente se muestran las gráficas.
     def _mostrar_placeholder(self, texto):
         self.lbl_estado.setText(texto)
         self.stack.setCurrentWidget(self.placeholder)
-
-    #Crea y muestra la ventana emergente que contiene la gráfica ampliada del rango seleccionado. Cuando el usuario cierra esa ventana, elimina la selección realizada sobre la gráfica original.
-    def _abrir_rango_modal(self, grafica_senal, nombre_senal, x, y, x_inicio, x_fin):
-        ventana = VentanaRangoModal(nombre_senal, x, y, x_inicio, x_fin, self)
-        ventana.exec()
-        grafica_senal.limpiar_seleccion_rango()
-
-    #NUEVOOO
-    #Busca la gráfica correspondiente a una señal determinada y le indica que seleccione un rango utilizando los valores ingresados manualmente.
-    def seleccionar_rango_manual(self, categoria, senal, desde, hasta):
-
-        if self.mapeo_actual is None:
-            return
-
-        if categoria not in self.mapeo_actual:
-            return
-
-        eje = f"eje_{senal[-1].lower()}"
-
-        config = self.mapeo_actual[categoria].get(eje)
-
-        if config is None:
-            return
-
-        columna = config["columna"]
-
-        grafica = self.graficas_por_columna.get(columna)
-
-        if grafica is None:
-            return
-
-        grafica.seleccionar_rango(desde, hasta)
-#---------------------------------------
