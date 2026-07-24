@@ -7,7 +7,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
+    QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 
@@ -46,6 +49,9 @@ class Filtros(QFrame):
         self.corte_unico.valueChanged.connect(self._actualizar_resumen)
         self.corte_inferior.valueChanged.connect(self._actualizar_resumen)
         self.corte_superior.valueChanged.connect(self._actualizar_resumen)
+        self.orden.valueChanged.connect(self._actualizar_resumen)
+        self.fs_control.valueChanged.connect(self._actualizar_limites_frecuencia)
+        self.fs_control.valueChanged.connect(self._actualizar_resumen)
         self.btn_aplicar.clicked.connect(self._solicitar_filtro)
         self.btn_restaurar.clicked.connect(self._solicitar_restauracion)
         self._actualizar_controles_tipo()
@@ -81,24 +87,28 @@ class Filtros(QFrame):
         seccion = QFrame()
         seccion.setObjectName("seccionFiltro")
         layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         titulo = QLabel("2. Definí qué conservar")
         titulo.setObjectName("tituloSeccionMapeo")
+        titulo.setContentsMargins(10, 10, 10, 4)
 
         self.tipo_filtro = QComboBox()
         self.tipo_filtro.setObjectName("cmbFiltro")
-        self.tipo_filtro.addItem("Menores al límite (pasa-bajos)", "lowpass")
-        self.tipo_filtro.addItem("Mayores al límite (pasa-altos)", "highpass")
-        self.tipo_filtro.addItem("Entre dos límites (pasa-banda)", "bandpass")
+        self.tipo_filtro.addItem("Pasa-bajos", "lowpass")
+        self.tipo_filtro.addItem("Pasa-altos", "highpass")
+        self.tipo_filtro.addItem("Pasa-banda", "bandpass")
+        self.tipo_filtro.addItem("Rechazo banda", "bandstop")
 
         self.corte_unico = self._crear_control_frecuencia(20.0)
         self.corte_inferior = self._crear_control_frecuencia(30.0)
         self.corte_superior = self._crear_control_frecuencia(450.0)
 
         formulario = QFormLayout()
-        formulario.setSpacing(8)
+        formulario.setSpacing(5)
+        formulario.setContentsMargins(8, 0, 8, 0)
+        formulario.setLabelAlignment(Qt.AlignLeft)
         formulario.addRow("Modo:", self.tipo_filtro)
 
         self.lbl_corte_unico = QLabel("Límite:")
@@ -108,13 +118,29 @@ class Filtros(QFrame):
         formulario.addRow(self.lbl_corte_inferior, self.corte_inferior)
         formulario.addRow(self.lbl_corte_superior, self.corte_superior)
 
+        self.lbl_orden = QLabel("Orden:")
+        self.orden = QSpinBox()
+        self.orden.setObjectName("spinFiltro")
+        self.orden.setRange(1, 10)
+        self.orden.setValue(4)
+        formulario.addRow(self.lbl_orden, self.orden)
+
+        self.lbl_fs = QLabel("Fs:")
+        self.fs_control = self._crear_control_frecuencia(2000.0)
+        self.fs_control.setDecimals(0)
+        self.fs_control.setSingleStep(100)
+        self.fs_control.setValue(2000)
+        formulario.addRow(self.lbl_fs, self.fs_control)
+
         self.lbl_frecuencia = QLabel("Cargá un archivo para habilitar el filtro.")
         self.lbl_frecuencia.setWordWrap(True)
         self.lbl_frecuencia.setObjectName("lblFrecuenciaFiltro")
+        self.lbl_frecuencia.setContentsMargins(10, 0, 10, 0)
 
         self.lbl_resumen = QLabel("")
         self.lbl_resumen.setWordWrap(True)
         self.lbl_resumen.setObjectName("resumenFiltro")
+        self.lbl_resumen.setContentsMargins(10, 0, 10, 0)
 
         aclaracion = QLabel(
             "El cambio no es un corte vertical perfecto: el filtro atenúa "
@@ -122,12 +148,21 @@ class Filtros(QFrame):
         )
         aclaracion.setWordWrap(True)
         aclaracion.setObjectName("lblDeteccion")
+        aclaracion.setContentsMargins(10, 0, 10, 10)
 
-        layout.addWidget(titulo)
-        layout.addLayout(formulario)
-        layout.addWidget(self.lbl_frecuencia)
-        layout.addWidget(self.lbl_resumen)
-        layout.addWidget(aclaracion)
+        contenedor = QWidget()
+        contenedor_layout = QVBoxLayout()
+        contenedor_layout.setContentsMargins(0, 0, 0, 0)
+        contenedor_layout.setSpacing(0)
+        contenedor_layout.addWidget(titulo)
+        contenedor_layout.addLayout(formulario)
+        contenedor_layout.addWidget(self.lbl_frecuencia)
+        contenedor_layout.addWidget(self.lbl_resumen)
+        contenedor_layout.addWidget(aclaracion)
+        contenedor_layout.addStretch()
+        contenedor.setLayout(contenedor_layout)
+
+        layout.addWidget(contenedor)
         seccion.setLayout(layout)
         return seccion
 
@@ -186,18 +221,14 @@ class Filtros(QFrame):
         self.info_actual = info or {}
         frecuencia_grafica = self.info_actual.get("frecuencia_grafica")
         if frecuencia_grafica:
-            self.frecuencia_detectada = float(frecuencia_grafica)
+            self.fs_control.blockSignals(True)
+            self.fs_control.setValue(float(frecuencia_grafica))
+            self.fs_control.blockSignals(False)
             self._actualizar_limites_frecuencia()
-            limite = self.frecuencia_detectada / 2
-            self.lbl_frecuencia.setText(
-                f"Frecuencia disponible: {self.frecuencia_detectada:g} Hz. "
-                f"Los límites deben ser menores que {limite:g} Hz."
-            )
         else:
-            self.frecuencia_detectada = None
             self.lbl_frecuencia.setText(
-                "El CSV no informa una frecuencia de muestreo, por lo que no "
-                "se puede calcular el filtro de forma segura."
+                "El CSV no informa una frecuencia de muestreo. "
+                "Ingresala manualmente."
             )
         self.lbl_estado.clear()
         self._actualizar_resumen()
@@ -224,11 +255,12 @@ class Filtros(QFrame):
         self.senal_objetivo.blockSignals(False)
         self._actualizar_resumen()
 
-    def _actualizar_limites_frecuencia(self):
-        if not self.frecuencia_detectada:
+    def _actualizar_limites_frecuencia(self, _valor=None):
+        fs = self.fs_control.value()
+        if fs <= 0:
             return
 
-        nyquist = self.frecuencia_detectada / 2
+        nyquist = fs / 2
         margen = max(0.01, nyquist * 0.000001)
         limite = max(0.02, nyquist - margen)
         for control in (self.corte_unico, self.corte_inferior, self.corte_superior):
@@ -245,8 +277,13 @@ class Filtros(QFrame):
         self.corte_inferior.setValue(inferior)
         self.corte_superior.setValue(min(limite, superior))
 
+        self.lbl_frecuencia.setText(
+            f"Fs: {fs:g} Hz · Nyquist: {nyquist:g} Hz · "
+            f"Límites &lt; {limite:g} Hz."
+        )
+
     def _actualizar_controles_tipo(self, _indice=None):
-        es_banda = self.tipo_filtro.currentData() == "bandpass"
+        es_banda = self.tipo_filtro.currentData() in ("bandpass", "bandstop")
         self.lbl_corte_unico.setVisible(not es_banda)
         self.corte_unico.setVisible(not es_banda)
         self.lbl_corte_inferior.setVisible(es_banda)
@@ -262,14 +299,15 @@ class Filtros(QFrame):
         return [senal["columna"] for senal in self.senales_disponibles]
 
     def _validar_configuracion(self):
-        if not self.frecuencia_detectada:
-            return False, "Falta la frecuencia de muestreo."
+        fs = self.fs_control.value()
+        if fs <= 0:
+            return False, "La frecuencia de muestreo debe ser mayor que cero."
         if not self._columnas_objetivo():
             return False, "No hay señales visibles para filtrar."
 
-        limite = self.frecuencia_detectada / 2
+        limite = fs / 2
         tipo = self.tipo_filtro.currentData()
-        if tipo == "bandpass":
+        if tipo in ("bandpass", "bandstop"):
             inferior = self.corte_inferior.value()
             superior = self.corte_superior.value()
             if inferior >= superior:
@@ -282,21 +320,28 @@ class Filtros(QFrame):
 
     def _actualizar_resumen(self, _valor=None):
         tipo = self.tipo_filtro.currentData()
+        orden = self.orden.value()
         if tipo == "lowpass":
             texto = (
                 "Se conservará principalmente el contenido por debajo de "
-                f"{self.corte_unico.value():g} Hz."
+                f"{self.corte_unico.value():g} Hz (orden {orden})."
             )
         elif tipo == "highpass":
             texto = (
                 "Se conservará principalmente el contenido por encima de "
-                f"{self.corte_unico.value():g} Hz."
+                f"{self.corte_unico.value():g} Hz (orden {orden})."
+            )
+        elif tipo == "bandstop":
+            texto = (
+                "Se eliminará principalmente el contenido entre "
+                f"{self.corte_inferior.value():g} y "
+                f"{self.corte_superior.value():g} Hz (orden {orden})."
             )
         else:
             texto = (
                 "Se conservará principalmente el contenido entre "
                 f"{self.corte_inferior.value():g} y "
-                f"{self.corte_superior.value():g} Hz."
+                f"{self.corte_superior.value():g} Hz (orden {orden})."
             )
 
         es_valida, error = self._validar_configuracion()
@@ -309,7 +354,7 @@ class Filtros(QFrame):
 
     def _crear_configuracion(self):
         tipo = self.tipo_filtro.currentData()
-        if tipo == "bandpass":
+        if tipo in ("bandpass", "bandstop"):
             frecuencias_corte = (
                 self.corte_inferior.value(),
                 self.corte_superior.value(),
@@ -318,10 +363,10 @@ class Filtros(QFrame):
             frecuencias_corte = self.corte_unico.value()
 
         return {
-            "frecuencia_muestreo": self.frecuencia_detectada,
+            "frecuencia_muestreo": self.fs_control.value(),
             "tipo": tipo,
             "frecuencias_corte": frecuencias_corte,
-            "orden": 4,
+            "orden": self.orden.value(),
             "columnas": self._columnas_objetivo(),
         }
 

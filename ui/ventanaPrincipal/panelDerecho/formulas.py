@@ -193,8 +193,9 @@ class Formulas(QFrame):
             numero = int(rango["numero"])
             identificador = self._id_rango(rango)
             fuente = " · datos filtrados" if rango.get("fuente") == "filtrada" else ""
+            nombre = rango.get("nombre") or f"Rango {numero}"
             checkbox = QCheckBox(
-                f"Rango {numero}: {int(rango['desde'])} – {int(rango['hasta'])}{fuente}"
+                f"{nombre}: {int(rango['desde'])} – {int(rango['hasta'])}{fuente}"
             )
             checkbox.setChecked(self.estados_seleccion.get(identificador, True))
             checkbox.setStyleSheet(

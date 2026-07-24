@@ -9,7 +9,9 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QFrame,
+    QInputDialog,
     QLabel,
+    QMessageBox,
     QScrollArea,
     QStackedWidget,
     QToolTip,
@@ -587,8 +589,25 @@ class AreaCentralGraficas(QFrame):
     def _registrar_rango(self, grafica, desde, hasta):
         columna = grafica.columna
         gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+        nombre, ok = QInputDialog.getText(
+            grafica,
+            "Nombre del rango",
+            f"Nombre para el rango {desde}–{hasta} (opcional):",
+        )
+        if not ok:
+            return
+        nombre = nombre.strip()
+        if nombre:
+            existentes = [r.nombre for r in gestor.listar() if r.nombre]
+            if nombre in existentes:
+                QMessageBox.warning(
+                    grafica,
+                    "Nombre repetido",
+                    f"Ya existe un rango con el nombre «{nombre}».",
+                )
+                return
         try:
-            rango, fue_ajustado = gestor.agregar_ajustado(desde, hasta)
+            rango, fue_ajustado = gestor.agregar_ajustado(desde, hasta, nombre)
         except (RangoSuperpuestoError, ValueError) as exc:
             mensaje = f"{grafica.nombre_senal}: {exc}"
             self.rangoRechazado.emit(mensaje)

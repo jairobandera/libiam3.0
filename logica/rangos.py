@@ -36,6 +36,7 @@ class RangoCalculo:
     desde: int
     hasta: int
     color: str
+    nombre: str = ""
 
     def como_dict(self) -> dict:
         return asdict(self)
@@ -49,7 +50,7 @@ class GestorRangos:
     def listar(self) -> list[RangoCalculo]:
         return list(self._rangos)
 
-    def agregar(self, desde: int, hasta: int) -> RangoCalculo:
+    def agregar(self, desde: int, hasta: int, nombre: str = "") -> RangoCalculo:
         desde, hasta = sorted((int(desde), int(hasta)))
         if desde == hasta:
             raise ValueError("El rango debe contener al menos dos frames.")
@@ -62,13 +63,14 @@ class GestorRangos:
 
         numero = self._siguiente_numero
         color = COLORES_RANGOS[(numero - 1) % len(COLORES_RANGOS)]
-        rango = RangoCalculo(numero=numero, desde=desde, hasta=hasta, color=color)
+        nombre = nombre.strip() or f"Rango {numero}"
+        rango = RangoCalculo(numero=numero, desde=desde, hasta=hasta, color=color, nombre=nombre)
         self._rangos.append(rango)
         self._siguiente_numero += 1
         return rango
 
     def agregar_ajustado(
-        self, inicio: int, fin: int
+        self, inicio: int, fin: int, nombre: str = ""
     ) -> tuple[RangoCalculo, bool]:
         """Agrega el tramo libre recorrido por el gesto del usuario.
 
@@ -130,7 +132,7 @@ class GestorRangos:
                 "en la dirección seleccionada."
             )
 
-        rango = self.agregar(inicio_ajustado, fin_ajustado)
+        rango = self.agregar(inicio_ajustado, fin_ajustado, nombre)
         fue_ajustado = (
             inicio_ajustado != inicio_original or fin_ajustado != fin_original
         )
