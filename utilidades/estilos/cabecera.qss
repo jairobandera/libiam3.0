@@ -39,3 +39,190 @@ QLabel {
 #toolbarButton:pressed {
     background-color: #E5E7EB;
 }
+
+/* --- Diálogos de la cabecera ---
+   Heredan el fondo oscuro global (#333337 de ventana.qss), igual que el resto
+   de la app: acá solo se ajustan los controles. --- */
+
+#dialogoCargarAyuda {
+    font-family: Segoe UI;
+    font-size: 12px;
+    color: #B0B0B0;
+}
+
+#dialogoCargarDetalle {
+    font-family: Segoe UI;
+    font-size: 11px;
+    color: #8A8A8A;
+}
+
+#listaProyectos {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    font-family: Segoe UI;
+    font-size: 13px;
+    color: #FFFFFF;
+    padding: 4px;
+    outline: none;
+}
+
+#listaProyectos::item {
+    padding: 8px 10px;
+    border-radius: 4px;
+}
+
+#listaProyectos::item:hover {
+    background-color: #333337;
+}
+
+#listaProyectos::item:selected {
+    background-color: #1976D2;
+    color: #FFFFFF;
+}
+
+#btnDialogoPrimario {
+    background-color: #1976D2;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-family: Segoe UI;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#btnDialogoPrimario:hover {
+    background-color: #1565C0;
+}
+
+#btnDialogoPrimario:pressed {
+    background-color: #0D47A1;
+}
+
+#btnDialogoPrimario:disabled {
+    background-color: #37373A;
+    color: #6D6D6D;
+}
+
+#btnDialogoSecundario {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-family: Segoe UI;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#btnDialogoSecundario:hover {
+    background-color: #333337;
+    border-color: #1976D2;
+}
+
+#btnDialogoSecundario:pressed {
+    background-color: #2D2D30;
+}
+
+#btnDialogoSecundario:disabled {
+    color: #6D6D6D;
+    border-color: #333337;
+}
+
+/* Acción destructiva: solo en el popup de limpieza */
+#btnDialogoPeligro {
+    background-color: #DC2626;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-family: Segoe UI;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#btnDialogoPeligro:hover {
+    background-color: #B91C1C;
+}
+
+#btnDialogoPeligro:pressed {
+    background-color: #991B1B;
+}
+
+#btnDialogoPeligro:disabled {
+    background-color: #37373A;
+    color: #6D6D6D;
+}
+
+/* --- Popup «Limpiar archivos guardados» --- */
+#dialogoLimpiarAyuda {
+    font-family: Segoe UI;
+    font-size: 12px;
+    color: #B0B0B0;
+}
+
+#dialogoLimpiarResumen {
+    font-family: Segoe UI;
+    font-size: 12px;
+    font-weight: 600;
+    color: #FFFFFF;
+}
+
+#separadorDialogo {
+    color: #3E3E42;
+    background-color: #3E3E42;
+    max-height: 1px;
+}
+
+#comboLimpiar {
+    background-color: #1E1E1E;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: Segoe UI;
+    font-size: 13px;
+    color: #FFFFFF;
+}
+
+#comboLimpiar:focus {
+    border-color: #1976D2;
+}
+
+#comboLimpiar::drop-down {
+    border: none;
+    width: 22px;
+}
+
+#comboLimpiar QAbstractItemView {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    color: #FFFFFF;
+    selection-background-color: #1976D2;
+    outline: none;
+}
+
+#listaLimpiar {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    font-family: Segoe UI;
+    font-size: 12px;
+    color: #FFFFFF;
+    padding: 4px;
+    outline: none;
+}
+
+#listaLimpiar::item {
+    padding: 6px 4px;
+    border-radius: 4px;
+}
+
+#listaLimpiar::item:hover {
+    background-color: #333337;
+}
+
+#listaLimpiar::item:selected {
+    background-color: #333337;
+    color: #FFFFFF;
+}

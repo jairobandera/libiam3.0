@@ -65,8 +65,13 @@ class PanelDerecho(QFrame):
         self.stacked_widget.addWidget(scroll_filtros)
 
         # Panel de formulas
+        scroll_formulas = QScrollArea()
+        scroll_formulas.setWidgetResizable(True)
+        scroll_formulas.setFrameShape(QFrame.NoFrame)
+        scroll_formulas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.formulas = Formulas()
-        self.stacked_widget.addWidget(self.formulas)
+        scroll_formulas.setWidget(self.formulas)
+        self.stacked_widget.addWidget(scroll_formulas)
 
         # Panel de detectar cabeceras
         scroll_detectar = QScrollArea()

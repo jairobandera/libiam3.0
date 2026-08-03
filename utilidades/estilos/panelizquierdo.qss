@@ -10,6 +10,99 @@
     border-bottom: 1px solid #3E3E42;
 }
 
+/* Seccion de variables */
+#seccionVariables {
+    background-color: #2D2D30;
+    border-bottom: 1px solid #3E3E42;
+}
+
+/* Etiqueta del nombre de la variable */
+#varLabel {
+    color: #FFFFFF;
+    font-family: Segoe UI;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* Campo de entrada de variables */
+#varInput {
+    background-color: #1E1E1E;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: Segoe UI;
+    font-size: 13px;
+}
+
+#varInput:focus {
+    border-color: #1976D2;
+}
+
+#varInput:read-only {
+    color: #B0B0B0;
+    background-color: #252526;
+}
+
+#varInput:disabled {
+    color: #6D6D6D;
+    background-color: #252526;
+    border-color: #333337;
+}
+
+/* Boton guardar variable */
+#btnGuardarVar {
+    background-color: #1976D2;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: Segoe UI;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#btnGuardarVar:hover {
+    background-color: #1565C0;
+}
+
+#btnGuardarVar:pressed {
+    background-color: #0D47A1;
+}
+
+#btnGuardarVar:disabled {
+    background-color: #37373A;
+    color: #6D6D6D;
+}
+
+/* Boton editar gravedad */
+#btnEditarVar {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: Segoe UI;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#btnEditarVar:hover {
+    background-color: #333337;
+    border-color: #1976D2;
+}
+
+#btnEditarVar:pressed {
+    background-color: #2D2D30;
+}
+
+/* Estado / feedback de las variables */
+#varEstado {
+    color: #8A8A8A;
+    font-family: Segoe UI;
+    font-size: 11px;
+}
+
 /* Seccion del arbol de archivos */
 #seccionArbol {
     background-color: #252526;

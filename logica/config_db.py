@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +28,15 @@ class SeccionArchivo(Base):
     fila_fin = Column(Integer, nullable=False)
     columnas = Column(String, nullable=False)
     activo = Column(Boolean, nullable=False, default=True)
+
+
+class VariableArchivo(Base):
+    __tablename__ = "variable_archivo"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ruta_archivo = Column(String, nullable=False)
+    nombre = Column(String, nullable=False)
+    valor = Column(Float, nullable=False)
 
 
 class CabeceraAsignada(Base):
@@ -225,6 +234,30 @@ def buscar_alias(session, nombre_columna):
         return {"tipo": mejor.tipo, "eje": mejor.eje}
 
     return None
+
+
+def guardar_variable_archivo(session, ruta_archivo, nombre, valor):
+    """Guarda (o actualiza) el valor de una variable numérica de un archivo."""
+    existente = session.query(VariableArchivo).filter_by(
+        ruta_archivo=ruta_archivo, nombre=nombre.lower()
+    ).first()
+    if existente:
+        existente.valor = float(valor)
+    else:
+        session.add(VariableArchivo(
+            ruta_archivo=ruta_archivo,
+            nombre=nombre.lower(),
+            valor=float(valor),
+        ))
+    session.commit()
+
+
+def obtener_variable_archivo(session, ruta_archivo, nombre):
+    """Retorna el valor guardado de una variable para un archivo, o None."""
+    variable = session.query(VariableArchivo).filter_by(
+        ruta_archivo=ruta_archivo, nombre=nombre.lower()
+    ).first()
+    return variable.valor if variable else None
 
 
 def guardar_seccion_archivo(session, ruta_archivo, fila_inicio, fila_fin, columnas):

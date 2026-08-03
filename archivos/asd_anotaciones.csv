@@ -1,0 +1,19 @@
+﻿tipo,senal,columna,numero,padre,desde,hasta,nombre,nota,fuente
+rango,Fuerza Y - Fy,Fy,1,,1,260,Rango 1,aca la persona esta haciendo caca,original
+subrango,Fuerza Y - Fy,Fy,1,Fy::1,8,25,Rango 1,,original
+subrango,Fuerza Y - Fy,Fy,2,Fy::1,21,41,Rango 2,,original
+subrango,Fuerza Y - Fy,Fy,3,Fy::1,42,68,Rango 3,,original
+rango,Fuerza Y - Fy,Fy,2,,261,419,Rango 2,,original
+rango,Fuerza Y - Fy,Fy,3,,344,657,Rango 3,,original
+rango,Fuerza Y - Fy,Fy,4,,595,856,Rango 4,,original
+rango,Fuerza Y - Fy,Fy,5,,710,1010,Rango 5,,original
+rango,Fuerza Y - Fy,Fy,6,,1151,1575,Rango 6,,original
+rango,Fuerza Y - Fy,Fy,7,,1668,2025,Rango 7,,original
+rango,Fuerza Y - Fy,Fy,8,,2246,2555,Rango 8,,original
+rango,Fuerza Y - Fy,Fy,9,,2427,2758,Rango 9,,original
+rango,Fuerza Z - Fz,Fz,1,,1668,2025,Rango 1,,original
+rango,Fuerza Z - Fz,Fz,2,,2246,2555,Rango 2,,original
+rango,Fuerza Z - Fz,Fz,3,,2427,2758,Rango 3,,original
+rango,Fuerza X - Fx,Fx,1,,1668,2025,Rango 1,,original
+rango,Fuerza X - Fx,Fx,2,,2246,2555,Rango 2,,original
+rango,Fuerza X - Fx,Fx,3,,2427,2758,Rango 3,,original

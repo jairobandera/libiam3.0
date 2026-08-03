@@ -1,17 +1,23 @@
+import os
+import shutil
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QHBoxLayout
+    QHBoxLayout,
+    QInputDialog,
+    QMessageBox,
 )
 
 from ui.cabecera.cabeceraPrincipal.cabecera import Cabecera
+from ui.cabecera.cabeceraPrincipal.cargarProyecto import CargarProyectoDialog
 from ui.cabecera.subCabecera.seleccionarRango import SeleccionarRango
 
 from ui.ventanaPrincipal.areaCentralGraficas import AreaCentralGraficas
 from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
 from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
 from ui.ventanaPrincipal.barraBotones import BarraBotones
-from logica import app_info
+from logica import app_info, proyecto
 
 
 class VentanaPrincipal(QWidget):
@@ -65,6 +71,24 @@ class VentanaPrincipal(QWidget):
 
         self.setLayout(layout)
 
+        # Conectar la configuración de la cabecera con el área de gráficas
+        self.cabecera.superposicionRangosCambiada.connect(
+            self.area_central.set_superposicion_habilitada
+        )
+        self.cabecera.noPreguntarSuperposicionCambiada.connect(
+            self.area_central.set_no_preguntar_superposicion
+        )
+        # El área central cambia la paleta activa; los paneles que muestran
+        # esos colores se repintan después.
+        self.cabecera.modoDaltonicoCambiado.connect(
+            self.area_central.set_modo_daltonico
+        )
+        self.cabecera.modoDaltonicoCambiado.connect(
+            lambda _activo: self.panel_derecho.filtros.aplicar_paleta()
+        )
+        self.cabecera.guardarSolicitado.connect(self._guardar_proyecto)
+        self.cabecera.cargarSolicitado.connect(self._cargar_proyecto)
+
         # Conectar panel izquierdo con panel derecho
         self.panel_izquierdo.panel_derecho_ref = self.panel_derecho
 
@@ -105,9 +129,150 @@ class VentanaPrincipal(QWidget):
         self.area_central.rangoAjustado.connect(
             self.panel_derecho.formulas.mostrar_aviso_rango
         )
+        self.panel_derecho.formulas.aplicarATodasCambiado.connect(
+            self.area_central.set_aplicar_corte_todas
+        )
+        self.panel_derecho.formulas.notaGuardada.connect(
+            self.area_central.set_nota
+        )
         self.panel_derecho.formulas.eliminarRangosSolicitado.connect(
             self.area_central.eliminar_rangos
         )
         self.panel_derecho.formulas.limpiarRangosSolicitado.connect(
             self.area_central.limpiar_rangos
         )
+
+        # --- Potencia ---
+        self.panel_derecho.formulas.formulaSolicitada.connect(
+            self.area_central.aplicar_potencia
+        )
+        self.panel_derecho.formulas.quitarFormulaSolicitado.connect(
+            self.area_central.quitar_formula
+        )
+        self.area_central.formulaEstadoCambiado.connect(
+            self.panel_derecho.formulas.actualizar_estado_formula
+        )
+        self.area_central.resultadosFormulaCambiaron.connect(
+            self.panel_derecho.formulas.mostrar_resultados_formula
+        )
+        self.panel_izquierdo.variablesCambiaron.connect(
+            self.area_central.set_variables_sujeto
+        )
+        self.panel_derecho.formulas.fuenteCalculoCambiada.connect(
+            self.area_central.set_fuente_calculo
+        )
+        self.area_central.fuenteDatosCambiada.connect(
+            self.panel_derecho.formulas.set_hay_filtro
+        )
+
+    def _guardar_proyecto(self):
+        """Guarda una copia del CSV y sus rangos/notas en la carpeta del proyecto.
+
+        Se dispara solo desde el botón «Guardar» de la cabecera. Pide el nombre
+        con un cuadro de diálogo propio (no el de Windows) y escribe todo dentro
+        de ``<proyecto>/archivos``.
+        """
+        archivo = getattr(self.panel_izquierdo, "archivo_actual", {}) or {}
+        ruta_original = archivo.get("ruta")
+        df_original = self.area_central.df_original
+        if not ruta_original and df_original is None:
+            QMessageBox.warning(
+                self, "Guardar", "Primero cargá un archivo CSV para poder guardar."
+            )
+            return
+
+        sugerido = ""
+        if archivo.get("nombre"):
+            sugerido = os.path.splitext(archivo["nombre"])[0]
+
+        nombre, ok = QInputDialog.getText(
+            self,
+            "Guardar proyecto",
+            "Nombre del archivo (se guardará como .csv):",
+            text=sugerido,
+        )
+        if not ok:
+            return
+
+        nombre = proyecto.sanear_nombre(nombre)
+        if not nombre:
+            QMessageBox.warning(self, "Guardar", "Ingresá un nombre de archivo válido.")
+            return
+
+        proyecto.asegurar_carpeta()
+        ruta_csv = proyecto.ruta_csv(nombre)
+        ruta_anotaciones = proyecto.ruta_anotaciones(nombre)
+
+        try:
+            # Copia del CSV original (o del DataFrame si no está la ruta).
+            if ruta_original and os.path.exists(ruta_original):
+                shutil.copyfile(ruta_original, ruta_csv)
+            else:
+                df_original.to_csv(ruta_csv, index=False)
+
+            # Rangos, sub-rangos y notas trabajados.
+            anotaciones = self.area_central.exportar_anotaciones()
+            proyecto.escribir_anotaciones(ruta_anotaciones, anotaciones)
+        except OSError as exc:
+            QMessageBox.critical(self, "Guardar", f"No se pudo guardar:\n{exc}")
+            return
+
+        QMessageBox.information(
+            self,
+            "Guardar",
+            "Proyecto guardado en la carpeta «archivos»:\n\n"
+            f"• {os.path.basename(ruta_csv)} (copia del CSV)\n"
+            f"• {os.path.basename(ruta_anotaciones)} "
+            f"({len(anotaciones)} rango(s)/sub-rango(s) con sus notas)",
+        )
+
+    def _cargar_proyecto(self):
+        """Abre un proyecto de la carpeta «archivos» con sus rangos y notas.
+
+        El diálogo solo lista esa carpeta: no se puede navegar a otra ruta,
+        porque un CSV de cualquier otro lado no tiene anotaciones asociadas.
+        La asociación es por nombre (``<nombre>.csv`` ↔
+        ``<nombre>_anotaciones.csv``); no se usa la base de datos.
+        """
+        dialogo = CargarProyectoDialog(self)
+        if dialogo.exec() != CargarProyectoDialog.Accepted:
+            return
+
+        datos = dialogo.proyecto_seleccionado()
+        if not datos:
+            return
+
+        if self.panel_izquierdo.cargar_archivo_desde_ruta(datos["ruta"]) is None:
+            return
+
+        # El CSV ya está graficado: recién ahora se pueden reponer los rangos,
+        # porque cargar_dataframe() limpia los gestores.
+        try:
+            anotaciones = proyecto.leer_anotaciones(datos["ruta_anotaciones"])
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Cargar", f"No se pudieron leer las anotaciones:\n{exc}"
+            )
+            return
+
+        if not anotaciones:
+            QMessageBox.information(
+                self,
+                "Cargar",
+                f"Se cargó «{datos['nombre']}».\n\n"
+                "El proyecto no tenía rangos ni notas guardados.",
+            )
+            return
+
+        restaurados, descartados = self.area_central.importar_anotaciones(anotaciones)
+
+        mensaje = (
+            f"Se cargó «{datos['nombre']}» con "
+            f"{restaurados} rango(s)/sub-rango(s) y sus notas."
+        )
+        if descartados:
+            mensaje += (
+                f"\n\nQuedaron {descartados} sin restaurar: su señal no está "
+                "graficada en este archivo. Revisá el mapeo de columnas."
+            )
+        QMessageBox.information(self, "Cargar", mensaje)

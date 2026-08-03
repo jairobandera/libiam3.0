@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from logica import paleta
+
 
 class Filtros(QFrame):
     filtroSolicitado = Signal(object)
@@ -175,12 +177,12 @@ class Filtros(QFrame):
 
         titulo = QLabel("3. Compará el resultado")
         titulo.setObjectName("tituloSeccionMapeo")
-        leyenda = QLabel(
-            '<span style="color:#4FC3F7; font-weight:600;">Azul: original</span>'
-            ' &nbsp;&nbsp; '
-            '<span style="color:#FFB300; font-weight:600;">Naranja: filtrada</span>'
-        )
-        leyenda.setObjectName("lblDeteccion")
+        # La leyenda toma los colores reales de las curvas, así sigue al modo
+        # daltónico en vez de nombrar un color que puede haber cambiado.
+        self.lbl_leyenda_colores = QLabel()
+        self.lbl_leyenda_colores.setObjectName("lblDeteccion")
+        self.aplicar_paleta()
+        leyenda = self.lbl_leyenda_colores
 
         botones = QHBoxLayout()
         self.btn_aplicar = QPushButton("Mostrar resultado")
@@ -382,7 +384,22 @@ class Filtros(QFrame):
         if columnas:
             self.restaurarSolicitado.emit(columnas)
 
+    def aplicar_paleta(self):
+        """Actualiza la leyenda de colores con la paleta activa."""
+        self.lbl_leyenda_colores.setText(
+            f'<span style="color:{paleta.color_senal_original()}; font-weight:600;">'
+            "▬ Original</span>"
+            " &nbsp;&nbsp; "
+            f'<span style="color:{paleta.color_senal_filtrada()}; font-weight:600;">'
+            "▬ Filtrada</span>"
+        )
+
     def actualizar_estado(self, exito, mensaje):
+        # El símbolo acompaña al color: en modo daltónico el verde y el rojo
+        # pueden verse casi iguales, el ✓/✕ no.
         color = "#66BB6A" if exito else "#EF5350"
+        if paleta.modo_daltonico_activo():
+            color = "#56B4E9" if exito else "#D55E00"
+        simbolo = "✓" if exito else "✕"
         self.lbl_estado.setStyleSheet(f"color: {color};")
-        self.lbl_estado.setText(mensaje)
+        self.lbl_estado.setText(f"{simbolo} {mensaje}" if mensaje else "")

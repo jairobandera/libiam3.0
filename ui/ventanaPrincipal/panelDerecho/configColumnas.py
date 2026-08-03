@@ -4,10 +4,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QComboBox,
-    QCheckBox,
     QPushButton,
-    QScrollArea,
-    QWidget,
+    QListWidget,
+    QListWidgetItem,
+    QAbstractItemView,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -107,20 +107,21 @@ class ConfigColumnas(QFrame):
         layout_tipo.addWidget(lbl_tipo)
         layout_tipo.addWidget(self.cmb_tipo_dato, 1)
 
-        # Contenedor de filas de mapeo
-        self.contenedor_filas = QWidget()
-        self.layout_filas = QVBoxLayout()
-        self.layout_filas.setContentsMargins(0, 0, 0, 0)
-        self.layout_filas.setSpacing(6)
-        self.contenedor_filas.setLayout(self.layout_filas)
+        # Ayuda sobre el reordenamiento por arrastre
+        lbl_ayuda_orden = QLabel("Arrastrá las variables para definir el orden de las gráficas.")
+        lbl_ayuda_orden.setObjectName("lblAyudaOrden")
+        lbl_ayuda_orden.setWordWrap(True)
 
-        # Scroll para las filas
-        self.scroll_filas = QScrollArea()
-        self.scroll_filas.setWidget(self.contenedor_filas)
-        self.scroll_filas.setWidgetResizable(True)
-        self.scroll_filas.setFrameShape(QFrame.NoFrame)
-        self.scroll_filas.setFixedHeight(500)
-        self.scroll_filas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Lista de filas de mapeo reordenable por drag & drop
+        self.lista_filas = QListWidget()
+        self.lista_filas.setObjectName("listaMapeo")
+        self.lista_filas.setDragDropMode(QAbstractItemView.InternalMove)
+        self.lista_filas.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.lista_filas.setFocusPolicy(Qt.NoFocus)
+        self.lista_filas.setFixedHeight(500)
+        self.lista_filas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.lista_filas.setSpacing(2)
+        self.lista_filas.itemChanged.connect(self._on_item_cambiado)
 
         # Boton de accion
         layout_botones = QHBoxLayout()
@@ -135,7 +136,8 @@ class ConfigColumnas(QFrame):
 
         layout.addWidget(lbl_titulo_mapeo)
         layout.addLayout(layout_tipo)
-        layout.addWidget(self.scroll_filas)
+        layout.addWidget(lbl_ayuda_orden)
+        layout.addWidget(self.lista_filas)
         layout.addLayout(layout_botones)
 
         frame.setLayout(layout)
@@ -200,12 +202,15 @@ class ConfigColumnas(QFrame):
         self.generar_filas_mapeo("Todos")
 
     def generar_filas_mapeo(self, tipo_filtro):
-        """Genera las filas de mapeo con checkbox y nombre."""
-        # Limpiar filas existentes
-        while self.layout_filas.count():
-            hijo = self.layout_filas.takeAt(0)
-            if hijo.widget():
-                hijo.widget().deleteLater()
+        """Genera las filas de mapeo como items nativos reordenables.
+
+        Se usan items nativos (texto + checkbox del propio item) en lugar de
+        widgets incrustados porque el reordenamiento por arrastre (InternalMove)
+        preserva los datos del item pero descartaría los widgets de setItemWidget.
+        """
+        # Evitar que la carga inicial de checkboxes dispare itemChanged.
+        self.lista_filas.blockSignals(True)
+        self.lista_filas.clear()
 
         tipos = self.mapeo.obtener_tipos_detectados()
 
@@ -213,24 +218,41 @@ class ConfigColumnas(QFrame):
             ejes = self.mapeo.obtener_ejes_para_tipo(tipo)
 
             for eje, columna_auto in ejes.items():
-                fila = self.crear_fila_mapeo(tipo, eje, columna_auto)
-                fila.tipo_dato = tipo
-                self.layout_filas.addWidget(fila)
+                nombre = self.formatear_nombre_eje(tipo, eje)
+                columna = columna_auto if columna_auto else "---"
+                item = QListWidgetItem(f"☰   {nombre}   ·   {columna}")
+                item.setData(Qt.UserRole, (tipo, eje))
+                # Arrastrable pero sin aceptar drop "dentro"; solo se reordena.
+                item.setFlags(
+                    (item.flags() | Qt.ItemIsDragEnabled | Qt.ItemIsUserCheckable)
+                    & ~Qt.ItemIsDropEnabled
+                )
+                item.setCheckState(
+                    Qt.Checked if self.mapeo.es_eje_activo(tipo, eje) else Qt.Unchecked
+                )
+                self.lista_filas.addItem(item)
+
+        self.lista_filas.blockSignals(False)
 
         # Aplicar filtro visual
         self._aplicar_filtro_visual(tipo_filtro)
 
+    def _on_item_cambiado(self, item):
+        """Refleja el cambio de checkbox del item en el modelo de mapeo."""
+        datos = item.data(Qt.UserRole)
+        if not datos:
+            return
+        tipo, eje = datos
+        activo = item.checkState() == Qt.Checked
+        self._toggle_eje(tipo, eje, activo)
+
     def _aplicar_filtro_visual(self, tipo_filtro):
         """Muestra u oculta filas segun el tipo seleccionado."""
-        for i in range(self.layout_filas.count()):
-            hijo = self.layout_filas.itemAt(i)
-            if hijo and hijo.widget():
-                frame = hijo.widget()
-                tipo_fila = getattr(frame, "tipo_dato", "")
-                if tipo_filtro == "Todos" or tipo_fila == tipo_filtro:
-                    frame.setVisible(True)
-                else:
-                    frame.setVisible(False)
+        for i in range(self.lista_filas.count()):
+            item = self.lista_filas.item(i)
+            datos = item.data(Qt.UserRole) or ("", "")
+            tipo_fila = datos[0]
+            item.setHidden(tipo_filtro != "Todos" and tipo_fila != tipo_filtro)
 
     def filtrar_por_tipo(self, tipo):
         """Filtra las filas de mapeo segun el tipo de dato seleccionado."""
@@ -240,39 +262,6 @@ class ConfigColumnas(QFrame):
         """Activa/desactiva un eje internamente. Solo se aplica al presionar 'Aplicar Mapeo'."""
         print(f"[DEBUG] _toggle_eje: tipo={tipo}, eje={eje}, activo={activo}")
         self.mapeo.toggle_eje(tipo, eje, activo)
-
-    def crear_fila_mapeo(self, tipo, eje, columna_auto):
-        """Crea una fila de mapeo con checkbox y label."""
-        frame = QFrame()
-        frame.setObjectName("filaMapeo")
-
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-
-        # Checkbox para activar/desactivar el eje
-        checkbox = QCheckBox()
-        checkbox.setObjectName(f"chk_{tipo}_{eje}")
-        checkbox.setChecked(self.mapeo.es_eje_activo(tipo, eje))
-        checkbox.toggled.connect(
-            lambda checked, t=tipo, e=eje: self._toggle_eje(t, e, checked)
-        )
-
-        # Label del eje
-        label_eje = QLabel(self.formatear_nombre_eje(tipo, eje))
-        label_eje.setObjectName("lblEje")
-        label_eje.setMinimumWidth(80)
-
-        # Label del nombre de columna
-        label_columna = QLabel(columna_auto if columna_auto else "---")
-        label_columna.setObjectName("lblColumnaCSV")
-
-        layout.addWidget(checkbox)
-        layout.addWidget(label_eje)
-        layout.addWidget(label_columna, 1)
-
-        frame.setLayout(layout)
-        return frame
 
     def formatear_nombre_eje(self, tipo, eje):
         """Formatea el nombre del eje para mostrarlo en la UI."""
@@ -294,6 +283,20 @@ class ConfigColumnas(QFrame):
         mapeo_completo = self.mapeo.obtener_mapeo_completo()
         tipo_filtro = self.cmb_tipo_dato.currentText()
         print(f"[DEBUG] aplicar_mapeo: tipo_filtro={tipo_filtro}")
+
+        # Asignar el orden segun la disposicion visual de las filas (drag & drop).
+        # Ese orden lo respeta el area central para ordenar las graficas.
+        orden = 0
+        for i in range(self.lista_filas.count()):
+            item = self.lista_filas.item(i)
+            datos = item.data(Qt.UserRole)
+            if not datos:
+                continue
+            tipo, eje = datos
+            ejes = mapeo_completo.get(tipo)
+            if isinstance(ejes, dict) and isinstance(ejes.get(eje), dict):
+                ejes[eje]["orden"] = orden
+                orden += 1
 
         if tipo_filtro != "Todos":
             mapeo_completo = {
