@@ -7,18 +7,29 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QIcon
 
 from logica import app_info
 from ui.cabecera.cabeceraPrincipal.acerca_de import AcercaDeDialog
+from ui.cabecera.cabeceraPrincipal.configuracion import ConfiguracionDialog
 
 
 class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior en si
 
+    superposicionRangosCambiada = Signal(bool)
+    noPreguntarSuperposicionCambiada = Signal(bool)
+    guardarSolicitado = Signal()
+    cargarSolicitado = Signal()
+    modoDaltonicoCambiado = Signal(bool)
+
     def __init__(self): #Constructor
         super().__init__()
         self.setObjectName("topHeader")
+        # Configuración de sesión (no se persiste).
+        self.superposicion_rangos = False
+        self.no_preguntar_superposicion = False
+        self.modo_daltonico = False
         self.init_ui()
 
     def init_ui(self):
@@ -69,7 +80,9 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         botones = [
             ("Inicio", "utilidades/icons/home.svg"),
             ("Guardar", "utilidades/icons/save.svg"),
+            ("Cargar", "utilidades/icons/load.svg"),
             ("Exportar", "utilidades/icons/export.svg"),
+            ("Configurar", "utilidades/icons/config.svg"),
             ("Acerca de", "utilidades/icons/help.svg"),
         ]
 
@@ -87,6 +100,16 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
 
             if texto == "Acerca de":
                 btn.clicked.connect(self._mostrar_acerca_de)
+            elif texto == "Configurar":
+                btn.clicked.connect(self._mostrar_configuracion)
+            elif texto == "Guardar":
+                btn.clicked.connect(self.guardarSolicitado.emit)
+            elif texto == "Cargar":
+                btn.setToolTip(
+                    "Abrir un proyecto guardado en la carpeta «archivos» "
+                    "con sus rangos y notas."
+                )
+                btn.clicked.connect(self.cargarSolicitado.emit)
 
             right_layout.addWidget(btn)
 
@@ -98,3 +121,29 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
 
     def _mostrar_acerca_de(self):
         AcercaDeDialog(self.window()).exec()
+
+    def _mostrar_configuracion(self):
+        dialogo = ConfiguracionDialog(
+            self.window(),
+            superposicion=self.superposicion_rangos,
+            no_preguntar=self.no_preguntar_superposicion,
+            modo_daltonico=self.modo_daltonico,
+        )
+        dialogo.superposicionCambiada.connect(self._on_superposicion_cambiada)
+        dialogo.noPreguntarSuperposicionCambiada.connect(
+            self._on_no_preguntar_cambiada
+        )
+        dialogo.modoDaltonicoCambiado.connect(self._on_modo_daltonico_cambiado)
+        dialogo.exec()
+
+    def _on_superposicion_cambiada(self, activo):
+        self.superposicion_rangos = bool(activo)
+        self.superposicionRangosCambiada.emit(self.superposicion_rangos)
+
+    def _on_no_preguntar_cambiada(self, activo):
+        self.no_preguntar_superposicion = bool(activo)
+        self.noPreguntarSuperposicionCambiada.emit(self.no_preguntar_superposicion)
+
+    def _on_modo_daltonico_cambiado(self, activo):
+        self.modo_daltonico = bool(activo)
+        self.modoDaltonicoCambiado.emit(self.modo_daltonico)

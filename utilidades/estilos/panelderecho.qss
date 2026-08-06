@@ -156,6 +156,209 @@
     border-left-color: #EF5350;
 }
 
+#btnToggleSubrangos {
+    background-color: transparent;
+    color: #B0B0B0;
+    border: none;
+    font-size: 12px;
+    padding: 0;
+    min-width: 16px;
+    max-width: 16px;
+}
+
+#btnToggleSubrangos:hover {
+    color: #FFFFFF;
+}
+
+/* Botón de selección activo (Todos / Pares / Impares / Ninguno).
+   La propiedad «activo» la fija Formulas._marcar_modo_seleccion(). */
+#btnResetMapeo[activo="true"] {
+    border: 1px solid #42A5F5;
+    color: #FFFFFF;
+    background-color: #2A3F55;
+}
+
+/* --- Recuadro de fórmulas dentro de «Rangos para cálculos» --- */
+#seccionFormulas {
+    background-color: #2D2D30;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+}
+
+#comboFormula {
+    background-color: #1E1E1E;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+#comboFormula:focus {
+    border-color: #1976D2;
+}
+
+#comboFormula:disabled {
+    color: #6D6D6D;
+    background-color: #252526;
+    border-color: #333337;
+}
+
+#comboFormula QAbstractItemView {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    color: #FFFFFF;
+    selection-background-color: #1976D2;
+    outline: none;
+}
+
+#lblExpresionFormula {
+    color: #B0B0B0;
+    font-size: 11px;
+}
+
+#lblEstadoFormula {
+    font-size: 11px;
+}
+
+#lblResultadosFormula {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    color: #E0E0E0;
+    font-size: 11px;
+    padding: 6px 8px;
+}
+
+/* --- Popup de fórmulas avanzadas --- */
+#tituloSeccionFormula {
+    color: #B0B0B0;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#lblVariablesFormula {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    color: #E0E0E0;
+    font-size: 11px;
+    padding: 6px 8px;
+}
+
+#lblValidacionFormula {
+    font-size: 11px;
+}
+
+#inputFormula {
+    background-color: #1E1E1E;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 7px 9px;
+    font-family: Consolas;
+    font-size: 13px;
+}
+
+#inputFormula:focus {
+    border-color: #1976D2;
+}
+
+#tablaResultados {
+    background-color: #252526;
+    alternate-background-color: #2D2D30;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    color: #FFFFFF;
+    font-size: 12px;
+    gridline-color: #3E3E42;
+    outline: none;
+}
+
+#tablaResultados::item {
+    padding: 4px 6px;
+}
+
+#tablaResultados::item:selected {
+    background-color: #1976D2;
+}
+
+#tablaResultados QHeaderView::section {
+    background-color: #2D2D30;
+    color: #B0B0B0;
+    border: none;
+    border-bottom: 1px solid #3E3E42;
+    padding: 6px;
+    font-weight: 600;
+}
+
+/* Botón de nota del rango (el color lo trae el propio icono SVG:
+   gris con "+" = sin nota, azul relleno = con nota) */
+#btnNotaRango {
+    background-color: transparent;
+    border: none;
+    border-radius: 3px;
+    padding: 1px;
+    min-width: 20px;
+    max-width: 22px;
+}
+
+#btnNotaRango:hover {
+    background-color: #37373A;
+}
+
+#btnNotaRango:pressed {
+    background-color: #2D2D30;
+}
+
+/* Botones para eliminar rangos y sub-rangos.
+   «✕» sola siempre borra el ítem de esa fila (rango o sub-rango); «↳✕»
+   solo aparece en un rango con sub-rangos y borra únicamente esos hijos. */
+#btnEliminarSubrango,
+#btnEliminarTodosSubrangos,
+#btnEliminarRango {
+    background-color: transparent;
+    color: #8A8A8A;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 2px;
+}
+
+#btnEliminarSubrango,
+#btnEliminarRango {
+    min-width: 20px;
+    max-width: 22px;
+}
+
+#btnEliminarTodosSubrangos {
+    min-width: 26px;
+    max-width: 30px;
+}
+
+#btnEliminarSubrango:hover,
+#btnEliminarTodosSubrangos:hover {
+    color: #EF5350;
+}
+
+/* El borrado de rango completo es más destructivo (se lleva los
+   sub-rangos): marco visible además del color en hover. */
+#btnEliminarRango {
+    border-radius: 3px;
+}
+
+#btnEliminarRango:hover {
+    color: #EF5350;
+    background-color: rgba(239, 83, 80, 0.15);
+}
+
+#chkRecorteTodas {
+    color: #DDE7EF;
+    font-family: Segoe UI;
+    font-size: 12px;
+    padding: 2px 0;
+}
+
 #tituloSeccionMapeo {
     font-family: Arial;
     font-size: 12px;
@@ -184,6 +387,44 @@
 #cmbTipoDato::drop-down {
     border: none;
     width: 20px;
+}
+
+/* Ayuda de reordenamiento */
+#lblAyudaOrden {
+    color: #808080;
+    font-family: Segoe UI;
+    font-size: 11px;
+    font-style: italic;
+}
+
+/* Lista de mapeo reordenable */
+#listaMapeo {
+    background-color: #1E1E1E;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    outline: none;
+    color: #FFFFFF;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#listaMapeo::item {
+    background-color: #2A2A2D;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 7px 6px;
+    margin: 1px;
+}
+
+#listaMapeo::item:hover {
+    background-color: #333337;
+    border-color: #1976D2;
+}
+
+#listaMapeo::item:selected {
+    background-color: #2A2A2D;
+    border-color: #1976D2;
+    color: #FFFFFF;
 }
 
 /* Filas de mapeo */
