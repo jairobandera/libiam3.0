@@ -7,7 +7,7 @@ from unittest import mock
 
 import numpy as np
 
-from logica import formulas, paleta, proyecto
+from logica import accesibilidad, formulas, paleta, proyecto
 from logica.filtros_senales import (
     ErrorConfiguracionFiltro,
     aplicar_butterworth,
@@ -256,19 +256,32 @@ class TestImpulso(unittest.TestCase):
 
         np.testing.assert_allclose(j, self.MASA * v, rtol=1e-9, atol=1e-9)
 
+    def _contexto(self):
+        return {
+            "masa": self.MASA,
+            "gravedad": self.G,
+            "frecuencia": self.FRECUENCIA,
+        }
+
+    def _detalles(self, fz, valores=None):
+        """Detalles del tramo, con la firma que consume ``computar_formula``."""
+        fz = np.asarray(fz, dtype=float)
+        if valores is None:
+            valores = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        return {
+            detalle["etiqueta"]: detalle["valor"]
+            for detalle in formulas.detalles_impulso(
+                valores, {"Fz": fz}, self._contexto()
+            )
+        }
+
     def test_separa_la_fase_de_frenado_de_la_de_propulsion(self):
         # Fuerza neta lineal de −700 N a +700 N en 1 s: cruza cero justo en una
         # muestra, así que las dos áreas son triángulos exactos de 175 N·s.
         t = np.linspace(0.0, 1.0, int(self.FRECUENCIA) + 1)
         fz = self.MASA * self.G + (1400.0 * t - 700.0)
 
-        valores = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
-        detalles = {
-            detalle["etiqueta"]: detalle["valor"]
-            for detalle in formulas.detalles_impulso(
-                valores, fz, self.MASA, self.G, self.FRECUENCIA
-            )
-        }
+        detalles = self._detalles(fz)
 
         self.assertAlmostEqual(detalles["propulsivo"], 175.0, places=6)
         self.assertAlmostEqual(detalles["frenado"], -175.0, places=6)
@@ -278,24 +291,45 @@ class TestImpulso(unittest.TestCase):
     def test_el_delta_de_velocidad_sale_del_impulso_neto(self):
         # 700 N·s sobre 70 kg son 10 m/s de cambio de velocidad.
         fz = np.full(int(self.FRECUENCIA) + 1, self.MASA * self.G * 2)
-        valores = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
-        detalles = {
-            detalle["etiqueta"]: detalle["valor"]
-            for detalle in formulas.detalles_impulso(
-                valores, fz, self.MASA, self.G, self.FRECUENCIA
-            )
-        }
-        self.assertAlmostEqual(detalles["Δ velocidad"], 10.0, places=6)
+        self.assertAlmostEqual(self._detalles(fz)["Δ velocidad"], 10.0, places=6)
 
     def test_las_unidades_acompanan_a_cada_valor(self):
         fz = np.full(20, self.MASA * self.G * 2)
-        valores = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
         detalles = formulas.detalles_impulso(
-            valores, fz, self.MASA, self.G, self.FRECUENCIA
+            formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA),
+            {"Fz": fz},
+            self._contexto(),
         )
         unidades = {d["etiqueta"]: d["unidad"] for d in detalles}
         self.assertEqual(unidades["impulso neto"], "N·s")
         self.assertEqual(unidades["Δ velocidad"], "m/s")
+
+    def test_el_neto_del_rango_resta_los_extremos_del_recorte(self):
+        # La integración arranca en el primer frame del registro, no en el
+        # rango. Con un impulso previo al tramo, tomar el último valor de la
+        # curva daría el acumulado desde el inicio del archivo en vez del neto
+        # del rango: por eso se restan los extremos.
+        n = 301
+        x = np.arange(n, dtype=float)
+        fz = np.full(n, self.MASA * self.G)
+        fz[0:101] += 700.0        # primer envión, antes del rango
+        fz[200:n] += 700.0        # segundo envión, dentro del rango
+
+        curva = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        acumulado_al_final = curva[-1]
+        neto_esperado = curva[-1] - curva[200]
+
+        resultados, _ = formulas.computar_formula(
+            "impulso", {"Fz": fz}, x, self._contexto(),
+            [{"id": "r1", "numero": 1, "desde": 200, "hasta": 300}],
+        )
+        detalles = {
+            d["etiqueta"]: d["valor"] for d in resultados[0]["detalles"]
+        }
+
+        self.assertAlmostEqual(detalles["impulso neto"], neto_esperado, places=9)
+        # Y no es el acumulado desde el frame 0, que es casi el doble.
+        self.assertLess(detalles["impulso neto"], acumulado_al_final * 0.75)
 
     def test_sin_masa_explica_que_falta(self):
         with self.assertRaises(formulas.ErrorFormula) as contexto:
@@ -313,25 +347,39 @@ class TestImpulso(unittest.TestCase):
 
 
 class TestRegistroFormulas(unittest.TestCase):
-    def test_cada_formula_trae_nombre_unidad_y_funcion(self):
-        for clave in (formulas.CLAVE_POTENCIA, formulas.CLAVE_IMPULSO):
-            datos = formulas.formula(clave)
-            self.assertTrue(datos["nombre"])
-            self.assertTrue(datos["unidad"])
-            self.assertTrue(callable(datos["calcular"]))
+    """El registro es lo único que hay que tocar para sumar una fórmula."""
 
-    def test_una_clave_desconocida_cae_en_potencia(self):
-        self.assertEqual(
-            formulas.formula("inexistente")["nombre"], formulas.NOMBRE_POTENCIA
-        )
+    def test_el_impulso_esta_registrado(self):
+        self.assertTrue(formulas.hay_formula("impulso"))
+        descripcion = formulas.descripcion_formula("impulso")
+        self.assertEqual(descripcion["nombre"], formulas.NOMBRE_IMPULSO)
+        self.assertEqual(descripcion["unidad"], formulas.UNIDAD_IMPULSO)
 
-    def test_la_funcion_del_registro_es_la_del_modulo(self):
-        fz = np.full(30, 1400.0)
-        calcular = formulas.formula(formulas.CLAVE_IMPULSO)["calcular"]
-        np.testing.assert_allclose(
-            calcular(fz, 70.0, 10.0, 100.0),
-            formulas.impulso(fz, 70.0, 10.0, 100.0),
+    def test_cada_formula_declara_lo_que_la_interfaz_necesita(self):
+        for clave, descripcion in formulas.FORMULAS.items():
+            with self.subTest(formula=clave):
+                self.assertTrue(descripcion["nombre"])
+                self.assertTrue(descripcion["unidad"])
+                self.assertTrue(callable(descripcion["computar"]))
+                self.assertIn(descripcion["salida_rol"], formulas.ROLES)
+
+    def test_la_potencia_sigue_siendo_la_predeterminada(self):
+        # El combo abre en la primera del registro; que no cambie sin querer.
+        self.assertEqual(formulas.formula_predeterminada(), "potencia")
+
+    def test_solo_el_impulso_trae_detalles(self):
+        # La potencia se describe con pico y media; el impulso necesita los suyos.
+        self.assertIsNone(formulas.FORMULAS["potencia"].get("detalles"))
+        self.assertTrue(callable(formulas.FORMULAS["impulso"]["detalles"]))
+
+    def test_el_impulso_necesita_masa_y_fz(self):
+        motivo = formulas.validar_formula("impulso", {"masa": 70.0}, roles_disponibles=())
+        self.assertIn("Fz", motivo)
+        motivo = formulas.validar_formula(
+            "impulso", {"masa": 0, "gravedad": 9.8, "frecuencia": 100.0},
+            roles_disponibles=("Fz",),
         )
+        self.assertIn("masa", motivo.lower())
 
 
 class TestResumenFormula(unittest.TestCase):
@@ -414,6 +462,142 @@ class TestPaleta(unittest.TestCase):
     def test_la_paleta_accesible_no_repite_colores(self):
         colores = paleta.PALETAS[paleta.MODO_DALTONICO]["rangos"]
         self.assertEqual(len(colores), len(set(colores)))
+
+    def test_nuevos_modos_y_modo_visual_desconocido(self):
+        # La paleta rojo-verde es la misma Okabe-Ito del modo histórico.
+        self.assertEqual(paleta.MODO_DALTONICO, paleta.MODO_ROJO_VERDE)
+        self.assertIn(paleta.MODO_COMPLETO, paleta.PALETAS)
+        self.assertIn(paleta.MODO_AZUL_AMARILLO, paleta.PALETAS)
+        # Un modo desconocido no cambia la paleta activa.
+        actual = paleta.modo_actual()
+        self.assertFalse(paleta.set_modo_visual("no_existe"))
+        self.assertEqual(paleta.modo_actual(), actual)
+
+    def test_modo_completo_es_una_rampa_de_grises_sin_repetir(self):
+        paleta.set_modo_visual(paleta.MODO_COMPLETO)
+        try:
+            grises = paleta.colores_rangos()
+            self.assertEqual(len(grises), len(set(grises)))
+            # Todos son grises (R == G == B).
+            for hex_color in grises:
+                valor = hex_color[1:]
+                rojo = int(valor[0:2], 16)
+                verde = int(valor[2:4], 16)
+                azul = int(valor[4:6], 16)
+                self.assertEqual((rojo, verde), (azul, azul))
+        finally:
+            paleta.set_modo_visual(paleta.MODO_ESTANDAR)
+
+    def test_nombre_color_resuelve_y_falla_de_grado(self):
+        self.assertEqual(paleta.nombre_color("#42A5F5"), "azul")
+        # Acepta minúsculas y sin numeral.
+        self.assertEqual(paleta.nombre_color("42a5f5"), "azul")
+        # Un color no conocido devuelve el propio valor.
+        self.assertEqual(paleta.nombre_color("#123456"), "#123456")
+
+    def test_paleta_azul_amarillo_esta_definida_y_sin_repetir(self):
+        colores = paleta.PALETAS[paleta.MODO_AZUL_AMARILLO]
+        rangos = colores["rangos"]
+        self.assertEqual(len(rangos), len(set(rangos)))
+        # Todos los colores usados tienen nombre humano para el tooltip.
+        usados = list(rangos) + [colores["senal_original"], colores["senal_filtrada"],
+                                 colores["senal_formula"], colores["seleccion"]]
+        for hex_color in usados:
+            self.assertIn(hex_color.upper(), paleta.NOMBRES_COLOR)
+
+
+class TestAccesibilidad(unittest.TestCase):
+    def setUp(self):
+        accesibilidad.reiniciar()
+        paleta.set_modo_visual(paleta.MODO_ESTANDAR)
+
+    def tearDown(self):
+        accesibilidad.reiniciar()
+        paleta.set_modo_visual(paleta.MODO_ESTANDAR)
+
+    def test_por_defecto_el_modo_esta_desactivado_y_sin_tipo(self):
+        self.assertFalse(accesibilidad.activo())
+        self.assertIsNone(accesibilidad.tipo_vision())
+        # Las opciones adicionales vienen activas por defecto.
+        self.assertTrue(accesibilidad.mostrar_nombre_color())
+        self.assertTrue(accesibilidad.estilos_linea_activos())
+        self.assertTrue(accesibilidad.aumentar_grosor_activo())
+
+    def test_desactivado_se_comporta_como_hoy(self):
+        # Grosor base, línea sólida y paleta estándar sin importar las opciones.
+        self.assertEqual(accesibilidad.grosor_senal("original"), 1.2)
+        self.assertEqual(accesibilidad.grosor_senal("filtrada"), 2.2)
+        self.assertEqual(accesibilidad.grosor_rango(), 2.0)
+        for tipo in (accesibilidad.TIPO_LINEA_ORIGINAL,
+                     accesibilidad.TIPO_LINEA_FILTRADA,
+                     accesibilidad.TIPO_LINEA_FORMULA):
+            self.assertEqual(accesibilidad.estilo_linea(tipo), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ESTANDAR)
+
+    def test_activar_con_tipo_sincroniza_la_paleta(self):
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_ROJO_VERDE)
+        # Con el modo apagado el tipo no cambia la paleta.
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ESTANDAR)
+        accesibilidad.set_activo(True)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ROJO_VERDE)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_COMPLETO)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_COMPLETO)
+        accesibilidad.set_activo(False)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ESTANDAR)
+
+    def test_azul_amarillo_es_un_tipo_disponible_y_sincroniza_la_paleta(self):
+        self.assertIn(accesibilidad.TIPO_AZUL_AMARILLO, accesibilidad.TIPOS_DISPONIBLES)
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_AZUL_AMARILLO)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_AZUL_AMARILLO)
+        # Las opciones de renderizado aplican igual que en los otros tipos.
+        self.assertEqual(accesibilidad.grosor_senal("original"), round(1.2 * 1.7, 2))
+        self.assertEqual(accesibilidad.estilo_linea("formula"), accesibilidad.ESTILO_DISCONTINUA)
+
+    def test_tipo_desconocido_no_cambia_nada(self):
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_ROJO_VERDE)
+        accesibilidad.set_tipo_vision("no_existe")
+        self.assertEqual(accesibilidad.tipo_vision(), accesibilidad.TIPO_ROJO_VERDE)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ROJO_VERDE)
+
+    def test_opciones_adicionales_son_independientes(self):
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_ROJO_VERDE)
+        # Desactivar solo el grosor: los estilos se mantienen.
+        accesibilidad.set_aumentar_grosor(False)
+        self.assertEqual(accesibilidad.grosor_senal("original"), 1.2)
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_PUNTEADA)
+        # Desactivar solo los estilos: el grosor sigue en su estado (base).
+        accesibilidad.set_estilos_linea(False)
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(accesibilidad.estilo_linea("filtrada"), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(accesibilidad.grosor_senal("filtrada"), 2.2)
+        # Reactivar el grosor sin tocar los estilos: ampliado y sigue sólido.
+        accesibilidad.set_aumentar_grosor(True)
+        self.assertGreater(accesibilidad.grosor_senal("filtrada"), 2.2)
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_SOLIDA)
+        # Reactivar los estilos.
+        accesibilidad.set_estilos_linea(True)
+        self.assertEqual(accesibilidad.estilo_linea("formula"), accesibilidad.ESTILO_DISCONTINUA)
+
+    def test_grosor_y_estilo_con_modo_activo(self):
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_COMPLETO)
+        self.assertEqual(accesibilidad.grosor_senal("original"), round(1.2 * 1.7, 2))
+        self.assertEqual(accesibilidad.grosor_rango(), round(2.0 * 1.7, 2))
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_PUNTEADA)
+        self.assertEqual(accesibilidad.estilo_linea("filtrada"), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(accesibilidad.estilo_linea("formula"), accesibilidad.ESTILO_DISCONTINUA)
+
+    def test_la_opcion_de_nombre_es_un_flag_independiente_del_modo(self):
+        accesibilidad.set_mostrar_nombre_color(False)
+        self.assertFalse(accesibilidad.mostrar_nombre_color())
+        accesibilidad.set_activo(True)
+        # Con el modo activo y la opción apagada no se muestra.
+        self.assertFalse(accesibilidad.mostrar_nombre_color())
+        accesibilidad.set_mostrar_nombre_color(True)
+        self.assertTrue(accesibilidad.mostrar_nombre_color())
 
 
 class TestProyecto(unittest.TestCase):

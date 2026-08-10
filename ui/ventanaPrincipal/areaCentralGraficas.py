@@ -23,7 +23,7 @@ from logica.filtros_senales import (
     ErrorConfiguracionFiltro,
     aplicar_butterworth,
 )
-from logica import formulas, paleta
+from logica import accesibilidad, formulas, paleta
 from logica.formulas import ErrorFormula
 from logica.rangos import GestorRangos, RangoSuperpuestoError
 
@@ -198,17 +198,45 @@ class GraficaSenal(pg.PlotWidget):
         self.autoRange()
 
     def _pen_original(self):
-        """Lápiz de la señal original; se atenúa si hay una curva filtrada encima."""
+        """Lápiz de la señal original; se atenúa si hay una curva filtrada encima.
+
+        Color, grosor y estilo salen de las paletas/opciones activas: con el
+        modo accesible desactivado se obtiene exactamente el trazo actual.
+        """
         color = pg.mkColor(paleta.color_senal_original())
         if self.y_filtrada is not None:
             color.setAlpha(165)
-        return pg.mkPen(color, width=1.2)
+        return pg.mkPen(
+            color,
+            width=accesibilidad.grosor_senal(accesibilidad.TIPO_LINEA_ORIGINAL),
+            style=self._estilo_linea(accesibilidad.TIPO_LINEA_ORIGINAL),
+        )
 
     def _pen_filtrada(self):
-        return pg.mkPen(paleta.color_senal_filtrada(), width=2.2)
+        return pg.mkPen(
+            paleta.color_senal_filtrada(),
+            width=accesibilidad.grosor_senal(accesibilidad.TIPO_LINEA_FILTRADA),
+            style=self._estilo_linea(accesibilidad.TIPO_LINEA_FILTRADA),
+        )
 
     def _pen_formula(self):
-        return pg.mkPen(paleta.color_senal_formula(), width=2.0)
+        return pg.mkPen(
+            paleta.color_senal_formula(),
+            width=accesibilidad.grosor_senal(accesibilidad.TIPO_LINEA_FORMULA),
+            style=self._estilo_linea(accesibilidad.TIPO_LINEA_FORMULA),
+        )
+
+    @staticmethod
+    def _estilo_linea(tipo_linea):
+        """Traduce el estilo simbólico de accesibilidad al enum de Qt."""
+        estilos = {
+            accesibilidad.ESTILO_SOLIDA: Qt.SolidLine,
+            accesibilidad.ESTILO_DISCONTINUA: Qt.DashLine,
+            accesibilidad.ESTILO_PUNTEADA: Qt.DotLine,
+        }
+        return estilos.get(
+            accesibilidad.estilo_linea(tipo_linea), Qt.SolidLine
+        )
 
     def aplicar_paleta(self):
         """Repinta curvas y rangos con la paleta activa, sin perder el zoom."""
@@ -683,6 +711,13 @@ class GraficaSenal(pg.PlotWidget):
         self.regiones_rangos = {}
         self.rangos_actuales = list(rangos)
 
+        # Nombre del color en el tooltip del rango: solo con el modo accesible
+        # activo y la opción «mostrar el nombre del color» marcada. Desactivado,
+        # los rangos no llevan tooltip (igual que hoy).
+        mostrar_nombre = (
+            accesibilidad.activo() and accesibilidad.mostrar_nombre_color()
+        )
+
         for rango in rangos:
             color = pg.mkColor(rango.color)
             color_brush = pg.mkColor(rango.color)
@@ -692,7 +727,16 @@ class GraficaSenal(pg.PlotWidget):
             )
             region.setZValue(-10)
             for linea in region.lines:
-                linea.setPen(pg.mkPen(color, width=2))
+                linea.setPen(
+                    pg.mkPen(
+                        color,
+                        width=accesibilidad.grosor_rango(),
+                    )
+                )
+            if mostrar_nombre:
+                region.setToolTip(
+                    f"{rango.nombre} · Color: {paleta.nombre_color(rango.color)}"
+                )
             self.addItem(region)
             self.regiones_rangos[rango.numero] = region
 
@@ -1074,14 +1118,31 @@ class AreaCentralGraficas(QFrame):
         self.superposicion_habilitada = bool(activo)
 
     def set_modo_daltonico(self, activo):
-        """Cambia la paleta de las gráficas y repinta todo lo que ya está en pantalla.
+        """Compatibilidad: activa la paleta rojo-verde (modo antiguo) y repinta.
 
-        Los colores dependen solo del número de rango, así que desactivarlo
-        devuelve exactamente los colores anteriores.
+        El modo accesible nuevo ya no pasa por aquí: ``accesibilidad``
+        sincroniza la paleta y luego se llama a ``aplicar_accesibilidad``.
         """
         if not paleta.set_modo_daltonico(activo):
             return
+        self._repintar_accesibilidad()
 
+    def aplicar_accesibilidad(self):
+        """Repinta las gráficas con la paleta ya sincronizada por accesibilidad.
+
+        La paleta activa ya quedó actualizada por ``logica.accesibilidad``
+        cuando el usuario tocó la configuración; aquí solo se vuelve a pintar
+        con los colores vigentes. El resto de las opciones de renderizado
+        (grosor, estilos y tooltips) se aplican dentro de ``aplicar_paleta``.
+        """
+        self._repintar_accesibilidad()
+
+    def _repintar_accesibilidad(self):
+        """Reasigna los colores y repinta gráficas y ventanas de sub-rangos.
+
+        Los colores dependen solo del número de rango, así que volver al modo
+        estándar devuelve exactamente los colores anteriores.
+        """
         for gestor in self.gestores_rangos.values():
             gestor.recolorear()
         for subgestor in self.subgestores.values():
@@ -1362,10 +1423,105 @@ class AreaCentralGraficas(QFrame):
                 c, n, desde, hasta, v
             )
         )
+        # La sección de fórmulas de la ventana comparte el mismo panel que el
+        # principal: el cálculo de sub-rangos corre con el mismo motor
+        # ``_calcular_por_intervalos`` y los resultados vuelven a esa ventana.
+        ventana.panel_calculo.calcularSolicitado.connect(
+            lambda v=ventana: self._calcular_subrangos(v)
+        )
+        ventana.panel_calculo.quitarFormulaSolicitado.connect(
+            lambda v=ventana: self._quitar_formula_subrangos(v)
+        )
+        ventana.panel_calculo.fuenteCalculoCambiada.connect(self.set_fuente_calculo)
+        ventana.panel_calculo.set_fuente(self.fuente_calculo)
         # Guardar referencia para que la ventana no se destruya y limpiar cerradas.
         self._ventanas_region = [v for v in self._ventanas_region if v.isVisible()]
         self._ventanas_region.append(ventana)
         ventana.show()
+
+    def _calcular_subrangos(self, ventana):
+        """Calcula la fórmula elegida sobre los sub-rangos del rango abierto.
+
+        Usa el mismo ``_calcular_por_intervalos`` que los rangos del panel
+        principal; la única diferencia es el destino: la curva va en la gráfica
+        de esta ventana y los resultados en su panel de fórmulas.
+        """
+        if self.df_grafica_original is None:
+            ventana.panel_calculo.actualizar_estado(
+                False, "Primero cargá un archivo CSV."
+            )
+            return
+
+        clave = ventana.formula_seleccionada() or formulas.formula_predeterminada()
+        if not formulas.hay_formula(clave):
+            ventana.panel_calculo.actualizar_estado(
+                False, f"Fórmula «{clave}» desconocida."
+            )
+            return
+        desc = formulas.descripcion_formula(clave)
+
+        columna, numero_padre = ventana.clave_subgestor
+        padre_id = self._id_rango(columna, numero_padre)
+        intervalos = [
+            rango
+            for rango in self._rangos_para_panel()
+            if rango.get("padre") == padre_id
+        ]
+        if not intervalos:
+            ventana.panel_calculo.actualizar_estado(
+                False,
+                "Creá al menos un sub-rango para poder calcular "
+                f"{formulas.nombre_con_articulo(desc)}.",
+            )
+            return
+
+        try:
+            columna_origen, resultados, tramos, advertencias, _ = (
+                self._calcular_por_intervalos(clave, intervalos)
+            )
+        except ErrorFormula as exc:
+            ventana.panel_calculo.actualizar_estado(False, str(exc))
+            return
+
+        if not resultados:
+            ventana.panel_calculo.actualizar_estado(
+                False, "Los sub-rangos no tienen datos válidos para calcular "
+                f"{formulas.nombre_con_articulo(desc)}."
+            )
+            return
+
+        ventana.grafica.set_curva_formula(
+            tramos["x"], tramos["y"], desc["nombre"],
+            desc["unidad"], picos=tramos["picos"],
+        )
+        fuente, detalle = self._procedencia([columna_origen])
+        grafica_origen = self.graficas_por_columna.get(columna_origen)
+        ventana.mostrar_resultados_formula(
+            {
+                "clave": clave,
+                "nombre": desc["nombre"],
+                "expresion": desc["expresion"],
+                "unidad": desc["unidad"],
+                "senal": (
+                    grafica_origen.nombre_senal if grafica_origen else columna_origen
+                ),
+                "fuente": fuente,
+                "detalle_filtro": detalle,
+                "resultados": resultados,
+                "advertencias": advertencias,
+            }
+        )
+        cantidad = len(resultados)
+        destino = "un sub-rango" if cantidad == 1 else f"{cantidad} sub-rangos"
+        ventana.panel_calculo.actualizar_estado(
+            True,
+                f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}.",
+        )
+
+    def _quitar_formula_subrangos(self, ventana):
+        """Saca la curva de la ventana de sub-rangos y limpia sus resultados."""
+        ventana.grafica.limpiar_curva_formula()
+        ventana.panel_calculo.limpiar_resultados()
 
     def _registrar_subrango(self, columna, numero_padre, desde, hasta, ventana):
         """Agrega un sub-rango respetando la configuración de superposición."""
@@ -1672,7 +1828,7 @@ class AreaCentralGraficas(QFrame):
         """Convierte los IDs marcados en el panel en intervalos de frames.
 
         Se aceptan rangos de cualquier señal visible: todos comparten el eje de
-        frames, que es lo único que hace falta para recortar la potencia. Los
+        frames, que es lo único que hace falta para recortar la fórmula. Los
         sub-rangos quedan fuera: se calculan en la ventana que se abre con doble
         clic sobre su rango.
         """
@@ -1687,7 +1843,7 @@ class AreaCentralGraficas(QFrame):
             intervalos.append(datos)
 
         # Sin duplicados: dos señales pueden tener el mismo tramo marcado y la
-        # potencia sale de Fz, así que daría dos veces exactamente lo mismo.
+        # fórmula se calcularía dos veces exactamente igual.
         vistos = set()
         unicos = []
         for datos in sorted(intervalos, key=lambda d: (d["desde"], d["hasta"])):
@@ -1714,173 +1870,207 @@ class AreaCentralGraficas(QFrame):
                 return columna
         return None
 
-    def aplicar_formula(self, configuracion=None, avisar=True):
-        """Calcula la fórmula elegida dentro de cada rango seleccionado.
+    def _columna_de_rol(self, rol):
+        """Columna que aporta un rol de señal, según el mapeo de columnas.
 
-        Se usa siempre la fuerza vertical (Fz): es la que hace el trabajo
-        contra la gravedad y de la que sale el impulso. La curva se dibuja solo
-        sobre la gráfica de Fz y solo dentro de los tramos marcados.
+        El rol (Fz, Fx, Mz, Cx, ...) se traduce a ``(tipo, eje)`` con la tabla
+        normativa ``logica.formulas.ROLES`` y se busca en ``mapeo_actual``.
+        Así cualquier señal del mapeo es usable sin casos por nombre.
         """
-        configuracion = dict(configuracion or {})
-        clave = configuracion.get("formula") or formulas.CLAVE_POTENCIA
-        datos_formula = formulas.formula(clave)
-        nombre_formula = datos_formula["nombre"].lower()
+        pareja = formulas.ROLES.get(rol)
+        if pareja is None:
+            return None
+        tipo, eje = pareja
+        entradas = (self.mapeo_actual or {}).get(tipo)
+        if not isinstance(entradas, dict):
+            return None
+        config = entradas.get(eje)
+        columna = config.get("columna") if isinstance(config, dict) else config
+        if columna in self.graficas_por_columna:
+            return columna
+        return None
 
+    def _roles_disponibles(self):
+        """Roles de señal resolubles con los datos cargados (los 9)."""
+        return {
+            rol for rol in formulas.ROLES if self._columna_de_rol(rol) is not None
+        }
+
+    def aplicar_formula(self, configuracion=None, avisar=True):
+        """Calcula una fórmula sobre cada rango seleccionado.
+
+        Cada resultado se dibuja **únicamente en la gráfica que posee el rango**
+        que lo originó: se agrupan por columna propietaria y cada gráfica recibe
+        solo su tramo de curva y sus picos. El motor (``_calcular_por_intervalos``)
+        es compartido con los sub-rangos y lo alimenta el registro ``FORMULAS``,
+        así cualquier fórmula existe una sola vez en ambos lugares.
+        """
         if self.df_grafica_original is None:
             self.formulaEstadoCambiado.emit(False, "Primero cargá un archivo CSV.")
             return
 
+        configuracion = dict(configuracion or {})
         seleccionados = configuracion.get("rangos") or []
-
-        columna_z = self._columna_vertical()
-        if columna_z is None:
-            self.formulaEstadoCambiado.emit(
-                False,
-                f"Necesito la señal de fuerza vertical (Fz) para {nombre_formula}.",
-            )
+        clave = configuracion.get("clave") or formulas.formula_predeterminada()
+        if not formulas.hay_formula(clave):
+            self.formulaEstadoCambiado.emit(False, f"Fórmula «{clave}» desconocida.")
             return
-
-        grafica_z = self.graficas_por_columna.get(columna_z)
-        if grafica_z is None or grafica_z.isHidden():
-            self.formulaEstadoCambiado.emit(
-                False, f"Mostrá la gráfica de Fz para calcular {nombre_formula}."
-            )
-            return
+        desc = formulas.descripcion_formula(clave)
 
         rangos = self._rangos_seleccionados(seleccionados)
         if not rangos:
             self.formulaEstadoCambiado.emit(
                 False,
                 "Marcá al menos un rango en una gráfica visible para calcular "
-                f"{nombre_formula}.",
+                f"{formulas.nombre_con_articulo(desc)}.",
             )
             return
 
         try:
-            resultados, tramos = self._calcular_formula(columna_z, rangos, clave)
+            columna, resultados, tramos, advertencias, segmentos = (
+                self._calcular_por_intervalos(clave, rangos)
+            )
         except ErrorFormula as exc:
             self.formulaEstadoCambiado.emit(False, str(exc))
             return
 
         if not resultados:
             self.formulaEstadoCambiado.emit(
-                False, "Los rangos marcados no tienen datos válidos de Fz."
+                False,
+                "Los rangos marcados no tienen datos válidos para calcular "
+                f"{formulas.nombre_con_articulo(desc)}.",
             )
             return
 
         self.formula_activa = configuracion
 
-        # La curva va solo en Fz; el resto de las gráficas queda limpio.
-        for columna, grafica in self.graficas_por_columna.items():
-            if columna != columna_z:
-                grafica.limpiar_curva_formula()
+        # Cada resultado se dibuja únicamente en la gráfica que posee su rango.
+        # El ``id`` de cada resultado mapea al rango que lo originó y ese rango
+        # conoce su ``columna``: se agrupan los segmentos REALES de cada tramo
+        # (no se re-filtra la curva combinada por frames, que mezclaría puntos
+        # de otros rangos solapados) y cada gráfica dibuja solo los suyos.
+        columna_por_id = {rango.get("id"): rango.get("columna") for rango in rangos}
+        por_grafica = {}
+        for res, seg in zip(resultados, segmentos):
+            propietario = columna_por_id.get(res.get("id"))
+            grupo = por_grafica.setdefault(
+                propietario, {"resultados": [], "segmentos": []}
+            )
+            grupo["resultados"].append(res)
+            grupo["segmentos"].append(seg)
 
-        grafica_z.set_curva_formula(
-            tramos["x"], tramos["y"], datos_formula["nombre"],
-            datos_formula["unidad"], picos=tramos["picos"],
-        )
+        # Se limpian todas las curvas y se redibuja el tramo de cada gráfica
+        # que posea al menos un rango seleccionado.
+        for grafica in self.graficas_por_columna.values():
+            grafica.limpiar_curva_formula()
+        for columna_owner, grupo in por_grafica.items():
+            grafica = self.graficas_por_columna.get(columna_owner)
+            if grafica is None or grafica.isHidden():
+                # Se calcula igual (no bloquea): solo no se dibuja.
+                continue
+            curva_owner = formulas.concatenar_curva(grupo["segmentos"])
+            grafica.set_curva_formula(
+                curva_owner["x"], curva_owner["y"], desc["nombre"],
+                desc["unidad"], picos=formulas.picos_de_resultados(grupo["resultados"]),
+            )
 
-        fuente, detalle = self._procedencia([columna_z])
+        fuentes = [rango["columna"] for rango in rangos]
+        fuente, detalle = self._procedencia(fuentes)
         self.resultadosFormulaCambiaron.emit(
             {
-                "nombre": datos_formula["nombre"],
-                "expresion": datos_formula["expresion"],
-                "unidad": datos_formula["unidad"],
-                "senal": grafica_z.nombre_senal,
+                "clave": clave,
+                "nombre": desc["nombre"],
+                "expresion": desc["expresion"],
+                "unidad": desc["unidad"],
+                # Los resultados pertenecen a varias señales: sin senal única.
+                "senal": "",
                 "fuente": fuente,
                 "detalle_filtro": detalle,
                 "resultados": resultados,
+                "advertencias": advertencias,
             }
         )
         if avisar:
             cantidad = len(resultados)
             destino = "un rango" if cantidad == 1 else f"{cantidad} rangos"
             self.formulaEstadoCambiado.emit(
-                True, f"Se calculó {nombre_formula} en {destino}."
+                True,
+                f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}.",
             )
 
-    def _calcular_formula(self, columna_z, rangos, clave):
-        """Valores de la fórmula en cada rango, y los tramos a dibujar.
+    def _calcular_por_intervalos(self, clave, intervalos):
+        """Motor compartido: resuelve roles, valida y aplica la fórmula.
 
-        Cada rango se integra por separado arrancando de cero: son gestos
-        independientes, no un continuo.
+        Lo usan tanto los rangos (ventana principal) como los sub-rangos
+        (ventana de detalle). Dentro de ``logica.formulas`` viven:
+        - ``resolver_roles``: elige los roles (obligatorios + opcionales) y
+          produce las advertencias no bloqueantes.
+        - ``validar_formula``: errores bloqueantes (roles/variables que faltan).
+        - ``computar_formula``: recorte por intervalo, cálculo y resumen.
+
+        Devuelve ``(columna_salida, resultados, curva, advertencias,
+        segmentos)``. ``segmentos`` son los ``(x, y)`` reales de cada intervalo
+        (alineados con ``resultados``), para que el panel de rangos dibuje cada
+        gráfica solo con sus propios tramos.
         """
-        x_total = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
-        fz_total = self._datos_columna(columna_z)
-        if fz_total is None:
-            raise ErrorFormula("No se pudo leer la fuerza vertical.")
+        desc = formulas.descripcion_formula(clave)
 
-        calcular = formulas.formula(clave)["calcular"]
-        frecuencia = self.frecuencia_grafica
-        resultados = []
-        segmentos_x, segmentos_y, picos = [], [], []
+        # Restricción declarada por la propia fórmula (``rangos_en_rol``): los
+        # rangos deben pertenecer a una señal concreta (p. ej. Potencia -> Fz).
+        # No es una regla general: solo aplica a la fórmula que la declara.
+        restriccion = desc.get("rangos_en_rol")
+        if restriccion:
+            columna_permitida = self._columna_de_rol(restriccion.get("rol"))
+            mensaje = restriccion.get("mensaje")
+            for intervalo in intervalos or []:
+                if (
+                    columna_permitida is None
+                    or intervalo.get("columna") != columna_permitida
+                ):
+                    raise ErrorFormula(mensaje)
 
-        for datos in rangos:
-            desde, hasta = int(datos["desde"]), int(datos["hasta"])
-            mascara = (
-                (x_total >= desde) & (x_total <= hasta)
-                & np.isfinite(x_total) & np.isfinite(fz_total)
-            )
-            if mascara.sum() < 2:
-                continue
-
-            x_tramo = x_total[mascara]
-            fz_tramo = fz_total[mascara]
-            valores = calcular(fz_tramo, self.masa_sujeto, self.gravedad, frecuencia)
-            datos_resumen = formulas.resumen(x_tramo, valores)
-            nombre_rango = datos.get("nombre") or f"Rango {datos['numero']}"
-
-            # El impulso trae además su valor total, el Δv y las dos fases; el
-            # pico de una curva acumulada por sí solo no dice gran cosa.
-            detalles = (
-                formulas.detalles_impulso(
-                    valores, fz_tramo, self.masa_sujeto, self.gravedad, frecuencia
-                )
-                if clave == formulas.CLAVE_IMPULSO
-                else []
+        disponibles = self._roles_disponibles()
+        roles_a_usar, eleccion, advertencias = formulas.resolver_roles(
+            clave, disponibles
+        )
+        if not roles_a_usar:
+            raise ErrorFormula(
+                f"No hay señales disponibles para calcular "
+                f"{formulas.nombre_con_articulo(desc)}."
             )
 
-            resultados.append(
-                {
-                    "id": datos["id"],
-                    "nombre": nombre_rango,
-                    "senal": datos.get("senal", ""),
-                    "desde": desde,
-                    "hasta": hasta,
-                    "duracion_s": (hasta - desde) / frecuencia if frecuencia else None,
-                    "resumen": datos_resumen,
-                    "detalles": detalles,
-                }
-            )
-
-            segmentos_x.append(x_tramo)
-            segmentos_y.append(valores)
-            if datos_resumen["pico"] is not None:
-                picos.append(
-                    {
-                        "x": datos_resumen["x_pico"],
-                        "y": datos_resumen["pico"],
-                        "etiqueta": nombre_rango,
-                        "resumen": datos_resumen,
-                    }
-                )
-
-        if not resultados:
-            return [], {}
-
-        # Un NaN entre tramos corta la línea: así una sola curva dibuja los
-        # rangos por separado, sin unirlos con un trazo que no existe.
-        x, y = [], []
-        for indice, (sx, sy) in enumerate(zip(segmentos_x, segmentos_y)):
-            if indice:
-                x.append(np.array([np.nan]))
-                y.append(np.array([np.nan]))
-            x.append(sx)
-            y.append(sy)
-
-        return resultados, {
-            "x": np.concatenate(x), "y": np.concatenate(y), "picos": picos,
+        contexto = {
+            "masa": self.masa_sujeto,
+            "gravedad": self.gravedad,
+            "frecuencia": self.frecuencia_grafica,
         }
+        motivo = formulas.validar_formula(clave, contexto, disponibles)
+        if motivo:
+            raise ErrorFormula(motivo)
+
+        roles = {}
+        x_total = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
+        for rol in roles_a_usar:
+            columna = self._columna_de_rol(rol)
+            if columna is None:
+                raise ErrorFormula(f"No se pudo resolver la señal {rol}.")
+            datos = self._datos_columna(columna)
+            if datos is None:
+                raise ErrorFormula(f"No se pudo leer la señal {rol}.")
+            roles[rol] = datos
+
+        resultados, segmentos = formulas.computar_formula(
+            clave, roles, x_total, contexto, intervalos, eleccion
+        )
+        curva = formulas.concatenar_curva(segmentos)
+        curva["picos"] = formulas.picos_de_resultados(resultados)
+
+        # Rol de salida: el declarado si está en uso, si no el primero usado.
+        salida = desc.get("salida_rol")
+        if salida not in roles and roles_a_usar:
+            salida = roles_a_usar[0]
+        columna_salida = self._columna_de_rol(salida) if salida else None
+        return columna_salida, resultados, curva, advertencias, segmentos
 
     def _procedencia(self, columnas_origen):
         """(fuente, detalle) de los datos que entraron en el cálculo."""
@@ -1899,8 +2089,8 @@ class AreaCentralGraficas(QFrame):
             return FUENTE_ORIGINAL, ""
         return FUENTE_MIXTA, "algunas señales filtradas y otras no"
 
-    def formula_disponible(self):
-        """Si están los datos mínimos para poder calcular (masa, fs y Fz)."""
+    def potencia_disponible(self):
+        """Si están los datos mínimos para poder calcular potencia."""
         return bool(
             self.masa_sujeto and self.frecuencia_grafica and self._columna_vertical()
         )
@@ -1911,7 +2101,7 @@ class AreaCentralGraficas(QFrame):
         for grafica in self.graficas_por_columna.values():
             grafica.limpiar_curva_formula()
         self.resultadosFormulaCambiaron.emit(None)
-        self.formulaEstadoCambiado.emit(True, "Se quitó la curva del cálculo.")
+        self.formulaEstadoCambiado.emit(True, "Se quitó la curva de la fórmula.")
 
 
     def aplicar_filtro(self, configuracion):

@@ -84,32 +84,34 @@ P(t) = Fz(t) · v(t)           potencia()     — instantaneous, in W
 J(t) = ∫ (Fz(t) − m·g) dt     impulso()      — accumulated, in N·s
 ```
 
-`_integrar_acumulado()` is the **single trapezoidal integrator** behind both `velocidad()` and `impulso()` — change the integration rule there and both follow. It **restarts from zero inside every marked range**: each range is an independent gesture, not a continuum.
+`_integrar_acumulado()` is the **single trapezoidal integrator** behind both `velocidad()` and `impulso()` — change the integration rule there and both follow.
 
-The at-rest assumption differs between the two, and that difference is the reason to offer both:
+**Integration runs once over the whole record, not per range** (`integra_en_registro: True`). It starts from zero at the CSV's first frame, which is captured with the subject still; a marked range only *slices* the result and never resets the initial condition. This is the single most important invariant in the module:
 
-- **Potencia** needs absolute velocity, so the range must start with the subject still. A range that starts mid-movement reports power relative to that assumption — inherent to integrating force alone, not a bug.
-- **Impulso** does not. By the impulse-momentum theorem `J = m·Δv`, so a range's total is the *change* in velocity however the tramo starts. `impulso()` is exactly `masa · velocidad()`; the tests assert that identity on a random signal.
+- **Potencia** needs absolute velocity, so it depends on that first frame really being at rest.
+- **Impulso** does not. By the impulse-momentum theorem `J = m·Δv`, so a range's **net impulse is the difference between the ends of its slice** — `valores[-1] − valores[0]`, never `valores[-1]`. On real data the gap is large (a range measuring 12.9 N·s sits at 60.9 N·s of accumulated curve), so getting this wrong is silently, badly wrong rather than slightly off.
 
-`detalles_impulso()` returns the per-range values the panel shows: net impulse, Δv, and the **propulsive/braking split** (the net force clipped by sign and integrated separately — at plate sampling rates the zero-crossing trapezoid error is negligible).
+`detalles_impulso()` returns the per-range values the panel shows: net impulse, Δv, and the **propulsive/braking split** (the net force clipped by sign and integrated separately — at plate sampling rates the zero-crossing trapezoid error is negligible). It is wired in through the registry's optional **`detalles` hook**, which `computar_formula()` calls per range via `_detalles_de()`. Formulas without it (potencia) are described well enough by the resumen's peak and mean; accumulated curves need their own numbers, and each entry carries its own unit so N·s and m/s can share a block.
 
-`FORMULAS` is the registry (`nombre`, `expresion`, `unidad`, `calcular`, `descripcion`) keyed by `CLAVE_POTENCIA` / `CLAVE_IMPULSO`; `formula(clave)` falls back to potencia on an unknown key so the UI never has to branch on names. **Adding a third formula means adding an entry there**, not touching the UI.
+`FORMULAS` is the registry, and **adding a formula there is the whole job** — `PanelCalculo` builds its combo straight from it, so the UI needs no changes at all. Each entry declares `nombre`, `articulo`, `expresion`, `unidad`, `salida_rol`, `requiere_roles`, `requiere` (blocking checks with their messages), `computar`, and optionally `integra_en_registro` and `detalles`.
 
-`_validar_parametros()` gates on mass, gravity and sampling rate, each with a message naming what's missing. `TestPotencia` and `TestImpulso` each cover a constant-force case checkable by hand: 2·m·g for 1 s gives exactly 10 m/s, 14 000 W and 700 N·s.
+`articulo` ("la" / "el") exists because messages are built as `nombre_con_articulo()`; hardcoding "la" produced *«se calculó la impulso»* the moment a masculine name joined the registry.
+
+`_validar_parametros()` gates on mass, gravity and sampling rate, each with a message naming what's missing. `TestPotencia` and `TestImpulso` each cover a constant-force case checkable by hand: 2·m·g for 1 s gives exactly 10 m/s, 14 000 W and 700 N·s. `TestImpulso.test_el_neto_del_rango_resta_los_extremos_del_recorte` is the regression guard for the slicing rule — it puts an impulse *before* the range so taking the last value would be visibly wrong.
 
 **Formulas are computed on parent ranges only, never on sub-ranges.** Sub-ranges get their own calculation later, inside the `VentanaRegion` that opens on double-click — that's where they're actually visible. `Formulas._rangos_padre_seleccionados()` filters them out for both the request and the Aplicar button's enabled state, and `_rangos_seleccionados()` in `AreaCentralGraficas` drops `es_subrango` again so the rule holds even if another caller appears.
 
-**Formulas are computed on ranges, not on the whole signal.** `Formulas._solicitar_formula()` sends the IDs currently checked plus the selected `formula` key, so the Todos/Pares/Impares/Ninguno buttons drive what gets calculated. `_marcar_modo_seleccion()` stores the active mode and sets an `activo` property that `#btnResetMapeo[activo="true"]` styles with a blue border. With nothing selected the Aplicar button is disabled and says why in its tooltip.
+**Formulas are computed on ranges, not on the whole signal.** `Formulas._solicitar_formula()` sends the IDs currently checked plus the `clave` of the formula picked in `PanelCalculo`, so the Todos/Pares/Impares/Ninguno buttons drive what gets calculated. `_marcar_modo_seleccion()` stores the active mode and sets an `activo` property that `#btnResetMapeo[activo="true"]` styles with a blue border. With nothing selected the Aplicar button is disabled and says why in its tooltip.
 
-**Only one formula curve exists at a time.** `GraficaSenal` has a single `curva_formula` slot and both formulas draw on Fz, so the panel's `Fórmula` combo picks which one. `Formulas._cambiar_formula()` re-requests the calculation when a curve is already on screen, rather than leaving a curve that no longer matches the selection.
+**`PanelCalculo` (`ui/ventanaPrincipal/panelDerecho/panelCalculo.py`) is the shared UI block** — source combo, formula combo, Aplicar/Quitar, status, results, warnings. Both the right panel (inside `Formulas`) and `VentanaRegion` embed the same widget, so neither duplicates the layout. It knows nothing about ranges or maths: it emits `calcularSolicitado` and renders whatever results it's handed.
 
-`AreaCentralGraficas.aplicar_formula()` (the `formula` key selects which; defaults to potencia):
+`AreaCentralGraficas.aplicar_formula()` (the `clave` key selects which; `formula_predeterminada()` when absent):
 
-- Always uses the column mapped as **Fuerza Z** (`_columna_vertical()`); it refuses with an explanatory message if Fz isn't mapped or is hidden.
-- `_rangos_seleccionados()` keeps only ranges whose graph is visible and drops duplicate `(desde, hasta)` pairs — two signals can carry the same interval and both formulas come from Fz either way.
-- Draws **only on the Fz graph**; every other graph gets `limpiar_curva_formula()`.
+- Resolves the formula's `requiere_roles` against `_roles_disponibles()`; it refuses with an explanatory message when a needed signal isn't mapped or is hidden.
+- `_calcular_por_intervalos()` is the shared engine for both parent ranges and the sub-range window, so the two paths can't drift.
+- Draws on the graph of the formula's `salida_rol`; every other graph gets `limpiar_curva_formula()`.
 - Re-applies itself after `_crear_graficas()` / `_actualizar_datos_graficas()`, since `set_datos()` rebuilds the curves. Mass and gravity arrive from `PanelIzquierdo.variablesCambiaron`.
-- Each result row carries `detalles` (empty for potencia). `Formulas._bloque_valores()` renders those instead of pico/media when present, because the peak of an *accumulated* curve says little on its own — each entry brings its own unit, so N·s and m/s can sit in the same block.
+- Each result row carries `detalles` (empty for potencia). `PanelCalculo._bloque_valores()` renders those instead of pico/media when present, because the peak of an *accumulated* curve says little on its own.
 
 **Filtering is deliberately NOT required to calculate.** A low-pass flattens peaks, so gating the calculation behind a filter would bias every reported peak downward. What matters instead is **provenance**: `fuente_calculo` ("filtrada"/"original") is user-selectable in the panel, `_fuente_de_columna()` reports what was *actually* used, and `filtros_por_columna` keeps each signal's filter description. `fuente` is the same vocabulary the ranges use and is persisted as a column in the annotations CSV (additive; older files read back as `""`).
 

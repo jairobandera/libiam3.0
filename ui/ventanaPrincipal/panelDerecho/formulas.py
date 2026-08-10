@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
 )
 
 from logica import formulas as formulas_logica
-from logica import paleta
+
+from ui.ventanaPrincipal.panelDerecho.panelCalculo import PanelCalculo
 
 
 BASE_DIR = os.path.abspath(
@@ -45,9 +46,7 @@ class Formulas(QFrame):
         self.rangos = []
         self.estados_seleccion = {}
         self.subrangos_colapsados = set()
-        self.ultimos_resultados = None
         self.modo_seleccion = None
-        self.formula_actual = formulas_logica.CLAVE_POTENCIA
         self.init_ui()
 
     def init_ui(self):
@@ -135,7 +134,15 @@ class Formulas(QFrame):
         seleccion_layout.addWidget(self.scroll)
         seleccion_layout.addWidget(self.lbl_resumen)
         seleccion_layout.addWidget(self.lbl_error)
-        seleccion_layout.addWidget(self._crear_seccion_formulas())
+        self.panel_calculo = PanelCalculo()
+        self.panel_calculo.calcularSolicitado.connect(self._solicitar_formula)
+        self.panel_calculo.quitarFormulaSolicitado.connect(
+            self.quitarFormulaSolicitado.emit
+        )
+        self.panel_calculo.fuenteCalculoCambiada.connect(
+            self.fuenteCalculoCambiada.emit
+        )
+        seleccion_layout.addWidget(self.panel_calculo)
         seleccion_layout.addLayout(botones)
         seleccion.setLayout(seleccion_layout)
 
@@ -150,111 +157,14 @@ class Formulas(QFrame):
         self.cmb_senal.currentIndexChanged.connect(self._renderizar_rangos_actuales)
         self._actualizar_botones()
 
-    def _crear_seccion_formulas(self):
-        """Recuadro de cálculos: se aplican sobre los rangos marcados."""
-        seccion = QFrame()
-        seccion.setObjectName("seccionFormulas")
-        layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(6)
-
-        titulo = QLabel("Cálculos")
-        titulo.setObjectName("tituloSeccionMapeo")
-        layout.addWidget(titulo)
-
-        # Qué se calcula. Las dos fórmulas salen de Fz y se dibujan sobre esa
-        # misma gráfica, así que solo puede haber una curva a la vez.
-        fila_formula = QHBoxLayout()
-        fila_formula.setSpacing(6)
-        lbl_formula = QLabel("Fórmula:")
-        lbl_formula.setObjectName("lblExpresionFormula")
-        self.cmb_formula = QComboBox()
-        self.cmb_formula.setObjectName("comboFormula")
-        for clave in (formulas_logica.CLAVE_POTENCIA, formulas_logica.CLAVE_IMPULSO):
-            self.cmb_formula.addItem(formulas_logica.formula(clave)["nombre"], clave)
-        self.cmb_formula.currentIndexChanged.connect(self._cambiar_formula)
-        fila_formula.addWidget(lbl_formula)
-        fila_formula.addWidget(self.cmb_formula, 1)
-        layout.addLayout(fila_formula)
-
-        self.lbl_expresion = QLabel("")
-        self.lbl_expresion.setWordWrap(True)
-        self.lbl_expresion.setObjectName("lblExpresionFormula")
-        layout.addWidget(self.lbl_expresion)
-
-        ayuda = QLabel(
-            "Marcá los rangos con los botones de arriba y pasá el mouse por la "
-            "curva para ver los valores."
-        )
-        ayuda.setWordWrap(True)
-        ayuda.setObjectName("lblDeteccion")
-        layout.addWidget(ayuda)
-        self._actualizar_expresion()
-
-        # Elegir sobre qué serie se calcula. No se exige filtro para calcular:
-        # un pasa-bajos achata los picos, así que forzarlo sesgaría los valores.
-        fila_fuente = QHBoxLayout()
-        fila_fuente.setSpacing(6)
-        lbl_fuente = QLabel("Calcular sobre:")
-        lbl_fuente.setObjectName("lblExpresionFormula")
-        self.cmb_fuente = QComboBox()
-        self.cmb_fuente.setObjectName("comboFormula")
-        self.cmb_fuente.addItem("Señal filtrada", "filtrada")
-        self.cmb_fuente.addItem("Señal original", "original")
-        self.cmb_fuente.currentIndexChanged.connect(
-            lambda _i: self.fuenteCalculoCambiada.emit(self.cmb_fuente.currentData())
-        )
-        fila_fuente.addWidget(lbl_fuente)
-        fila_fuente.addWidget(self.cmb_fuente, 1)
-        layout.addLayout(fila_fuente)
-        self.set_hay_filtro(False)
-
-        fila = QHBoxLayout()
-        self.btn_aplicar_formula = QPushButton("Aplicar")
-        self.btn_aplicar_formula.setObjectName("btnAplicarMapeo")
-        self.btn_aplicar_formula.setCursor(Qt.PointingHandCursor)
-        self.btn_aplicar_formula.clicked.connect(self._solicitar_formula)
-        self.btn_quitar_formula = QPushButton("Quitar")
-        self.btn_quitar_formula.setObjectName("btnResetMapeo")
-        self.btn_quitar_formula.setCursor(Qt.PointingHandCursor)
-        self.btn_quitar_formula.setEnabled(False)
-        self.btn_quitar_formula.clicked.connect(self.quitarFormulaSolicitado.emit)
-        fila.addWidget(self.btn_aplicar_formula)
-        fila.addWidget(self.btn_quitar_formula)
-        layout.addLayout(fila)
-
-        self.lbl_estado_formula = QLabel("")
-        self.lbl_estado_formula.setWordWrap(True)
-        self.lbl_estado_formula.setObjectName("lblEstadoFormula")
-        layout.addWidget(self.lbl_estado_formula)
-
-        self.lbl_resultados = QLabel("")
-        self.lbl_resultados.setWordWrap(True)
-        self.lbl_resultados.setObjectName("lblResultadosFormula")
-        self.lbl_resultados.hide()
-        layout.addWidget(self.lbl_resultados)
-
-        seccion.setLayout(layout)
-        return seccion
-
     def set_hay_filtro(self, hay_filtro):
         """Solo tiene sentido elegir la fuente si alguna señal visible tiene filtro."""
-        self.cmb_fuente.setEnabled(bool(hay_filtro))
-        if hay_filtro:
-            self.cmb_fuente.setToolTip(
-                "Sobre qué serie se calcula. Ojo: el filtro achata los picos, "
-                "así que el pico sobre la señal original suele ser mayor."
-            )
-        else:
-            self.cmb_fuente.setToolTip(
-                "No hay ninguna señal visible con filtro: se calcula sobre la "
-                "señal original."
-            )
+        self.panel_calculo.set_hay_filtro(hay_filtro)
 
     def _rangos_padre_seleccionados(self):
         """Solo los rangos, sin sub-rangos.
 
-        Desde este panel la potencia se calcula únicamente sobre los rangos.
+        Desde este panel la fórmula se calcula únicamente sobre los rangos.
         Los sub-rangos se calculan en la ventana que se abre al hacer doble
         clic sobre un rango, que es donde se los ve en detalle.
         """
@@ -269,158 +179,31 @@ class Formulas(QFrame):
             if identificador not in subrangos
         ]
 
-    def _nombre_formula(self):
-        return formulas_logica.formula(self.formula_actual)["nombre"].lower()
-
-    def _actualizar_expresion(self):
-        """Muestra la expresión y el supuesto de la fórmula elegida."""
-        datos = formulas_logica.formula(self.formula_actual)
-        self.lbl_expresion.setText(
-            f"<b>{datos['expresion']}</b><br>{datos['descripcion']} "
-            "Se calcula sobre la fuerza vertical (Fz) dentro de cada rango "
-            "marcado, y la curva se dibuja solo sobre Fz."
-        )
-
-    def _cambiar_formula(self):
-        """Cambia la fórmula activa; si ya hay una curva, la vuelve a calcular."""
-        clave = self.cmb_formula.currentData()
-        if clave == self.formula_actual:
-            return
-        self.formula_actual = clave
-        self._actualizar_expresion()
-        self._actualizar_botones()
-        # Las dos fórmulas comparten la única curva de la gráfica de Fz: si
-        # había uno dibujado, se reemplaza por el nuevo en vez de dejar a la
-        # vista un resultado que ya no corresponde a lo elegido.
-        if self.ultimos_resultados is not None:
-            self._solicitar_formula()
-
     def _solicitar_formula(self):
         """Pide el cálculo con los rangos que estén marcados en ese momento."""
         seleccionados = self._rangos_padre_seleccionados()
         if not seleccionados:
             self.actualizar_estado_formula(
-                False, f"Marcá al menos un rango para calcular {self._nombre_formula()}."
+                False, "Marcá al menos un rango para poder calcular."
             )
             return
-        self.formulaSolicitada.emit(
-            {"rangos": seleccionados, "formula": self.formula_actual}
+        clave = self.panel_calculo.formula_seleccionada() or (
+            formulas_logica.formula_predeterminada()
         )
+        self.formulaSolicitada.emit({"clave": clave, "rangos": seleccionados})
 
     def actualizar_estado_formula(self, exito, mensaje):
-        color = "#66BB6A" if exito else "#EF5350"
-        if paleta.modo_daltonico_activo():
-            color = "#56B4E9" if exito else "#D55E00"
-        simbolo = "✓" if exito else "✕"
-        self.lbl_estado_formula.setStyleSheet(f"color: {color}; font-size: 11px;")
-        self.lbl_estado_formula.setText(f"{simbolo} {mensaje}" if mensaje else "")
+        """Forward: el componente de cálculo es quien pinta el estado."""
+        self.panel_calculo.actualizar_estado(exito, mensaje)
 
     def limpiar_resultados_formula(self):
         """Deja el recuadro como si nunca se hubiera aplicado una fórmula."""
-        self.ultimos_resultados = None
         self.modo_seleccion = None
-        self.lbl_resultados.setText("")
-        self.lbl_resultados.hide()
-        self.lbl_estado_formula.setText("")
-        self.btn_quitar_formula.setEnabled(False)
+        self.panel_calculo.limpiar_resultados()
 
     def mostrar_resultados_formula(self, datos):
         """Un bloque por rango calculado, con sus valores destacados."""
-        if not datos or not datos.get("resultados"):
-            self.limpiar_resultados_formula()
-            return
-        self.ultimos_resultados = datos
-
-        resultados = datos["resultados"]
-        unidad = datos.get("unidad") or ""
-        sufijo = f" {unidad}" if unidad else ""
-
-        encabezado = [(f"<b>{datos.get('nombre', 'Potencia')}</b>", "")]
-        senal = datos.get("senal")
-        procedencia = self._texto_procedencia(datos)
-        if senal:
-            procedencia = f"sobre {senal} · {procedencia.removeprefix('sobre ')}"
-        encabezado.append((procedencia, "color:#8A8A8A;"))
-        partes = [self._divs_con_separacion(encabezado)]
-
-        for resultado in resultados:
-            partes.append(self._bloque_valores(resultado, sufijo))
-
-        self.lbl_resultados.setText("".join(partes))
-        self.lbl_resultados.show()
-        self.btn_quitar_formula.setEnabled(True)
-
-    ETIQUETAS_FUENTE = {
-        "filtrada": "señal filtrada",
-        "original": "señal original",
-        "mixta": "señales mixtas",
-    }
-
-    @classmethod
-    def _texto_procedencia(cls, datos):
-        fuente = datos.get("fuente") or "original"
-        etiqueta = cls.ETIQUETAS_FUENTE.get(fuente, "señal original")
-        detalle = datos.get("detalle_filtro") or ""
-        return f"sobre {etiqueta} · {detalle}" if detalle else f"sobre {etiqueta}"
-
-    # Separación entre entradas, ≈ una línea en blanco.
-    SEPARACION_ENTRADAS = 12
-
-    def _bloque_valores(self, resultado, sufijo):
-        """Un rango como bloque con salto de línea, no como renglón corrido."""
-        resumen = resultado.get("resumen") or {}
-        pico = resumen.get("pico")
-
-        tramo = f"frames {resultado['desde']}–{resultado['hasta']}"
-        duracion = resultado.get("duracion_s")
-        if duracion:
-            tramo += f" · {duracion:.3g} s"
-        lineas = [
-            (f"<b>{resultado['nombre']}</b>", "color:#E0E0E0;"),
-            (tramo, "color:#8A8A8A; font-size:10px;"),
-        ]
-
-        if pico is None:
-            lineas.append(("sin datos válidos", "color:#8A8A8A;"))
-        elif resultado.get("detalles"):
-            # Fórmulas acumuladas (el impulso): el pico de la curva dice poco,
-            # lo que importa son los valores del tramo y su propia unidad.
-            for detalle in resultado["detalles"]:
-                valor = formulas_logica.formatear_valor(detalle["valor"])
-                unidad = detalle.get("unidad") or ""
-                sufijo_detalle = f" {unidad}" if unidad else ""
-                lineas.append(
-                    (f"{detalle['etiqueta']} <b>{valor}{sufijo_detalle}</b>", "")
-                )
-        else:
-            valor_pico = formulas_logica.formatear_valor(pico)
-            valor_media = formulas_logica.formatear_valor(resumen.get("media"))
-            lineas.append(
-                (
-                    f"pico <b>{valor_pico}{sufijo}</b> "
-                    f'<span style="color:#8A8A8A;">(frame {resumen["x_pico"]:g})</span>',
-                    "",
-                )
-            )
-            lineas.append((f"media <b>{valor_media}{sufijo}</b>", ""))
-
-        return self._divs_con_separacion(lineas)
-
-    @classmethod
-    def _divs_con_separacion(cls, lineas):
-        """Arma los <div> y separa del bloque siguiente.
-
-        El margen va en el **último div hoja**, no en un contenedor: Qt ignora
-        ``margin-bottom`` en un div que solo contiene otros divs, así que un
-        wrapper no separa nada (comprobado midiendo ``heightForWidth``).
-        """
-        partes = []
-        for indice, (contenido, estilo) in enumerate(lineas):
-            if indice == len(lineas) - 1:
-                estilo = f"{estilo} margin-bottom:{cls.SEPARACION_ENTRADAS}px;".strip()
-            atributo = f' style="{estilo}"' if estilo else ""
-            partes.append(f"<div{atributo}>{contenido}</div>")
-        return "".join(partes)
+        self.panel_calculo.mostrar_resultados(datos)
 
     def cargar_rangos(self, rangos):
         self._guardar_estados_visibles()
@@ -831,17 +614,16 @@ class Formulas(QFrame):
     def _actualizar_botones(self):
         self.btn_eliminar.setEnabled(bool(self._obtener_visibles_seleccionados()))
         self.btn_limpiar.setEnabled(bool(self.rangos))
-        # Las fórmulas se calculan sobre rangos (no sub-rangos): sin ninguno
-        # marcado no hay nada que calcular, así que el botón queda gris con la
-        # razón en el tooltip.
+        # El cálculo corre sobre rangos (no sub-rangos): sin ninguno marcado
+        # no hay nada que calcular, así que el botón queda gris con la razón en
+        # el tooltip. El texto es genérico: vale para cualquier fórmula.
         hay_seleccion = bool(self._rangos_padre_seleccionados())
-        nombre = self._nombre_formula()
-        self.btn_aplicar_formula.setEnabled(hay_seleccion)
-        self.btn_aplicar_formula.setToolTip(
-            f"Calcula {nombre} en los rangos marcados. Los sub-rangos se "
-            "calculan al abrirlos con doble clic."
+        self.panel_calculo.set_aplicar_habilitado(
+            hay_seleccion,
+            "Calcula la fórmula seleccionada en los rangos marcados. Los "
+            "sub-rangos se calculan al abrirlos con doble clic."
             if hay_seleccion
-            else f"Marcá al menos un rango para poder calcular {nombre}."
+            else "Marcá al menos un rango para poder calcular.",
         )
 
     def mostrar_error_rango(self, mensaje):
