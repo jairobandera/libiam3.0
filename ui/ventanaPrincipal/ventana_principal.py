@@ -78,13 +78,14 @@ class VentanaPrincipal(QWidget):
         self.cabecera.noPreguntarSuperposicionCambiada.connect(
             self.area_central.set_no_preguntar_superposicion
         )
-        # El área central cambia la paleta activa; los paneles que muestran
-        # esos colores se repintan después.
-        self.cabecera.modoDaltonicoCambiado.connect(
-            self.area_central.set_modo_daltonico
+        # El área central repinta con la paleta que ya sincronizó
+        # «logica.accesibilidad»; los paneles que muestran esos colores
+        # (leyenda de filtros) se refrescan después.
+        self.cabecera.accesibilidadCambiada.connect(
+            self.area_central.aplicar_accesibilidad
         )
-        self.cabecera.modoDaltonicoCambiado.connect(
-            lambda _activo: self.panel_derecho.filtros.aplicar_paleta()
+        self.cabecera.accesibilidadCambiada.connect(
+            lambda: self.panel_derecho.filtros.aplicar_paleta()
         )
         self.cabecera.guardarSolicitado.connect(self._guardar_proyecto)
         self.cabecera.cargarSolicitado.connect(self._cargar_proyecto)
@@ -142,9 +143,9 @@ class VentanaPrincipal(QWidget):
             self.area_central.limpiar_rangos
         )
 
-        # --- Potencia ---
+        # --- Fórmulas ---
         self.panel_derecho.formulas.formulaSolicitada.connect(
-            self.area_central.aplicar_potencia
+            self.area_central.aplicar_formula
         )
         self.panel_derecho.formulas.quitarFormulaSolicitado.connect(
             self.area_central.quitar_formula

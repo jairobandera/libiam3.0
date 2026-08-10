@@ -7,7 +7,7 @@ from unittest import mock
 
 import numpy as np
 
-from logica import formulas, paleta, proyecto
+from logica import accesibilidad, formulas, paleta, proyecto
 from logica.filtros_senales import (
     ErrorConfiguracionFiltro,
     aplicar_butterworth,
@@ -303,6 +303,142 @@ class TestPaleta(unittest.TestCase):
     def test_la_paleta_accesible_no_repite_colores(self):
         colores = paleta.PALETAS[paleta.MODO_DALTONICO]["rangos"]
         self.assertEqual(len(colores), len(set(colores)))
+
+    def test_nuevos_modos_y_modo_visual_desconocido(self):
+        # La paleta rojo-verde es la misma Okabe-Ito del modo histórico.
+        self.assertEqual(paleta.MODO_DALTONICO, paleta.MODO_ROJO_VERDE)
+        self.assertIn(paleta.MODO_COMPLETO, paleta.PALETAS)
+        self.assertIn(paleta.MODO_AZUL_AMARILLO, paleta.PALETAS)
+        # Un modo desconocido no cambia la paleta activa.
+        actual = paleta.modo_actual()
+        self.assertFalse(paleta.set_modo_visual("no_existe"))
+        self.assertEqual(paleta.modo_actual(), actual)
+
+    def test_modo_completo_es_una_rampa_de_grises_sin_repetir(self):
+        paleta.set_modo_visual(paleta.MODO_COMPLETO)
+        try:
+            grises = paleta.colores_rangos()
+            self.assertEqual(len(grises), len(set(grises)))
+            # Todos son grises (R == G == B).
+            for hex_color in grises:
+                valor = hex_color[1:]
+                rojo = int(valor[0:2], 16)
+                verde = int(valor[2:4], 16)
+                azul = int(valor[4:6], 16)
+                self.assertEqual((rojo, verde), (azul, azul))
+        finally:
+            paleta.set_modo_visual(paleta.MODO_ESTANDAR)
+
+    def test_nombre_color_resuelve_y_falla_de_grado(self):
+        self.assertEqual(paleta.nombre_color("#42A5F5"), "azul")
+        # Acepta minúsculas y sin numeral.
+        self.assertEqual(paleta.nombre_color("42a5f5"), "azul")
+        # Un color no conocido devuelve el propio valor.
+        self.assertEqual(paleta.nombre_color("#123456"), "#123456")
+
+    def test_paleta_azul_amarillo_esta_definida_y_sin_repetir(self):
+        colores = paleta.PALETAS[paleta.MODO_AZUL_AMARILLO]
+        rangos = colores["rangos"]
+        self.assertEqual(len(rangos), len(set(rangos)))
+        # Todos los colores usados tienen nombre humano para el tooltip.
+        usados = list(rangos) + [colores["senal_original"], colores["senal_filtrada"],
+                                 colores["senal_formula"], colores["seleccion"]]
+        for hex_color in usados:
+            self.assertIn(hex_color.upper(), paleta.NOMBRES_COLOR)
+
+
+class TestAccesibilidad(unittest.TestCase):
+    def setUp(self):
+        accesibilidad.reiniciar()
+        paleta.set_modo_visual(paleta.MODO_ESTANDAR)
+
+    def tearDown(self):
+        accesibilidad.reiniciar()
+        paleta.set_modo_visual(paleta.MODO_ESTANDAR)
+
+    def test_por_defecto_el_modo_esta_desactivado_y_sin_tipo(self):
+        self.assertFalse(accesibilidad.activo())
+        self.assertIsNone(accesibilidad.tipo_vision())
+        # Las opciones adicionales vienen activas por defecto.
+        self.assertTrue(accesibilidad.mostrar_nombre_color())
+        self.assertTrue(accesibilidad.estilos_linea_activos())
+        self.assertTrue(accesibilidad.aumentar_grosor_activo())
+
+    def test_desactivado_se_comporta_como_hoy(self):
+        # Grosor base, línea sólida y paleta estándar sin importar las opciones.
+        self.assertEqual(accesibilidad.grosor_senal("original"), 1.2)
+        self.assertEqual(accesibilidad.grosor_senal("filtrada"), 2.2)
+        self.assertEqual(accesibilidad.grosor_rango(), 2.0)
+        for tipo in (accesibilidad.TIPO_LINEA_ORIGINAL,
+                     accesibilidad.TIPO_LINEA_FILTRADA,
+                     accesibilidad.TIPO_LINEA_FORMULA):
+            self.assertEqual(accesibilidad.estilo_linea(tipo), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ESTANDAR)
+
+    def test_activar_con_tipo_sincroniza_la_paleta(self):
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_ROJO_VERDE)
+        # Con el modo apagado el tipo no cambia la paleta.
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ESTANDAR)
+        accesibilidad.set_activo(True)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ROJO_VERDE)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_COMPLETO)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_COMPLETO)
+        accesibilidad.set_activo(False)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ESTANDAR)
+
+    def test_azul_amarillo_es_un_tipo_disponible_y_sincroniza_la_paleta(self):
+        self.assertIn(accesibilidad.TIPO_AZUL_AMARILLO, accesibilidad.TIPOS_DISPONIBLES)
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_AZUL_AMARILLO)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_AZUL_AMARILLO)
+        # Las opciones de renderizado aplican igual que en los otros tipos.
+        self.assertEqual(accesibilidad.grosor_senal("original"), round(1.2 * 1.7, 2))
+        self.assertEqual(accesibilidad.estilo_linea("formula"), accesibilidad.ESTILO_DISCONTINUA)
+
+    def test_tipo_desconocido_no_cambia_nada(self):
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_ROJO_VERDE)
+        accesibilidad.set_tipo_vision("no_existe")
+        self.assertEqual(accesibilidad.tipo_vision(), accesibilidad.TIPO_ROJO_VERDE)
+        self.assertEqual(paleta.modo_actual(), paleta.MODO_ROJO_VERDE)
+
+    def test_opciones_adicionales_son_independientes(self):
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_ROJO_VERDE)
+        # Desactivar solo el grosor: los estilos se mantienen.
+        accesibilidad.set_aumentar_grosor(False)
+        self.assertEqual(accesibilidad.grosor_senal("original"), 1.2)
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_PUNTEADA)
+        # Desactivar solo los estilos: el grosor sigue en su estado (base).
+        accesibilidad.set_estilos_linea(False)
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(accesibilidad.estilo_linea("filtrada"), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(accesibilidad.grosor_senal("filtrada"), 2.2)
+        # Reactivar el grosor sin tocar los estilos: ampliado y sigue sólido.
+        accesibilidad.set_aumentar_grosor(True)
+        self.assertGreater(accesibilidad.grosor_senal("filtrada"), 2.2)
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_SOLIDA)
+        # Reactivar los estilos.
+        accesibilidad.set_estilos_linea(True)
+        self.assertEqual(accesibilidad.estilo_linea("formula"), accesibilidad.ESTILO_DISCONTINUA)
+
+    def test_grosor_y_estilo_con_modo_activo(self):
+        accesibilidad.set_activo(True)
+        accesibilidad.set_tipo_vision(accesibilidad.TIPO_COMPLETO)
+        self.assertEqual(accesibilidad.grosor_senal("original"), round(1.2 * 1.7, 2))
+        self.assertEqual(accesibilidad.grosor_rango(), round(2.0 * 1.7, 2))
+        self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_PUNTEADA)
+        self.assertEqual(accesibilidad.estilo_linea("filtrada"), accesibilidad.ESTILO_SOLIDA)
+        self.assertEqual(accesibilidad.estilo_linea("formula"), accesibilidad.ESTILO_DISCONTINUA)
+
+    def test_la_opcion_de_nombre_es_un_flag_independiente_del_modo(self):
+        accesibilidad.set_mostrar_nombre_color(False)
+        self.assertFalse(accesibilidad.mostrar_nombre_color())
+        accesibilidad.set_activo(True)
+        # Con el modo activo y la opción apagada no se muestra.
+        self.assertFalse(accesibilidad.mostrar_nombre_color())
+        accesibilidad.set_mostrar_nombre_color(True)
+        self.assertTrue(accesibilidad.mostrar_nombre_color())
 
 
 class TestProyecto(unittest.TestCase):

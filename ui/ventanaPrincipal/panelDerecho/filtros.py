@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from logica import paleta
+from logica import accesibilidad, paleta
 
 
 class Filtros(QFrame):
@@ -384,14 +384,32 @@ class Filtros(QFrame):
         if columnas:
             self.restaurarSolicitado.emit(columnas)
 
+    def _glifo_estilo(self, tipo_linea):
+        """Símbolo de la leyenda según el estilo simbólico de accesibilidad.
+
+        Refleja visualmente el estilo de línea vigente (y su grosor aludido):
+        con el modo accesible desactivado todo es sólido, igual que en la
+        gráfica.
+        """
+        glifos = {
+            accesibilidad.ESTILO_SOLIDA: "▬ ",
+            accesibilidad.ESTILO_DISCONTINUA: "─┄",
+            accesibilidad.ESTILO_PUNTEADA: "···",
+        }
+        return glifos.get(accesibilidad.estilo_linea(tipo_linea), "▬ ")
+
     def aplicar_paleta(self):
-        """Actualiza la leyenda de colores con la paleta activa."""
+        """Actualiza la leyenda de colores con la paleta activa.
+
+        Incluye el estilo simulado de cada tipo de señal cuando el modo
+        accesible está activo, para que la leyenda coincida con la gráfica.
+        """
         self.lbl_leyenda_colores.setText(
             f'<span style="color:{paleta.color_senal_original()}; font-weight:600;">'
-            "▬ Original</span>"
+            f"{self._glifo_estilo(accesibilidad.TIPO_LINEA_ORIGINAL)}Original</span>"
             " &nbsp;&nbsp; "
             f'<span style="color:{paleta.color_senal_filtrada()}; font-weight:600;">'
-            "▬ Filtrada</span>"
+            f"{self._glifo_estilo(accesibilidad.TIPO_LINEA_FILTRADA)}Filtrada</span>"
         )
 
     def actualizar_estado(self, exito, mensaje):
