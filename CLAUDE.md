@@ -73,30 +73,43 @@ Column-name → signal-type mapping is **learned and persisted in SQLite** (`lib
 
 `logica/filtros_senales.py` is the real, tested implementation: `aplicar_butterworth()` (4th-order, zero-phase `filtfilt`), validating cutoffs against Nyquist, interpolating over NaNs before filtering and restoring them after. Filtered curves are overlaid (original blue, filtered orange) — filtering never replaces the original. `logica/procesamiento_filtros.py` is an older, untested duplicate; prefer `filtros_senales.py`.
 
-### Potencia (the only formula)
+### Formulas: potencia and impulso
 
-`logica/formulas.py` is the engine, UI-free and tested. It computes **mechanical power from the vertical force**, the standard force-plate method:
+`logica/formulas.py` is the engine, UI-free and tested. Both formulas derive from **the vertical force**, the standard force-plate method:
 
 ```
 a(t) = (Fz(t) − m·g) / m      aceleracion()  — the plate already reads m·g at rest,
 v(t) = ∫ a(t) dt              velocidad()      so only the excess accelerates the subject
-P(t) = Fz(t) · v(t)           potencia()
+P(t) = Fz(t) · v(t)           potencia()     — instantaneous, in W
+J(t) = ∫ (Fz(t) − m·g) dt     impulso()      — accumulated, in N·s
 ```
 
-The integration is **trapezoidal and restarts from v = 0 inside every marked range** — each range is treated as an independent gesture beginning at rest, which is how a jump is marked. A range that starts mid-movement therefore reports power relative to that assumption, not an absolute value; that's inherent to integrating force alone, not a bug.
+`_integrar_acumulado()` is the **single trapezoidal integrator** behind both `velocidad()` and `impulso()` — change the integration rule there and both follow. It **restarts from zero inside every marked range**: each range is an independent gesture, not a continuum.
 
-`_validar_parametros()` gates on mass, gravity and sampling rate, each with a message naming what's missing (`TestPotencia` covers a constant-acceleration case whose result is checkable by hand: 2·m·g for 1 s gives exactly 10 m/s and 14 000 W).
+The at-rest assumption differs between the two, and that difference is the reason to offer both:
 
-**Power is computed on parent ranges only, never on sub-ranges.** Sub-ranges get their own calculation later, inside the `VentanaRegion` that opens on double-click — that's where they're actually visible. `Formulas._rangos_padre_seleccionados()` filters them out for both the request and the Aplicar button's enabled state, and `_rangos_seleccionados()` in `AreaCentralGraficas` drops `es_subrango` again so the rule holds even if another caller appears.
+- **Potencia** needs absolute velocity, so the range must start with the subject still. A range that starts mid-movement reports power relative to that assumption — inherent to integrating force alone, not a bug.
+- **Impulso** does not. By the impulse-momentum theorem `J = m·Δv`, so a range's total is the *change* in velocity however the tramo starts. `impulso()` is exactly `masa · velocidad()`; the tests assert that identity on a random signal.
 
-**Power is computed on ranges, not on the whole signal.** `Formulas._solicitar_potencia()` sends the IDs currently checked, so the Todos/Pares/Impares/Ninguno buttons drive what gets calculated. `_marcar_modo_seleccion()` stores the active mode and sets an `activo` property that `#btnResetMapeo[activo="true"]` styles with a blue border. With nothing selected the Aplicar button is disabled and says why in its tooltip.
+`detalles_impulso()` returns the per-range values the panel shows: net impulse, Δv, and the **propulsive/braking split** (the net force clipped by sign and integrated separately — at plate sampling rates the zero-crossing trapezoid error is negligible).
 
-`AreaCentralGraficas.aplicar_potencia()`:
+`FORMULAS` is the registry (`nombre`, `expresion`, `unidad`, `calcular`, `descripcion`) keyed by `CLAVE_POTENCIA` / `CLAVE_IMPULSO`; `formula(clave)` falls back to potencia on an unknown key so the UI never has to branch on names. **Adding a third formula means adding an entry there**, not touching the UI.
+
+`_validar_parametros()` gates on mass, gravity and sampling rate, each with a message naming what's missing. `TestPotencia` and `TestImpulso` each cover a constant-force case checkable by hand: 2·m·g for 1 s gives exactly 10 m/s, 14 000 W and 700 N·s.
+
+**Formulas are computed on parent ranges only, never on sub-ranges.** Sub-ranges get their own calculation later, inside the `VentanaRegion` that opens on double-click — that's where they're actually visible. `Formulas._rangos_padre_seleccionados()` filters them out for both the request and the Aplicar button's enabled state, and `_rangos_seleccionados()` in `AreaCentralGraficas` drops `es_subrango` again so the rule holds even if another caller appears.
+
+**Formulas are computed on ranges, not on the whole signal.** `Formulas._solicitar_formula()` sends the IDs currently checked plus the selected `formula` key, so the Todos/Pares/Impares/Ninguno buttons drive what gets calculated. `_marcar_modo_seleccion()` stores the active mode and sets an `activo` property that `#btnResetMapeo[activo="true"]` styles with a blue border. With nothing selected the Aplicar button is disabled and says why in its tooltip.
+
+**Only one formula curve exists at a time.** `GraficaSenal` has a single `curva_formula` slot and both formulas draw on Fz, so the panel's `Fórmula` combo picks which one. `Formulas._cambiar_formula()` re-requests the calculation when a curve is already on screen, rather than leaving a curve that no longer matches the selection.
+
+`AreaCentralGraficas.aplicar_formula()` (the `formula` key selects which; defaults to potencia):
 
 - Always uses the column mapped as **Fuerza Z** (`_columna_vertical()`); it refuses with an explanatory message if Fz isn't mapped or is hidden.
-- `_rangos_seleccionados()` keeps only ranges whose graph is visible and drops duplicate `(desde, hasta)` pairs — two signals can carry the same interval and power comes from Fz either way.
+- `_rangos_seleccionados()` keeps only ranges whose graph is visible and drops duplicate `(desde, hasta)` pairs — two signals can carry the same interval and both formulas come from Fz either way.
 - Draws **only on the Fz graph**; every other graph gets `limpiar_curva_formula()`.
 - Re-applies itself after `_crear_graficas()` / `_actualizar_datos_graficas()`, since `set_datos()` rebuilds the curves. Mass and gravity arrive from `PanelIzquierdo.variablesCambiaron`.
+- Each result row carries `detalles` (empty for potencia). `Formulas._bloque_valores()` renders those instead of pico/media when present, because the peak of an *accumulated* curve says little on its own — each entry brings its own unit, so N·s and m/s can sit in the same block.
 
 **Filtering is deliberately NOT required to calculate.** A low-pass flattens peaks, so gating the calculation behind a filter would bias every reported peak downward. What matters instead is **provenance**: `fuente_calculo` ("filtrada"/"original") is user-selectable in the panel, `_fuente_de_columna()` reports what was *actually* used, and `filtros_por_columna` keeps each signal's filter description. `fuente` is the same vocabulary the ranges use and is persisted as a column in the annotations CSV (additive; older files read back as `""`).
 
@@ -104,7 +117,7 @@ In `GraficaSenal`:
 
 - `set_curva_formula(x, y, ...)` takes explicit `x` because the curve now covers only the marked stretches. **A NaN between segments plus `connect="finite"`** draws the ranges separately instead of joining them with a line that doesn't exist.
 - `picos` carries one point per range, each with its own summary; the hover box shows the values of the range you're pointing at.
-- The curve goes on a **second right-hand ViewBox** (`vb_formula`) when it can't share the signal's axis — watts against newtons always can't. `_necesita_eje_propio()` decides on **scale, not just unit**: if either curve would occupy less than `FRACCION_MINIMA_EJE_COMPARTIDO` of the combined span, it gets its own axis.
+- The curve goes on a **second right-hand ViewBox** (`vb_formula`) when it can't share the signal's axis — watts or N·s against newtons never can. `_necesita_eje_propio()` decides on **scale, not just unit**: if either curve would occupy less than `FRACCION_MINIMA_EJE_COMPARTIDO` of the combined span, it gets its own axis.
 - **Never call `vb_formula.autoRange()`**: it reframes X too, and since that ViewBox is X-linked to the main one it would drag the signal's view to the range stretch and desynchronise it from the other graphs. Only `enableAutoRange(axis="y")`.
 - `_actualizar_caja_valor()` shows a `pg.TextItem` box **only while the cursor is over a peak or the curve**, and hides it on leaving. It carries the whole summary (peak, min, mean, RMS), so `_anclaje_caja()` compares the box's **real pixel height** (converted through `viewBox.viewPixelSize()`) against the free space on each side instead of using a fixed threshold.
 - Don't measure a `TextItem`'s on-screen rect with `mapRectToScene()`: it ignores transformations, so the mapped rect comes back shrunk and useless. Compare `boundingRect().height()` (already in pixels) scaled by `viewPixelSize()`.

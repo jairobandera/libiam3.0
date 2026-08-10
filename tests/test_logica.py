@@ -223,6 +223,117 @@ class TestPotencia(unittest.TestCase):
             formulas.potencia([700.0], self.MASA, self.G, 100.0)
 
 
+class TestImpulso(unittest.TestCase):
+    MASA = 70.0
+    G = 10.0  # redondo, para que las cuentas del test se sigan a mano
+    FRECUENCIA = 100.0
+
+    def test_en_reposo_el_impulso_es_cero(self):
+        # Con Fz igual al peso la fuerza neta es cero: no se acumula impulso.
+        fz = np.full(50, self.MASA * self.G)
+        resultado = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        np.testing.assert_allclose(resultado, 0.0, atol=1e-9)
+
+    def test_arranca_de_cero(self):
+        fz = np.full(10, self.MASA * self.G * 2)
+        j = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        self.assertEqual(j[0], 0.0)
+
+    def test_integra_una_fuerza_neta_constante(self):
+        # Fz = 2·m·g deja una fuerza neta de m·g = 700 N.
+        # Tras 1 s el impulso tiene que ser 700 N · 1 s = 700 N·s.
+        fz = np.full(int(self.FRECUENCIA) + 1, self.MASA * self.G * 2)
+        j = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        self.assertAlmostEqual(j[-1], 700.0, places=6)
+
+    def test_equivale_a_masa_por_velocidad(self):
+        # Teorema del impulso: J = m·Δv. Vale para cualquier señal.
+        rng = np.random.default_rng(7)
+        fz = self.MASA * self.G + rng.normal(0.0, 300.0, size=200)
+
+        j = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        v = formulas.velocidad(fz, self.MASA, self.G, self.FRECUENCIA)
+
+        np.testing.assert_allclose(j, self.MASA * v, rtol=1e-9, atol=1e-9)
+
+    def test_separa_la_fase_de_frenado_de_la_de_propulsion(self):
+        # Fuerza neta lineal de −700 N a +700 N en 1 s: cruza cero justo en una
+        # muestra, así que las dos áreas son triángulos exactos de 175 N·s.
+        t = np.linspace(0.0, 1.0, int(self.FRECUENCIA) + 1)
+        fz = self.MASA * self.G + (1400.0 * t - 700.0)
+
+        valores = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        detalles = {
+            detalle["etiqueta"]: detalle["valor"]
+            for detalle in formulas.detalles_impulso(
+                valores, fz, self.MASA, self.G, self.FRECUENCIA
+            )
+        }
+
+        self.assertAlmostEqual(detalles["propulsivo"], 175.0, places=6)
+        self.assertAlmostEqual(detalles["frenado"], -175.0, places=6)
+        # Lo que sube y lo que baja se cancela: el neto es cero.
+        self.assertAlmostEqual(detalles["impulso neto"], 0.0, places=6)
+
+    def test_el_delta_de_velocidad_sale_del_impulso_neto(self):
+        # 700 N·s sobre 70 kg son 10 m/s de cambio de velocidad.
+        fz = np.full(int(self.FRECUENCIA) + 1, self.MASA * self.G * 2)
+        valores = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        detalles = {
+            detalle["etiqueta"]: detalle["valor"]
+            for detalle in formulas.detalles_impulso(
+                valores, fz, self.MASA, self.G, self.FRECUENCIA
+            )
+        }
+        self.assertAlmostEqual(detalles["Δ velocidad"], 10.0, places=6)
+
+    def test_las_unidades_acompanan_a_cada_valor(self):
+        fz = np.full(20, self.MASA * self.G * 2)
+        valores = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
+        detalles = formulas.detalles_impulso(
+            valores, fz, self.MASA, self.G, self.FRECUENCIA
+        )
+        unidades = {d["etiqueta"]: d["unidad"] for d in detalles}
+        self.assertEqual(unidades["impulso neto"], "N·s")
+        self.assertEqual(unidades["Δ velocidad"], "m/s")
+
+    def test_sin_masa_explica_que_falta(self):
+        with self.assertRaises(formulas.ErrorFormula) as contexto:
+            formulas.impulso([700.0, 700.0], None, self.G, self.FRECUENCIA)
+        self.assertIn("masa", str(contexto.exception).lower())
+
+    def test_sin_frecuencia_explica_que_falta(self):
+        with self.assertRaises(formulas.ErrorFormula) as contexto:
+            formulas.impulso([700.0, 700.0], self.MASA, self.G, 0)
+        self.assertIn("frecuencia", str(contexto.exception).lower())
+
+    def test_rango_de_una_sola_muestra_no_revienta(self):
+        with self.assertRaises(formulas.ErrorFormula):
+            formulas.impulso([700.0], self.MASA, self.G, self.FRECUENCIA)
+
+
+class TestRegistroFormulas(unittest.TestCase):
+    def test_cada_formula_trae_nombre_unidad_y_funcion(self):
+        for clave in (formulas.CLAVE_POTENCIA, formulas.CLAVE_IMPULSO):
+            datos = formulas.formula(clave)
+            self.assertTrue(datos["nombre"])
+            self.assertTrue(datos["unidad"])
+            self.assertTrue(callable(datos["calcular"]))
+
+    def test_una_clave_desconocida_cae_en_potencia(self):
+        self.assertEqual(
+            formulas.formula("inexistente")["nombre"], formulas.NOMBRE_POTENCIA
+        )
+
+    def test_la_funcion_del_registro_es_la_del_modulo(self):
+        fz = np.full(30, 1400.0)
+        calcular = formulas.formula(formulas.CLAVE_IMPULSO)["calcular"]
+        np.testing.assert_allclose(
+            calcular(fz, 70.0, 10.0, 100.0),
+            formulas.impulso(fz, 70.0, 10.0, 100.0),
+        )
+
+
 class TestResumenFormula(unittest.TestCase):
     def test_encuentra_el_pico_y_su_posicion(self):
         x = np.array([10.0, 11.0, 12.0, 13.0])

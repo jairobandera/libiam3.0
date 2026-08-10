@@ -1007,7 +1007,7 @@ class AreaCentralGraficas(QFrame):
         # Las gráficas se rehicieron desde cero: si había una fórmula puesta,
         # se vuelve a aplicar sobre las nuevas curvas.
         if self.formula_activa:
-            self.aplicar_potencia(self.formula_activa, avisar=False)
+            self.aplicar_formula(self.formula_activa, avisar=False)
 
     def _actualizar_visibilidad(self):
         if not self.graficas_por_columna:
@@ -1063,7 +1063,7 @@ class AreaCentralGraficas(QFrame):
         # set_datos() rehace las curvas, así que la fórmula se vuelve a poner
         # (y se recalcula sobre los datos filtrados, que es lo que se espera).
         if self.formula_activa:
-            self.aplicar_potencia(self.formula_activa, avisar=False)
+            self.aplicar_formula(self.formula_activa, avisar=False)
 
     def set_aplicar_corte_todas(self, activo):
         """Define si el próximo recorte se aplica a todas las gráficas visibles."""
@@ -1626,7 +1626,7 @@ class AreaCentralGraficas(QFrame):
         self.gravedad = variables.get("gravedad") or self.gravedad
         # Si hay una fórmula que depende de la masa, se recalcula sola.
         if self.formula_activa:
-            self.aplicar_potencia(self.formula_activa, avisar=False)
+            self.aplicar_formula(self.formula_activa, avisar=False)
 
     def _fuente_de_columna(self, columna):
         """Sobre qué serie se calcula esta columna, de verdad.
@@ -1666,7 +1666,7 @@ class AreaCentralGraficas(QFrame):
             return
         self.fuente_calculo = valor
         if self.formula_activa:
-            self.aplicar_potencia(self.formula_activa, avisar=False)
+            self.aplicar_formula(self.formula_activa, avisar=False)
 
     def _rangos_seleccionados(self, identificadores):
         """Convierte los IDs marcados en el panel en intervalos de frames.
@@ -1714,31 +1714,36 @@ class AreaCentralGraficas(QFrame):
                 return columna
         return None
 
-    def aplicar_potencia(self, configuracion=None, avisar=True):
-        """Calcula la potencia mecánica dentro de cada rango seleccionado.
+    def aplicar_formula(self, configuracion=None, avisar=True):
+        """Calcula la fórmula elegida dentro de cada rango seleccionado.
 
         Se usa siempre la fuerza vertical (Fz): es la que hace el trabajo
-        contra la gravedad. La curva se dibuja solo sobre la gráfica de Fz y
-        solo dentro de los tramos marcados.
+        contra la gravedad y de la que sale el impulso. La curva se dibuja solo
+        sobre la gráfica de Fz y solo dentro de los tramos marcados.
         """
+        configuracion = dict(configuracion or {})
+        clave = configuracion.get("formula") or formulas.CLAVE_POTENCIA
+        datos_formula = formulas.formula(clave)
+        nombre_formula = datos_formula["nombre"].lower()
+
         if self.df_grafica_original is None:
             self.formulaEstadoCambiado.emit(False, "Primero cargá un archivo CSV.")
             return
 
-        configuracion = dict(configuracion or {})
         seleccionados = configuracion.get("rangos") or []
 
         columna_z = self._columna_vertical()
         if columna_z is None:
             self.formulaEstadoCambiado.emit(
-                False, "Necesito la señal de fuerza vertical (Fz) para la potencia."
+                False,
+                f"Necesito la señal de fuerza vertical (Fz) para {nombre_formula}.",
             )
             return
 
         grafica_z = self.graficas_por_columna.get(columna_z)
         if grafica_z is None or grafica_z.isHidden():
             self.formulaEstadoCambiado.emit(
-                False, "Mostrá la gráfica de Fz para calcular la potencia."
+                False, f"Mostrá la gráfica de Fz para calcular {nombre_formula}."
             )
             return
 
@@ -1747,12 +1752,12 @@ class AreaCentralGraficas(QFrame):
             self.formulaEstadoCambiado.emit(
                 False,
                 "Marcá al menos un rango en una gráfica visible para calcular "
-                "la potencia.",
+                f"{nombre_formula}.",
             )
             return
 
         try:
-            resultados, tramos = self._calcular_potencia(columna_z, rangos)
+            resultados, tramos = self._calcular_formula(columna_z, rangos, clave)
         except ErrorFormula as exc:
             self.formulaEstadoCambiado.emit(False, str(exc))
             return
@@ -1771,16 +1776,16 @@ class AreaCentralGraficas(QFrame):
                 grafica.limpiar_curva_formula()
 
         grafica_z.set_curva_formula(
-            tramos["x"], tramos["y"], formulas.NOMBRE_POTENCIA,
-            formulas.UNIDAD_POTENCIA, picos=tramos["picos"],
+            tramos["x"], tramos["y"], datos_formula["nombre"],
+            datos_formula["unidad"], picos=tramos["picos"],
         )
 
         fuente, detalle = self._procedencia([columna_z])
         self.resultadosFormulaCambiaron.emit(
             {
-                "nombre": formulas.NOMBRE_POTENCIA,
-                "expresion": formulas.EXPRESION_POTENCIA,
-                "unidad": formulas.UNIDAD_POTENCIA,
+                "nombre": datos_formula["nombre"],
+                "expresion": datos_formula["expresion"],
+                "unidad": datos_formula["unidad"],
                 "senal": grafica_z.nombre_senal,
                 "fuente": fuente,
                 "detalle_filtro": detalle,
@@ -1791,13 +1796,13 @@ class AreaCentralGraficas(QFrame):
             cantidad = len(resultados)
             destino = "un rango" if cantidad == 1 else f"{cantidad} rangos"
             self.formulaEstadoCambiado.emit(
-                True, f"Se calculó la potencia en {destino}."
+                True, f"Se calculó {nombre_formula} en {destino}."
             )
 
-    def _calcular_potencia(self, columna_z, rangos):
-        """Potencia dentro de cada rango, y los tramos a dibujar.
+    def _calcular_formula(self, columna_z, rangos, clave):
+        """Valores de la fórmula en cada rango, y los tramos a dibujar.
 
-        Cada rango se integra por separado partiendo del reposo: son gestos
+        Cada rango se integra por separado arrancando de cero: son gestos
         independientes, no un continuo.
         """
         x_total = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
@@ -1805,6 +1810,7 @@ class AreaCentralGraficas(QFrame):
         if fz_total is None:
             raise ErrorFormula("No se pudo leer la fuerza vertical.")
 
+        calcular = formulas.formula(clave)["calcular"]
         frecuencia = self.frecuencia_grafica
         resultados = []
         segmentos_x, segmentos_y, picos = [], [], []
@@ -1819,11 +1825,20 @@ class AreaCentralGraficas(QFrame):
                 continue
 
             x_tramo = x_total[mascara]
-            valores = formulas.potencia(
-                fz_total[mascara], self.masa_sujeto, self.gravedad, frecuencia
-            )
+            fz_tramo = fz_total[mascara]
+            valores = calcular(fz_tramo, self.masa_sujeto, self.gravedad, frecuencia)
             datos_resumen = formulas.resumen(x_tramo, valores)
             nombre_rango = datos.get("nombre") or f"Rango {datos['numero']}"
+
+            # El impulso trae además su valor total, el Δv y las dos fases; el
+            # pico de una curva acumulada por sí solo no dice gran cosa.
+            detalles = (
+                formulas.detalles_impulso(
+                    valores, fz_tramo, self.masa_sujeto, self.gravedad, frecuencia
+                )
+                if clave == formulas.CLAVE_IMPULSO
+                else []
+            )
 
             resultados.append(
                 {
@@ -1834,6 +1849,7 @@ class AreaCentralGraficas(QFrame):
                     "hasta": hasta,
                     "duracion_s": (hasta - desde) / frecuencia if frecuencia else None,
                     "resumen": datos_resumen,
+                    "detalles": detalles,
                 }
             )
 
@@ -1883,19 +1899,19 @@ class AreaCentralGraficas(QFrame):
             return FUENTE_ORIGINAL, ""
         return FUENTE_MIXTA, "algunas señales filtradas y otras no"
 
-    def potencia_disponible(self):
-        """Si están los datos mínimos para poder calcular potencia."""
+    def formula_disponible(self):
+        """Si están los datos mínimos para poder calcular (masa, fs y Fz)."""
         return bool(
             self.masa_sujeto and self.frecuencia_grafica and self._columna_vertical()
         )
 
     def quitar_formula(self):
-        """Saca la curva de potencia de todas las gráficas."""
+        """Saca la curva de la fórmula de todas las gráficas."""
         self.formula_activa = None
         for grafica in self.graficas_por_columna.values():
             grafica.limpiar_curva_formula()
         self.resultadosFormulaCambiaron.emit(None)
-        self.formulaEstadoCambiado.emit(True, "Se quitó la curva de potencia.")
+        self.formulaEstadoCambiado.emit(True, "Se quitó la curva del cálculo.")
 
 
     def aplicar_filtro(self, configuracion):

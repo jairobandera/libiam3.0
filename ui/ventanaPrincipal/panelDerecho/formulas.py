@@ -47,6 +47,7 @@ class Formulas(QFrame):
         self.subrangos_colapsados = set()
         self.ultimos_resultados = None
         self.modo_seleccion = None
+        self.formula_actual = formulas_logica.CLAVE_POTENCIA
         self.init_ui()
 
     def init_ui(self):
@@ -150,22 +151,33 @@ class Formulas(QFrame):
         self._actualizar_botones()
 
     def _crear_seccion_formulas(self):
-        """Recuadro de Potencia: se calcula sobre los rangos marcados."""
+        """Recuadro de cálculos: se aplican sobre los rangos marcados."""
         seccion = QFrame()
         seccion.setObjectName("seccionFormulas")
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(6)
 
-        titulo = QLabel("Potencia")
+        titulo = QLabel("Cálculos")
         titulo.setObjectName("tituloSeccionMapeo")
         layout.addWidget(titulo)
 
-        self.lbl_expresion = QLabel(
-            f"<b>{formulas_logica.EXPRESION_POTENCIA}</b><br>"
-            "Se calcula sobre la fuerza vertical (Fz), dentro de cada rango "
-            "marcado y arrancando del reposo. La curva se dibuja solo sobre Fz."
-        )
+        # Qué se calcula. Las dos fórmulas salen de Fz y se dibujan sobre esa
+        # misma gráfica, así que solo puede haber una curva a la vez.
+        fila_formula = QHBoxLayout()
+        fila_formula.setSpacing(6)
+        lbl_formula = QLabel("Fórmula:")
+        lbl_formula.setObjectName("lblExpresionFormula")
+        self.cmb_formula = QComboBox()
+        self.cmb_formula.setObjectName("comboFormula")
+        for clave in (formulas_logica.CLAVE_POTENCIA, formulas_logica.CLAVE_IMPULSO):
+            self.cmb_formula.addItem(formulas_logica.formula(clave)["nombre"], clave)
+        self.cmb_formula.currentIndexChanged.connect(self._cambiar_formula)
+        fila_formula.addWidget(lbl_formula)
+        fila_formula.addWidget(self.cmb_formula, 1)
+        layout.addLayout(fila_formula)
+
+        self.lbl_expresion = QLabel("")
         self.lbl_expresion.setWordWrap(True)
         self.lbl_expresion.setObjectName("lblExpresionFormula")
         layout.addWidget(self.lbl_expresion)
@@ -177,6 +189,7 @@ class Formulas(QFrame):
         ayuda.setWordWrap(True)
         ayuda.setObjectName("lblDeteccion")
         layout.addWidget(ayuda)
+        self._actualizar_expresion()
 
         # Elegir sobre qué serie se calcula. No se exige filtro para calcular:
         # un pasa-bajos achata los picos, así que forzarlo sesgaría los valores.
@@ -200,7 +213,7 @@ class Formulas(QFrame):
         self.btn_aplicar_formula = QPushButton("Aplicar")
         self.btn_aplicar_formula.setObjectName("btnAplicarMapeo")
         self.btn_aplicar_formula.setCursor(Qt.PointingHandCursor)
-        self.btn_aplicar_formula.clicked.connect(self._solicitar_potencia)
+        self.btn_aplicar_formula.clicked.connect(self._solicitar_formula)
         self.btn_quitar_formula = QPushButton("Quitar")
         self.btn_quitar_formula.setObjectName("btnResetMapeo")
         self.btn_quitar_formula.setCursor(Qt.PointingHandCursor)
@@ -256,15 +269,43 @@ class Formulas(QFrame):
             if identificador not in subrangos
         ]
 
-    def _solicitar_potencia(self):
+    def _nombre_formula(self):
+        return formulas_logica.formula(self.formula_actual)["nombre"].lower()
+
+    def _actualizar_expresion(self):
+        """Muestra la expresión y el supuesto de la fórmula elegida."""
+        datos = formulas_logica.formula(self.formula_actual)
+        self.lbl_expresion.setText(
+            f"<b>{datos['expresion']}</b><br>{datos['descripcion']} "
+            "Se calcula sobre la fuerza vertical (Fz) dentro de cada rango "
+            "marcado, y la curva se dibuja solo sobre Fz."
+        )
+
+    def _cambiar_formula(self):
+        """Cambia la fórmula activa; si ya hay una curva, la vuelve a calcular."""
+        clave = self.cmb_formula.currentData()
+        if clave == self.formula_actual:
+            return
+        self.formula_actual = clave
+        self._actualizar_expresion()
+        self._actualizar_botones()
+        # Las dos fórmulas comparten la única curva de la gráfica de Fz: si
+        # había uno dibujado, se reemplaza por el nuevo en vez de dejar a la
+        # vista un resultado que ya no corresponde a lo elegido.
+        if self.ultimos_resultados is not None:
+            self._solicitar_formula()
+
+    def _solicitar_formula(self):
         """Pide el cálculo con los rangos que estén marcados en ese momento."""
         seleccionados = self._rangos_padre_seleccionados()
         if not seleccionados:
             self.actualizar_estado_formula(
-                False, "Marcá al menos un rango para calcular la potencia."
+                False, f"Marcá al menos un rango para calcular {self._nombre_formula()}."
             )
             return
-        self.formulaSolicitada.emit({"rangos": seleccionados})
+        self.formulaSolicitada.emit(
+            {"rangos": seleccionados, "formula": self.formula_actual}
+        )
 
     def actualizar_estado_formula(self, exito, mensaje):
         color = "#66BB6A" if exito else "#EF5350"
@@ -341,6 +382,16 @@ class Formulas(QFrame):
 
         if pico is None:
             lineas.append(("sin datos válidos", "color:#8A8A8A;"))
+        elif resultado.get("detalles"):
+            # Fórmulas acumuladas (el impulso): el pico de la curva dice poco,
+            # lo que importa son los valores del tramo y su propia unidad.
+            for detalle in resultado["detalles"]:
+                valor = formulas_logica.formatear_valor(detalle["valor"])
+                unidad = detalle.get("unidad") or ""
+                sufijo_detalle = f" {unidad}" if unidad else ""
+                lineas.append(
+                    (f"{detalle['etiqueta']} <b>{valor}{sufijo_detalle}</b>", "")
+                )
         else:
             valor_pico = formulas_logica.formatear_valor(pico)
             valor_media = formulas_logica.formatear_valor(resumen.get("media"))
@@ -780,16 +831,17 @@ class Formulas(QFrame):
     def _actualizar_botones(self):
         self.btn_eliminar.setEnabled(bool(self._obtener_visibles_seleccionados()))
         self.btn_limpiar.setEnabled(bool(self.rangos))
-        # La potencia se calcula sobre rangos (no sub-rangos): sin ninguno
+        # Las fórmulas se calculan sobre rangos (no sub-rangos): sin ninguno
         # marcado no hay nada que calcular, así que el botón queda gris con la
         # razón en el tooltip.
         hay_seleccion = bool(self._rangos_padre_seleccionados())
+        nombre = self._nombre_formula()
         self.btn_aplicar_formula.setEnabled(hay_seleccion)
         self.btn_aplicar_formula.setToolTip(
-            "Calcula la potencia en los rangos marcados. Los sub-rangos se "
+            f"Calcula {nombre} en los rangos marcados. Los sub-rangos se "
             "calculan al abrirlos con doble clic."
             if hay_seleccion
-            else "Marcá al menos un rango para poder calcular la potencia."
+            else f"Marcá al menos un rango para poder calcular {nombre}."
         )
 
     def mostrar_error_rango(self, mensaje):

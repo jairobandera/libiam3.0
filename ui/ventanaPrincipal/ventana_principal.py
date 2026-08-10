@@ -142,9 +142,9 @@ class VentanaPrincipal(QWidget):
             self.area_central.limpiar_rangos
         )
 
-        # --- Potencia ---
+        # --- Fórmulas (potencia / impulso) ---
         self.panel_derecho.formulas.formulaSolicitada.connect(
-            self.area_central.aplicar_potencia
+            self.area_central.aplicar_formula
         )
         self.panel_derecho.formulas.quitarFormulaSolicitado.connect(
             self.area_central.quitar_formula
