@@ -1,12 +1,24 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ui.ventanaPrincipal.panelDerecho.panelCalculo import PanelCalculo
 
 
 class VentanaRegion(QDialog):
     """Ventana que muestra el recorte de un rango para crear sub-rangos dentro.
 
     Reutiliza ``GraficaSenal`` en modo selección: dos clics sobre la gráfica
-    proponen un sub-rango, que el área central valida y agrega.
+    proponen un sub-rango, que el área central valida y agrega. La sección de
+    fórmulas de la derecha es el mismo ``PanelCalculo`` del panel principal, así
+    el cálculo de sub-rangos comparte el mismo componente (y el mismo aspecto).
     """
 
     subRangoPropuesto = Signal(int, int)
@@ -25,7 +37,7 @@ class VentanaRegion(QDialog):
         super().__init__(parent)
         self.setWindowTitle(titulo or "Sub-rangos")
         self.setModal(False)
-        self.resize(900, 520)
+        self.resize(1180, 540)
         self.setStyleSheet("QDialog { background-color: #1E1E1E; }")
         self._init_ui(titulo, etiqueta_x, unidad, x, y_original, y_filtrada, columna)
 
@@ -53,7 +65,14 @@ class VentanaRegion(QDialog):
         self.btn_seleccionar.toggled.connect(self._on_seleccion_toggled)
         fila_botones.addWidget(self.btn_seleccionar)
         fila_botones.addStretch()
-        layout.addLayout(fila_botones)
+
+        # Izquierda: encabezado + acción de sub-rangos + gráfica.
+        caja_izquierda = QWidget()
+        layout_izquierda = QVBoxLayout()
+        layout_izquierda.setContentsMargins(0, 0, 0, 0)
+        layout_izquierda.setSpacing(8)
+        layout_izquierda.addWidget(encabezado)
+        layout_izquierda.addLayout(fila_botones)
 
         self.grafica = GraficaSenal(
             titulo,
@@ -64,7 +83,22 @@ class VentanaRegion(QDialog):
         self.grafica.set_datos(x, y_original, y_filtrada)
         self.grafica.set_modo_seleccion_rango(False)
         self.grafica.rangoPropuesto.connect(self._on_rango_propuesto)
-        layout.addWidget(self.grafica, 1)
+        layout_izquierda.addWidget(self.grafica, 1)
+        caja_izquierda.setLayout(layout_izquierda)
+
+        # Derecha: sección de cálculo reutilizada del panel principal. El
+        # cálculo de sub-rangos llega luego via las señales del área central.
+        self.panel_calculo = PanelCalculo()
+        self.panel_calculo.setFixedWidth(300)
+        # La fuente (filtrada/original) depende de si esta señal tiene filtro.
+        self.panel_calculo.set_hay_filtro(y_filtrada is not None)
+
+        separador = QSplitter(Qt.Horizontal)
+        separador.addWidget(caja_izquierda)
+        separador.addWidget(self.panel_calculo)
+        separador.setSizes([840, 300])
+        separador.setCollapsible(0, False)
+        layout.addWidget(separador, 1)
 
         self.setLayout(layout)
 
@@ -77,6 +111,18 @@ class VentanaRegion(QDialog):
     def mostrar_subrangos(self, subrangos):
         self.grafica.mostrar_rangos(subrangos)
 
+    def formula_seleccionada(self):
+        """Clave de la fórmula elegida en el panel de la derecha."""
+        return self.panel_calculo.formula_seleccionada()
+
+    def mostrar_resultados_formula(self, datos):
+        """Vuelca en el panel los resultados calculados por el área central."""
+        self.panel_calculo.mostrar_resultados(datos)
+
     def aplicar_paleta(self):
-        """Repinta la gráfica cuando cambia la paleta (modo daltónico)."""
+        """Repinta la gráfica al cambiar la accesibilidad (colores y estilos).
+
+        La gráfica es un ``GraficaSenal``: todo el renderizado accesible
+        (paleta, grosor, estilos y tooltips) se hereda de ``areaCentralGraficas``.
+        """
         self.grafica.aplicar_paleta()

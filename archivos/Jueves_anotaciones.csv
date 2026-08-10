@@ -1,0 +1,4 @@
+﻿tipo,senal,columna,numero,padre,desde,hasta,nombre,nota,fuente
+rango,Fuerza Z - Fz,Fz,1,,2142,2305,Rango 1,Hola,filtrada
+rango,Fuerza Z - Fz,Fz,2,,263,953,Rango 2,,filtrada
+rango,Fuerza Y - Fy,Fy,1,,263,953,Rango 1,,filtrada

@@ -21,6 +21,9 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
     noPreguntarSuperposicionCambiada = Signal(bool)
     guardarSolicitado = Signal()
     cargarSolicitado = Signal()
+    # Cambió algún ajuste de accesibilidad; el área central relee el estado.
+    accesibilidadCambiada = Signal()
+    # Compatibilidad durante la migración: ver ``configuracion.py``.
     modoDaltonicoCambiado = Signal(bool)
 
     def __init__(self): #Constructor
@@ -29,7 +32,6 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         # Configuración de sesión (no se persiste).
         self.superposicion_rangos = False
         self.no_preguntar_superposicion = False
-        self.modo_daltonico = False
         self.init_ui()
 
     def init_ui(self):
@@ -127,13 +129,15 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
             self.window(),
             superposicion=self.superposicion_rangos,
             no_preguntar=self.no_preguntar_superposicion,
-            modo_daltonico=self.modo_daltonico,
         )
         dialogo.superposicionCambiada.connect(self._on_superposicion_cambiada)
         dialogo.noPreguntarSuperposicionCambiada.connect(
             self._on_no_preguntar_cambiada
         )
-        dialogo.modoDaltonicoCambiado.connect(self._on_modo_daltonico_cambiado)
+        dialogo.accesibilidadCambiada.connect(self._on_accesibilidad_cambiada)
+        # Compatibilidad durante la migración: el antiguo modo «daltónico» se
+        # reenvía tal cual; el área central todavía lo escucha (etapa 5).
+        dialogo.modoDaltonicoCambiado.connect(self.modoDaltonicoCambiado.emit)
         dialogo.exec()
 
     def _on_superposicion_cambiada(self, activo):
@@ -144,6 +148,5 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         self.no_preguntar_superposicion = bool(activo)
         self.noPreguntarSuperposicionCambiada.emit(self.no_preguntar_superposicion)
 
-    def _on_modo_daltonico_cambiado(self, activo):
-        self.modo_daltonico = bool(activo)
-        self.modoDaltonicoCambiado.emit(self.modo_daltonico)
+    def _on_accesibilidad_cambiada(self):
+        self.accesibilidadCambiada.emit()

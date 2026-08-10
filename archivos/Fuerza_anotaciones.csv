@@ -1,0 +1,5 @@
+﻿tipo,senal,columna,numero,padre,desde,hasta,nombre,nota,fuente
+rango,Fuerza Z - Fz,Fz,1,,682,1320,Rango 1,,filtrada
+subrango,Fuerza Z - Fz,Fz,1,Fz::1,880,958,Sub-rango 1,,filtrada
+subrango,Fuerza Z - Fz,Fz,2,Fz::1,1031,1106,Sub-rango 2,,filtrada
+rango,Fuerza Z - Fz,Fz,2,,955,1053,Rango 2,,filtrada
