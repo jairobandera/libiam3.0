@@ -1,29 +1,4 @@
-"""Cálculos sobre la fuerza vertical: potencia mecánica e impulso.
-
-Independiente de la interfaz: recibe números y devuelve números.
-
-En una plataforma de fuerza la potencia no se mide directamente, hace falta la
-velocidad. Se obtiene por el método estándar (el que se usa para saltos):
-
-    a(t) = (Fz(t) − m·g) / m        aceleración del centro de masa
-    v(t) = ∫ a(t) dt                velocidad, partiendo del reposo
-    P(t) = Fz(t) · v(t)             potencia instantánea, en watts
-
-El impulso es la otra cara de la misma integral, sin dividir por la masa:
-
-    J(t) = ∫ (Fz(t) − m·g) dt       impulso neto acumulado, en N·s
-
-La integración se hace **una sola vez sobre el registro completo**, arrancando
-de cero desde el primer frame del CSV (que se captura con el sujeto en
-reposo). El rango seleccionado solo se usa para recortar y analizar un segmento
-del resultado; nunca reinicia la condición inicial.
-
-De ahí que el impulso **neto de un rango** sea la diferencia entre los extremos
-de su recorte, no el último valor de la curva. Por el teorema del impulso
-J = m·Δv, ese neto es el cambio de velocidad del tramo, y a diferencia de la
-potencia no depende de que el rango arranque en reposo: solo el origen de la
-curva acumulada lo hace.
-"""
+"""Cálculos de potencia e impulso usados por la aplicación."""
 
 from __future__ import annotations
 
@@ -33,7 +8,7 @@ import numpy as np
 
 
 class ErrorFormula(ValueError):
-    """El cálculo no se puede hacer (datos o parámetros insuficientes)."""
+    pass
 
 
 NOMBRE_POTENCIA = "Potencia"
@@ -48,7 +23,6 @@ UNIDAD_VELOCIDAD = "m/s"
 
 
 def _validar_parametros(masa, gravedad, frecuencia):
-    """Comprueba lo que hace falta para poder integrar, con mensajes claros."""
     masa = float(masa or 0)
     gravedad = float(gravedad or 0)
     frecuencia = float(frecuencia or 0)
@@ -66,14 +40,8 @@ def _validar_parametros(masa, gravedad, frecuencia):
         )
     return masa, gravedad, frecuencia
 
-# -------------------------------------------------------------------------------------
-# --- Aceleración, velocidad y potencia ------------------------------------------------
 def _integrar_acumulado(valores, dt):
-    """Integral acumulada por trapecios, arrancando de cero.
-
-    Un solo integrador para la velocidad y para el impulso: si cambia la regla
-    de integración, cambia para las dos a la vez.
-    """
+    """Integra por trapecios y devuelve una curva que comienza en cero."""
     valores = np.asarray(valores, dtype=float)
     if valores.size < 2:
         raise ErrorFormula("El tramo es demasiado corto para integrar.")
@@ -81,54 +49,26 @@ def _integrar_acumulado(valores, dt):
     return np.concatenate(([0.0], np.cumsum(incrementos)))
 
 def fuerza_neta(fz, masa, gravedad):
-    """Fz − m·g: el exceso de fuerza sobre el peso, que es lo que acelera."""
     return np.asarray(fz, dtype=float) - masa * gravedad
 
 def aceleracion(fz, masa, gravedad):
-    """a = (Fz − m·g) / m: aceleración del centro de masa."""
     return fuerza_neta(fz, masa, gravedad) / masa
 
 def velocidad(fz, masa, gravedad, frecuencia):
-    """Integra la aceleración por trapecios, partiendo del reposo (v = 0)."""
     return _integrar_acumulado(aceleracion(fz, masa, gravedad), 1.0 / frecuencia)
 
 def potencia(fz, masa, gravedad, frecuencia):
-    """P = Fz · v, en watts. ``fz`` en newtons, ``frecuencia`` en Hz."""
     masa, gravedad, frecuencia = _validar_parametros(masa, gravedad, frecuencia)
     fz = np.asarray(fz, dtype=float)
     return fz * velocidad(fz, masa, gravedad, frecuencia)
 
-# --- Impulso -------------------------------------------------------------------------
 def impulso(fz, masa, gravedad, frecuencia):
-    """J = ∫ (Fz − m·g) dt acumulado, en N·s.
-
-    Devuelve la curva acumulada, no un número: así se ve **dónde** se gana y se
-    pierde impulso (la fase de frenado lo baja, la de propulsión lo sube).
-
-    Igual que la potencia, se integra sobre el registro completo desde el
-    primer frame. El impulso **neto de un rango** es entonces la diferencia
-    entre sus extremos, no el último valor: de eso se encarga
-    :func:`detalles_impulso`.
-
-    Equivale exactamente a ``masa · velocidad(...)``, que es el teorema del
-    impulso escrito con las funciones de este módulo.
-    """
+    """Devuelve el impulso acumulado desde el inicio del registro."""
     masa, gravedad, frecuencia = _validar_parametros(masa, gravedad, frecuencia)
     return _integrar_acumulado(fuerza_neta(fz, masa, gravedad), 1.0 / frecuencia)
 
 def detalles_impulso(valores, roles, contexto, eleccion=None):
-    """Valores derivados del impulso de un tramo, listos para mostrar.
-
-    ``valores`` es el recorte de la curva acumulada y ``roles`` el recorte de
-    las señales de entrada. El neto sale de **restar los extremos** porque la
-    integración arranca en el primer frame del registro, no en el rango.
-
-    Las dos fases se informan por separado porque el neto es la resta entre
-    ellas y ese número solo no dice cuál pesó más. El corte por signo integra
-    cada parte aparte; en el cruce por cero el trapecio reparte de más, pero a
-    las frecuencias de una plataforma el error queda muy por debajo de la
-    resolución del gesto.
-    """
+    """Resume el cambio neto y las fases propulsiva y de frenado."""
     valores = np.asarray(valores, dtype=float)
     if valores.size < 2:
         return []
@@ -138,13 +78,12 @@ def detalles_impulso(valores, roles, contexto, eleccion=None):
     frecuencia = float(contexto["frecuencia"])
     dt = 1.0 / frecuencia
 
+    # La curva ya está acumulada; el tramo es la diferencia entre sus extremos.
     total = float(valores[-1] - valores[0])
     neta = fuerza_neta(roles["Fz"], masa, gravedad)
 
     return [
         {"etiqueta": "impulso neto", "valor": total, "unidad": UNIDAD_IMPULSO},
-        # J = m·Δv: el cambio de velocidad no depende de cómo arranque el
-        # tramo, a diferencia de la velocidad absoluta que usa la potencia.
         {"etiqueta": "Δ velocidad", "valor": total / masa, "unidad": UNIDAD_VELOCIDAD},
         {
             "etiqueta": "propulsivo",
@@ -158,7 +97,6 @@ def detalles_impulso(valores, roles, contexto, eleccion=None):
         },
     ]
 
-# --- Presentación ------------------------------------------------------------
 def formatear_valor(valor) -> str:
     if valor is None:
         return "—"
@@ -175,10 +113,9 @@ def formatear_valor(valor) -> str:
         texto = f"{valor:.4g}"
     else:
         return "0"
-    # Separador de miles con espacio fino, como se usa en informes técnicos.
+    # Separa los miles con espacios para evitar la notación científica.
     return texto.replace(",", " ")
 
-# --- Resumen numérico --------------------------------------------------------
 def resumen(x, y) -> dict:
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -206,9 +143,7 @@ def resumen(x, y) -> dict:
     }
 
 
-# --- Registro de fórmulas --------------------------------------------------
-# Una fórmula se define **una sola vez** acá; tanto el panel de rangos como la
-# ventana de sub-rangos la consumen a través de ``computar_formula``.
+# La interfaz obtiene de este registro las fórmulas disponibles.
 def _potencia_desde(roles, contexto, eleccion=None):
     return potencia(
         roles["Fz"],
@@ -265,8 +200,6 @@ FORMULAS = {
         "expresion": EXPRESION_IMPULSO,
         "unidad": UNIDAD_IMPULSO,
         "salida_rol": "Fz",
-        # Igual que la potencia: se integra el registro entero y el rango solo
-        # recorta. El neto del tramo sale de restar los extremos del recorte.
         "integra_en_registro": True,
         "requiere_roles": ("Fz",),
         "rangos_en_rol": {
@@ -283,24 +216,16 @@ FORMULAS = {
                           "del archivo, necesaria para calcular el impulso.",
         },
         "computar": _impulso_desde,
-        # El pico de una curva acumulada dice poco: lo que importa es el neto
-        # del tramo, el Δv que implica y cómo se reparte entre las dos fases.
         "detalles": detalles_impulso,
     },
 }
 
 
 def descripcion_formula(clave):
-    """Metadatos de una fórmula (nombre, unidad, rol origen, etc.)."""
     return FORMULAS[clave]
 
 
 def nombre_con_articulo(clave_o_desc):
-    """«la potencia», «el impulso»: para armar mensajes sin errores de género.
-
-    El artículo va en el registro junto al nombre. Si no está declarado se usa
-    «la», que era el único caso cuando la potencia era la única fórmula.
-    """
     desc = (
         clave_o_desc
         if isinstance(clave_o_desc, dict)
@@ -314,20 +239,11 @@ def hay_formula(clave):
 
 
 def formula_predeterminada():
-    """Primera fórmula del registro, para cuando no se eligió ninguna."""
     return next(iter(FORMULAS), None)
 
 
 def validar_formula(clave, contexto, roles_disponibles=()):
-    """Errores BLOQUEANTES: devuelve el motivo por el que no se puede calcular.
-
-    Separada de ``resolver_roles`` (advertencias, no bloqueantes). Revisa:
-
-    - que cada rol de ``requiere_roles`` esté entre ``roles_disponibles``, y
-    - que las variables de ``requiere`` estén presentes en ``contexto``.
-
-    Devuelve ``""`` si todo está en orden, o un mensaje claro para imprimir.
-    """
+    """Devuelve un mensaje cuando falta una señal o un parámetro requerido."""
     desc = FORMULAS[clave]
     disponibles = frozenset(roles_disponibles or ())
     for rol in desc.get("requiere_roles") or ():
@@ -378,12 +294,6 @@ def resolver_roles(clave, roles_disponibles=()):
 
 
 def _detalles_de(desc, valores, roles_tramo, contexto, eleccion):
-    """Valores extra de un tramo, si la fórmula define cómo calcularlos.
-
-    Las fórmulas instantáneas (la potencia) se describen bien con el pico y la
-    media del resumen. Las acumuladas necesitan sus propios números, y cada uno
-    trae su unidad para que N·s y m/s convivan en el mismo bloque.
-    """
     calcular = desc.get("detalles")
     if not calcular:
         return []
@@ -399,13 +309,13 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
     resultados, segmentos = [], []
     frecuencia = contexto.get("frecuencia")
 
-    # Máscara de validez común: se procesan las muestras finitas en orden, sin
-    # interpolar los NaN (misma semántica para ambas rutas).
+    # Se omiten las posiciones inválidas sin inventar valores intermedios.
     finito = np.isfinite(x)
     for serie in roles.values():
         finito = finito & np.isfinite(serie)
 
     if desc.get("integra_en_registro"):
+        # Las curvas acumuladas se calculan una vez y después se recortan.
         if finito.sum() < 2:
             return resultados, segmentos
         x_reg = x[finito]
@@ -448,7 +358,7 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
 
         return resultados, segmentos
 
-    # Cálculo por rango (fórmulas sin integración temporal): sin cambios.
+    # Las demás fórmulas se calculan por separado en cada rango.
     for datos in intervalos:
         desde, hasta = int(datos["desde"]), int(datos["hasta"])
         base = (x >= desde) & (x <= hasta)
@@ -483,7 +393,6 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
     return resultados, segmentos
 
 def picos_de_resultados(resultados):
-    """Marcadores para la gráfica (pico, frame, etiqueta) desde los resultados."""
     picos = []
     for datos in resultados:
         resumen_datos = datos.get("resumen") or {}
