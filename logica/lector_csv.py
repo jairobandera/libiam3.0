@@ -23,6 +23,33 @@ NOMBRES_EJE_X = {
 }
 
 
+def calcular_frecuencia_efectiva(frecuencia_muestreo, subframes=None):
+    """Frecuencia disponible después de preparar los datos para graficar.
+
+    El valor que informa o ingresa el usuario es la frecuencia original del
+    registro. Si varias muestras ``SubFrame`` se promedian en un único frame,
+    la frecuencia efectiva se divide por esa cantidad.
+    """
+    if frecuencia_muestreo in (None, ""):
+        return None
+
+    try:
+        frecuencia = float(frecuencia_muestreo)
+    except (TypeError, ValueError):
+        return None
+    if frecuencia <= 0:
+        return None
+
+    subframes = subframes or {}
+    divisor = 1
+    if subframes.get("tiene_subframes"):
+        try:
+            divisor = max(1, int(subframes.get("max_por_frame", 1)))
+        except (TypeError, ValueError):
+            divisor = 1
+    return frecuencia / divisor
+
+
 def _normalizar_saltos_linea(datos: bytes) -> bytes:
     """Normaliza incluso exportaciones que contienen la secuencia CR-CR-LF."""
     return (

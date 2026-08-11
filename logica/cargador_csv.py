@@ -5,7 +5,11 @@ import numpy as np
 from PySide6.QtWidgets import QFileDialog
 
 from logica.config_db import cargar_aliases, buscar_alias, listar_secciones_archivo
-from logica.lector_csv import leer_csv_crudo, leer_csv_rapido
+from logica.lector_csv import (
+    calcular_frecuencia_efectiva,
+    leer_csv_crudo,
+    leer_csv_rapido,
+)
 
 
 class CargadorCSV:
@@ -274,10 +278,9 @@ class CargadorCSV:
         else:
             subframe_info = "No"
 
-        frecuencia_grafica = frecuencia_muestreo
-        if frecuencia_muestreo and subframes["tiene_subframes"]:
-            divisor = max(1, subframes.get("max_por_frame", 1))
-            frecuencia_grafica = frecuencia_muestreo / divisor
+        frecuencia_grafica = calcular_frecuencia_efectiva(
+            frecuencia_muestreo, subframes
+        )
 
         return {
             "nombre": nombre_archivo,

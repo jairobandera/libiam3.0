@@ -14,17 +14,23 @@ from PySide6.QtWidgets import (
 )
 
 from logica import accesibilidad, paleta
+from logica.lector_csv import calcular_frecuencia_efectiva
 
 
 class Filtros(QFrame):
     filtroSolicitado = Signal(object)
     restaurarSolicitado = Signal(object)
+    # Emite la frecuencia posterior al promedio de subframes. El área central
+    # la usa también para las operaciones que dependen del tiempo.
+    frecuenciaCambiada = Signal(float)
 
     def __init__(self):
         super().__init__()
         self.setObjectName("filtrosPanel")
         self.info_actual = {}
         self.frecuencia_detectada = None
+        self.clave_archivo_actual = None
+        self.frecuencias_por_archivo = {}
         self.senales_disponibles = []
         self.init_ui()
 
@@ -52,6 +58,7 @@ class Filtros(QFrame):
         self.corte_inferior.valueChanged.connect(self._actualizar_resumen)
         self.corte_superior.valueChanged.connect(self._actualizar_resumen)
         self.orden.valueChanged.connect(self._actualizar_resumen)
+        self.fs_control.valueChanged.connect(self._recordar_frecuencia_usada)
         self.fs_control.valueChanged.connect(self._actualizar_limites_frecuencia)
         self.fs_control.valueChanged.connect(self._actualizar_resumen)
         self.btn_aplicar.clicked.connect(self._solicitar_filtro)
@@ -127,11 +134,17 @@ class Filtros(QFrame):
         self.orden.setValue(4)
         formulario.addRow(self.lbl_orden, self.orden)
 
-        self.lbl_fs = QLabel("Fs:")
+        self.lbl_fs = QLabel("Frecuencia usada:")
         self.fs_control = self._crear_control_frecuencia(2000.0)
+        self.fs_control.setRange(0.0, 1_000_000.0)
         self.fs_control.setDecimals(0)
         self.fs_control.setSingleStep(100)
-        self.fs_control.setValue(2000)
+        self.fs_control.setSpecialValueText("Ingresar")
+        self.fs_control.setValue(0)
+        self.fs_control.setToolTip(
+            "Frecuencia original del registro. Si el CSV tiene subframes, "
+            "ABS calcula automáticamente la frecuencia efectiva."
+        )
         formulario.addRow(self.lbl_fs, self.fs_control)
 
         self.lbl_frecuencia = QLabel("Cargá un archivo para habilitar el filtro.")
@@ -221,17 +234,24 @@ class Filtros(QFrame):
 
     def cargar_datos(self, info):
         self.info_actual = info or {}
-        frecuencia_grafica = self.info_actual.get("frecuencia_grafica")
-        if frecuencia_grafica:
-            self.fs_control.blockSignals(True)
-            self.fs_control.setValue(float(frecuencia_grafica))
-            self.fs_control.blockSignals(False)
-            self._actualizar_limites_frecuencia()
-        else:
-            self.lbl_frecuencia.setText(
-                "El CSV no informa una frecuencia de muestreo. "
-                "Ingresala manualmente."
-            )
+        self.clave_archivo_actual = (
+            self.info_actual.get("ruta_archivo") or self.info_actual.get("nombre")
+        )
+        self.frecuencia_detectada = self.info_actual.get("frecuencia_muestreo")
+        frecuencia_recordada = self.frecuencias_por_archivo.get(
+            self.clave_archivo_actual
+        )
+        frecuencia_inicial = (
+            frecuencia_recordada
+            if frecuencia_recordada is not None
+            else self.frecuencia_detectada
+        )
+        self.fs_control.blockSignals(True)
+        self.fs_control.setValue(
+            float(frecuencia_inicial) if frecuencia_inicial else 0.0
+        )
+        self.fs_control.blockSignals(False)
+        self._actualizar_limites_frecuencia()
         self.lbl_estado.clear()
         self._actualizar_resumen()
 
@@ -257,12 +277,43 @@ class Filtros(QFrame):
         self.senal_objetivo.blockSignals(False)
         self._actualizar_resumen()
 
+    def _divisor_subframes(self):
+        subframes = self.info_actual.get("subframes") or {}
+        if not subframes.get("tiene_subframes"):
+            return 1
+        try:
+            return max(1, int(subframes.get("max_por_frame", 1)))
+        except (TypeError, ValueError):
+            return 1
+
+    def _recordar_frecuencia_usada(self, valor):
+        """Conserva el valor manual al cambiar entre archivos en la sesión."""
+        if self.clave_archivo_actual:
+            self.frecuencias_por_archivo[self.clave_archivo_actual] = float(valor)
+
+    def _frecuencia_efectiva(self):
+        return calcular_frecuencia_efectiva(
+            self.fs_control.value(), self.info_actual.get("subframes")
+        )
+
     def _actualizar_limites_frecuencia(self, _valor=None):
-        fs = self.fs_control.value()
-        if fs <= 0:
+        frecuencia_original = self.fs_control.value()
+        fs = self._frecuencia_efectiva()
+        if not fs:
+            self.info_actual["frecuencia_usada"] = None
+            self.info_actual["frecuencia_grafica"] = None
+            for control in (self.corte_unico, self.corte_inferior, self.corte_superior):
+                control.setMaximum(999_999.99)
+            self.lbl_frecuencia.setText(
+                "Ingresá la frecuencia original del registro. Si hay subframes, "
+                "el programa hará la división automáticamente."
+            )
+            self.frecuenciaCambiada.emit(0.0)
             return
 
         nyquist = fs / 2
+        self.info_actual["frecuencia_usada"] = float(frecuencia_original)
+        self.info_actual["frecuencia_grafica"] = float(fs)
         margen = max(0.01, nyquist * 0.000001)
         limite = max(0.02, nyquist - margen)
         for control in (self.corte_unico, self.corte_inferior, self.corte_superior):
@@ -279,10 +330,17 @@ class Filtros(QFrame):
         self.corte_inferior.setValue(inferior)
         self.corte_superior.setValue(min(limite, superior))
 
-        self.lbl_frecuencia.setText(
-            f"Fs: {fs:g} Hz · Nyquist: {nyquist:g} Hz · "
-            f"Límites &lt; {limite:g} Hz."
+        divisor = self._divisor_subframes()
+        detalle = (
+            f" ({frecuencia_original:g} Hz ÷ {divisor} subframes)"
+            if divisor > 1
+            else ""
         )
+        self.lbl_frecuencia.setText(
+            f"Frecuencia efectiva: {fs:g} Hz{detalle} · "
+            f"Nyquist: {nyquist:g} Hz · Límites &lt; {limite:g} Hz."
+        )
+        self.frecuenciaCambiada.emit(float(fs))
 
     def _actualizar_controles_tipo(self, _indice=None):
         es_banda = self.tipo_filtro.currentData() in ("bandpass", "bandstop")
@@ -301,9 +359,9 @@ class Filtros(QFrame):
         return [senal["columna"] for senal in self.senales_disponibles]
 
     def _validar_configuracion(self):
-        fs = self.fs_control.value()
-        if fs <= 0:
-            return False, "La frecuencia de muestreo debe ser mayor que cero."
+        fs = self._frecuencia_efectiva()
+        if not fs:
+            return False, "Ingresá una frecuencia usada mayor que cero."
         if not self._columnas_objetivo():
             return False, "No hay señales visibles para filtrar."
 
@@ -365,7 +423,11 @@ class Filtros(QFrame):
             frecuencias_corte = self.corte_unico.value()
 
         return {
-            "frecuencia_muestreo": self.fs_control.value(),
+            # El DataFrame ya fue promediado por frame: el filtro debe recibir
+            # la frecuencia efectiva, no la frecuencia original escrita arriba.
+            "frecuencia_muestreo": self._frecuencia_efectiva(),
+            "frecuencia_original": self.fs_control.value(),
+            "divisor_subframes": self._divisor_subframes(),
             "tipo": tipo,
             "frecuencias_corte": frecuencias_corte,
             "orden": self.orden.value(),

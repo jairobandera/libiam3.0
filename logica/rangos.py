@@ -16,8 +16,9 @@ COLORES_RANGOS = paleta.PALETAS[paleta.MODO_ESTANDAR]["rangos"]
 class RangoSuperpuestoError(ValueError):
     def __init__(self, rango_existente):
         self.rango_existente = rango_existente
+        numero_visible = rango_existente.orden or rango_existente.numero
         super().__init__(
-            f"El rango se superpone con el rango {rango_existente.numero} "
+            f"El rango se superpone con el rango {numero_visible} "
             f"({rango_existente.desde}–{rango_existente.hasta})."
         )
 
@@ -29,6 +30,10 @@ class RangoCalculo:
     hasta: int
     color: str
     nombre: str = ""
+    # ``numero`` es la identidad interna estable. ``orden`` es la posición
+    # visible de izquierda a derecha y puede cambiar al agregar otro recorte.
+    orden: int = 0
+    nombre_personalizado: bool = False
 
     def como_dict(self) -> dict:
         return asdict(self)
@@ -48,7 +53,39 @@ class GestorRangos:
         self._prefijo_nombre = prefijo_nombre
 
     def listar(self) -> list[RangoCalculo]:
-        return list(self._rangos)
+        """Devuelve los rangos ordenados y numerados de izquierda a derecha.
+
+        La identidad interna (``numero``) no cambia. Esto permite reordenar lo
+        que ve el usuario sin romper notas, sub-rangos ni botones que ya
+        apuntan al recorte. Los nombres automáticos y los colores sí siguen la
+        posición visible; los nombres escritos por el usuario se conservan.
+        """
+        ordenados = sorted(
+            self._rangos,
+            key=lambda rango: (rango.desde, rango.hasta, rango.numero),
+        )
+        resultado = []
+        for orden, rango in enumerate(ordenados, start=1):
+            nombre = (
+                rango.nombre
+                if rango.nombre_personalizado
+                else f"{self._prefijo_nombre} {orden}"
+            )
+            resultado.append(
+                replace(
+                    rango,
+                    orden=orden,
+                    color=paleta.color_rango(orden),
+                    nombre=nombre,
+                )
+            )
+        return resultado
+
+    def _rango_visible(self, numero: int) -> RangoCalculo | None:
+        return next(
+            (rango for rango in self.listar() if rango.numero == int(numero)),
+            None,
+        )
 
     def hay_superposicion(self, desde: int, hasta: int) -> bool:
         """Indica si el intervalo se superpone con algún rango existente."""
@@ -74,12 +111,24 @@ class GestorRangos:
                 # Los extremos son inclusivos: compartir un frame también cuenta
                 # como superposición para evitar duplicarlo en los cálculos.
                 if desde <= existente.hasta and hasta >= existente.desde:
-                    raise RangoSuperpuestoError(existente)
+                    raise RangoSuperpuestoError(
+                        self._rango_visible(existente.numero) or existente
+                    )
 
         numero = self._siguiente_numero
         color = paleta.color_rango(numero)
-        nombre = nombre.strip() or f"{self._prefijo_nombre} {numero}"
-        rango = RangoCalculo(numero=numero, desde=desde, hasta=hasta, color=color, nombre=nombre)
+        nombre = nombre.strip()
+        nombre_personalizado = bool(nombre)
+        nombre = nombre or f"{self._prefijo_nombre} {numero}"
+        rango = RangoCalculo(
+            numero=numero,
+            desde=desde,
+            hasta=hasta,
+            color=color,
+            nombre=nombre,
+            orden=numero,
+            nombre_personalizado=nombre_personalizado,
+        )
         self._rangos.append(rango)
         self._siguiente_numero += 1
         return rango
@@ -172,16 +221,32 @@ class GestorRangos:
             raise ValueError("El rango debe contener al menos dos frames.")
 
         color = paleta.color_rango(numero)
-        nombre = (nombre or "").strip() or f"{self._prefijo_nombre} {numero}"
+        nombre = (nombre or "").strip()
+        nombre_personalizado = bool(nombre) and nombre != (
+            f"{self._prefijo_nombre} {numero}"
+        )
+        nombre = nombre or f"{self._prefijo_nombre} {numero}"
         rango = RangoCalculo(
-            numero=numero, desde=desde, hasta=hasta, color=color, nombre=nombre
+            numero=numero,
+            desde=desde,
+            hasta=hasta,
+            color=color,
+            nombre=nombre,
+            orden=numero,
+            nombre_personalizado=nombre_personalizado,
         )
 
         self._rangos = [
             existente for existente in self._rangos if existente.numero != numero
         ]
         self._rangos.append(rango)
-        self._rangos.sort(key=lambda existente: existente.numero)
+        self._rangos.sort(
+            key=lambda existente: (
+                existente.desde,
+                existente.hasta,
+                existente.numero,
+            )
+        )
         self._siguiente_numero = max(self._siguiente_numero, numero + 1)
         return rango
 

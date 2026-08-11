@@ -126,7 +126,7 @@ In `GraficaSenal`:
 
 ### Ranges, sub-ranges and notes
 
-`GestorRangos` (`logica/rangos.py`) manages integer frame ranges (inclusive endpoints; sharing an endpoint counts as overlap). `agregar_ajustado()` snaps to the free stretch in the gesture's direction — this is the default behavior. `hay_superposicion()` and `agregar(..., permitir_superposicion=True)` support the opt-in overlap mode. **Only `agregar`/`agregar_ajustado`/`eliminar`/`restaurar` are covered by `TestRangos`; the overlap additions are not yet tested.**
+`GestorRangos` (`logica/rangos.py`) manages integer frame ranges (inclusive endpoints; sharing an endpoint counts as overlap). `listar()` returns them from left to right and assigns a visual `orden`; the stable `numero` remains the internal identity used by notes, sub-ranges and delete actions. Automatic names and colors follow `orden`, while custom names survive reordering. `agregar_ajustado()` snaps to the free stretch in the gesture's direction — this is the default behavior. `hay_superposicion()` and `agregar(..., permitir_superposicion=True)` support the opt-in overlap mode.
 
 `GestorRangos(prefijo_nombre=...)` decides how unnamed ranges are called. Sub-gestores are built with `GestorRangos("Sub-rango")` so the panel, the notes and the annotations CSV all distinguish them from their parent. Projects saved before that change carry `Rango N` on their sub-ranges; `Formulas._crear_checkbox()` relabels those on display.
 
@@ -144,7 +144,7 @@ Overlap settings live in `Cabecera` (session-only) and are pushed to `AreaCentra
 
 **All plot colors come from `logica/paleta.py`** — never hardcode a hex in `ui/` for a curve, a range or the selection preview. It holds two palettes (`estandar` and `daltonico`, the latter using the Okabe-Ito series) and a module-level active mode, toggled from `Configurar` → "Paleta accesible para daltonismo" (session-only, like the overlap settings).
 
-The key invariant: **a range's color is a pure function of its number** (`paleta.color_rango(numero)`), so `GestorRangos.recolorear()` can flip a whole session's colors and flipping back restores exactly what was there. Saved annotations don't store colors for the same reason.
+The key invariant: **a range's visible color is a pure function of its left-to-right `orden`** (`paleta.color_rango(orden)`), while its internal `numero` stays stable. Saved annotations don't store colors for the same reason.
 
 `AreaCentralGraficas.set_modo_daltonico()` is the entry point: it recolors every gestor and subgestor, then repaints via `GraficaSenal.aplicar_paleta()` — which re-pens the existing `curva_original`/`curva_filtrada` items instead of re-plotting, so the user's zoom survives. Open `VentanaRegion` windows are repainted too (each one carries a `clave_subgestor` for that). `Filtros.aplicar_paleta()` refreshes its color legend separately, wired in `VentanaPrincipal.init_ui()`.
 
@@ -166,13 +166,13 @@ Be deliberate about which one a new setting belongs in:
 - **Clean up** — `Configurar` → "Archivos guardados" → `LimpiarArchivosDialog` (`ui/cabecera/cabeceraPrincipal/limpiarArchivos.py`). The period combo (`proyecto.PERIODOS`) is only a *shortcut that pre-checks* matching rows; the list stays editable, so "a specific file" is just manual checking. Deletion goes through `proyecto.eliminar_proyectos()`, which removes both files of each pair and refuses any path whose parent isn't `archivos/`. Nothing is deleted without a `QMessageBox.question` listing the names.
 - **Load** — `VentanaPrincipal._cargar_proyecto()`, from the `Cargar` header button. `CargarProyectoDialog` (`ui/cabecera/cabeceraPrincipal/cargarProyecto.py`) lists *only* `archivos/` with no way to navigate elsewhere. It then loads the CSV through `PanelIzquierdo.cargar_archivo_desde_ruta()` (so tree, info and right panel update as with a normal load) and **afterwards** calls `AreaCentralGraficas.importar_anotaciones()` — order matters, because `cargar_dataframe()` wipes the range state.
 
-`importar_anotaciones()` rebuilds parents before children and uses `GestorRangos.restaurar()`, which keeps the original number (hence the original color) and skips overlap validation — it was already decided when the range was created. Rows whose column isn't plotted in the current file are counted as discarded and reported to the user.
+`importar_anotaciones()` rebuilds parents before children and uses `GestorRangos.restaurar()`, which keeps the internal number and skips overlap validation — it was already decided when the range was created. Visual order, automatic names and colors are recalculated from the horizontal position. Rows whose column isn't plotted in the current file are counted as discarded and reported to the user.
 
 Note `archivos/` is **not** in `.gitignore`.
 
 ### Subframes
 
-When a CSV has a `SubFrame` column, samples in the same frame are averaged (`groupby(frame).mean()`) in `AreaCentralGraficas` before plotting, and the effective sampling frequency used by the filter panel is divided accordingly.
+When a CSV has a `SubFrame` column, samples in the same frame are averaged (`groupby(frame).mean()`) in `AreaCentralGraficas` before plotting. `Filtros.fs_control` always represents the original frequency (detected or typed manually); `calcular_frecuencia_efectiva()` divides it by the subframes per frame and that effective value is sent to filters and formulas.
 
 ## Qt gotchas found in this codebase
 

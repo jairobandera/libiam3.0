@@ -857,6 +857,19 @@ class AreaCentralGraficas(QFrame):
             self._crear_graficas()
         self._actualizar_visibilidad()
 
+    def set_frecuencia_grafica(self, frecuencia):
+        """Actualiza la frecuencia efectiva elegida en el panel de filtros."""
+        try:
+            frecuencia = float(frecuencia)
+        except (TypeError, ValueError):
+            frecuencia = 0.0
+        nueva_frecuencia = frecuencia if frecuencia > 0 else None
+        if nueva_frecuencia == self.frecuencia_grafica:
+            return
+        self.frecuencia_grafica = nueva_frecuencia
+        if self.formula_activa:
+            self.aplicar_formula(self.formula_activa, avisar=False)
+
     def set_modo_seleccion_rango(self, activo):
         self.modo_seleccion_rango = activo
         for grafica in self.graficas:
@@ -1620,7 +1633,12 @@ class AreaCentralGraficas(QFrame):
                     "padre": rango["padre"] or "",
                     "desde": rango["desde"],
                     "hasta": rango["hasta"],
-                    "nombre": rango["nombre"],
+                    # Los nombres automáticos se recalculan según la posición
+                    # horizontal. Se guarda vacío para no convertirlos en un
+                    # nombre personalizado al volver a abrir el proyecto.
+                    "nombre": (
+                        rango["nombre"] if rango.get("nombre_personalizado") else ""
+                    ),
                     "nota": rango.get("nota", ""),
                     "fuente": rango.get("fuente", ""),
                 }

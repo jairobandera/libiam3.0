@@ -46,7 +46,7 @@ El panel `Filtro de frecuencias` permite elegir qué señales se procesarán y o
 - Por encima de un límite (pasa-altos).
 - Dentro de un intervalo (pasa-banda).
 
-La frecuencia de muestreo se obtiene del CSV. Cuando los datos contienen subframes y se promedian por frame, el panel usa la frecuencia resultante de esa preparación. También muestra el límite máximo admitido, equivalente a la mitad de la frecuencia disponible, y bloquea combinaciones matemáticamente inválidas.
+El campo `Frecuencia usada` se completa con la frecuencia original detectada en el CSV y también permite corregirla o ingresarla manualmente. Cuando los datos contienen subframes y se promedian por frame, el programa divide ese valor automáticamente y muestra la frecuencia efectiva. Por ejemplo, 2000 Hz con 8 subframes se procesa a 250 Hz. El panel también muestra el límite máximo admitido, equivalente a la mitad de la frecuencia efectiva, y bloquea combinaciones matemáticamente inválidas.
 
 El procesamiento se realiza con secciones de segundo orden y hacia adelante y hacia atrás para evitar un desplazamiento temporal apreciable de los eventos. La atenuación fuera de los límites elegidos es gradual; no se presenta como una eliminación perfecta e instantánea de todas las frecuencias exteriores.
 
@@ -56,10 +56,11 @@ El filtrado no reemplaza visualmente los datos: la señal original permanece en 
 
 - Los límites seleccionados se redondean al frame entero más cercano. Por ejemplo, `30.15` pasa a `30` y `30.76` pasa a `31`.
 - Cada rango pertenece únicamente a la gráfica donde se seleccionó y conserva un color propio.
+- La lista se ordena de izquierda a derecha. Los nombres automáticos se actualizan según esa posición, sin perder notas ni sub-rangos asociados.
 - Los rangos de una misma gráfica no pueden superponerse ni compartir un frame extremo. Si una selección invade un rango existente, se ajusta al tramo libre continuo siguiendo la dirección del gesto. Por ejemplo, con `20–30` ya ocupado, seleccionar `24–50` crea `31–50`.
 - La selección ya no abre una ventana modal.
 - El panel `Rangos para cálculos` permite elegir la señal y usar todos sus rangos, solo los pares, solo los impares o una combinación manual mediante casillas.
-- Los rangos seleccionados se pueden eliminar sin borrar los demás.
+- Cada rango y sub-rango se puede eliminar desde la cruz de su propia fila.
 
 La selección se hace con dos clics sobre una gráfica después de activar `Seleccionar rango`. También se puede ingresar un intervalo entero desde la barra superior.
 

@@ -114,6 +114,9 @@ class VentanaPrincipal(QWidget):
         self.panel_derecho.filtros.restaurarSolicitado.connect(
             self.area_central.restaurar_datos_originales
         )
+        self.panel_derecho.filtros.frecuenciaCambiada.connect(
+            self.area_central.set_frecuencia_grafica
+        )
         self.area_central.filtroEstadoCambiado.connect(
             self.panel_derecho.filtros.actualizar_estado
         )
@@ -138,9 +141,6 @@ class VentanaPrincipal(QWidget):
         )
         self.panel_derecho.formulas.eliminarRangosSolicitado.connect(
             self.area_central.eliminar_rangos
-        )
-        self.panel_derecho.formulas.limpiarRangosSolicitado.connect(
-            self.area_central.limpiar_rangos
         )
 
         # --- Fórmulas ---

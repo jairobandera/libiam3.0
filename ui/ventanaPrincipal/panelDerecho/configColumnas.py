@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QListWidget,
     QListWidgetItem,
+    QAbstractScrollArea,
     QAbstractItemView,
 )
 from PySide6.QtCore import Qt, Signal
@@ -118,7 +119,17 @@ class ConfigColumnas(QFrame):
         self.lista_filas.setDragDropMode(QAbstractItemView.InternalMove)
         self.lista_filas.setSelectionMode(QAbstractItemView.SingleSelection)
         self.lista_filas.setFocusPolicy(Qt.NoFocus)
-        self.lista_filas.setFixedHeight(500)
+        # Todos los renglones tienen la misma altura. Qt puede reutilizar ese
+        # cálculo al mostrar el panel en vez de medir cada item al abrirlo.
+        self.lista_filas.setUniformItemSizes(True)
+        self.lista_filas.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.lista_filas.setVerticalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
+        self.lista_filas.setSizeAdjustPolicy(
+            QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored
+        )
+        self.lista_filas.setFixedHeight(220)
         self.lista_filas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.lista_filas.setSpacing(2)
         self.lista_filas.itemChanged.connect(self._on_item_cambiado)
@@ -210,6 +221,7 @@ class ConfigColumnas(QFrame):
         """
         # Evitar que la carga inicial de checkboxes dispare itemChanged.
         self.lista_filas.blockSignals(True)
+        self.lista_filas.setUpdatesEnabled(False)
         self.lista_filas.clear()
 
         tipos = self.mapeo.obtener_tipos_detectados()
@@ -220,7 +232,9 @@ class ConfigColumnas(QFrame):
             for eje, columna_auto in ejes.items():
                 nombre = self.formatear_nombre_eje(tipo, eje)
                 columna = columna_auto if columna_auto else "---"
-                item = QListWidgetItem(f"☰   {nombre}   ·   {columna}")
+                texto = f"☰   {nombre}   ·   {columna}"
+                item = QListWidgetItem(texto)
+                item.setToolTip(texto)
                 item.setData(Qt.UserRole, (tipo, eje))
                 # Arrastrable pero sin aceptar drop "dentro"; solo se reordena.
                 item.setFlags(
@@ -233,6 +247,16 @@ class ConfigColumnas(QFrame):
                 self.lista_filas.addItem(item)
 
         self.lista_filas.blockSignals(False)
+        self.lista_filas.setUpdatesEnabled(True)
+
+        # No se pinta un bloque fijo de 500 px cuando hay pocas variables. La
+        # lista crece hasta un límite y usa su propio scroll si hiciera falta.
+        if self.lista_filas.count():
+            alto_fila = max(30, self.lista_filas.sizeHintForRow(0))
+            alto_lista = min(380, max(150, alto_fila * self.lista_filas.count() + 8))
+        else:
+            alto_lista = 150
+        self.lista_filas.setFixedHeight(alto_lista)
 
         # Aplicar filtro visual
         self._aplicar_filtro_visual(tipo_filtro)

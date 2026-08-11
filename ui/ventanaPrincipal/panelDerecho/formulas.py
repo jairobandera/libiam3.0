@@ -31,7 +31,6 @@ class Formulas(QFrame):
     """Selecciona qué rangos estarán disponibles para los cálculos."""
 
     eliminarRangosSolicitado = Signal(object)
-    limpiarRangosSolicitado = Signal()
     seleccionRangosCambiada = Signal(object)
     aplicarATodasCambiado = Signal(bool)
     notaGuardada = Signal(str, str)
@@ -118,15 +117,6 @@ class Formulas(QFrame):
         self.lbl_error.setWordWrap(True)
         self.lbl_error.setStyleSheet("color: #EF5350;")
 
-        botones = QHBoxLayout()
-        self.btn_eliminar = QPushButton("Eliminar de esta señal")
-        self.btn_eliminar.setObjectName("btnResetMapeo")
-        self.btn_limpiar = QPushButton("Eliminar todos")
-        self.btn_limpiar.setObjectName("btnResetMapeo")
-        self.btn_limpiar.setToolTip("Elimina los rangos de todas las señales")
-        botones.addWidget(self.btn_eliminar)
-        botones.addWidget(self.btn_limpiar)
-
         seleccion_layout.addWidget(ayuda)
         seleccion_layout.addLayout(fila_senal)
         seleccion_layout.addWidget(self.chk_todas)
@@ -143,7 +133,6 @@ class Formulas(QFrame):
             self.fuenteCalculoCambiada.emit
         )
         seleccion_layout.addWidget(self.panel_calculo)
-        seleccion_layout.addLayout(botones)
         seleccion.setLayout(seleccion_layout)
 
         layout.addWidget(titulo)
@@ -152,8 +141,6 @@ class Formulas(QFrame):
         layout.addStretch()
         self.setLayout(layout)
 
-        self.btn_eliminar.clicked.connect(self._eliminar_seleccionados)
-        self.btn_limpiar.clicked.connect(self._eliminar_todos)
         self.cmb_senal.currentIndexChanged.connect(self._renderizar_rangos_actuales)
         self._actualizar_botones()
 
@@ -382,13 +369,14 @@ class Formulas(QFrame):
         y el botón de nota y el de eliminar (a la derecha) queden siempre
         visibles. El nombre completo y el origen quedan en el tooltip.
         """
-        numero = int(rango["numero"])
+        numero_interno = int(rango["numero"])
+        numero = int(rango.get("orden") or numero_interno)
         identificador = self._id_rango(rango)
         # Los guardados con el formato anterior traen «Rango N» también en los
         # sub-rangos; acá se muestran igual como «Sub-rango N».
         predeterminado = f"{'Sub-rango' if es_sub else 'Rango'} {numero}"
         nombre_completo = rango.get("nombre") or predeterminado
-        if es_sub and nombre_completo == f"Rango {numero}":
+        if es_sub and nombre_completo == f"Rango {numero_interno}":
             nombre_completo = predeterminado
         medidas = f"{int(rango['desde'])} – {int(rango['hasta'])}"
         prefijo = "↳ " if es_sub else ""
@@ -442,7 +430,8 @@ class Formulas(QFrame):
             boton.setIcon(QIcon(self._ruta_icono("nota_agregar.svg")))
             boton.setProperty("tienenota", "false")
             boton.setToolTip("Agregar una nota a este rango")
-        nombre = rango.get("nombre") or f"Rango {int(rango['numero'])}"
+        numero = int(rango.get("orden") or rango["numero"])
+        nombre = rango.get("nombre") or f"Rango {numero}"
         boton.clicked.connect(
             lambda _=False, ident=identificador, nom=nombre, nt=nota: self._abrir_nota(
                 ident, nom, nt
@@ -467,10 +456,11 @@ class Formulas(QFrame):
         self._renderizar_rangos_actuales()
 
     def _nombre_rango(self, rango):
-        numero = int(rango["numero"])
+        numero_interno = int(rango["numero"])
+        numero = int(rango.get("orden") or numero_interno)
         predeterminado = f"{'Sub-rango' if rango.get('es_subrango') else 'Rango'} {numero}"
         nombre = rango.get("nombre") or predeterminado
-        if rango.get("es_subrango") and nombre == f"Rango {numero}":
+        if rango.get("es_subrango") and nombre == f"Rango {numero_interno}":
             nombre = predeterminado
         return nombre
 
@@ -540,7 +530,7 @@ class Formulas(QFrame):
         self._marcar_modo_seleccion(modo)
         for identificador, checkbox in self.checkboxes.items():
             numero = next(
-                int(rango["numero"])
+                int(rango.get("orden") or rango["numero"])
                 for rango in self.rangos
                 if self._id_rango(rango) == identificador
             )
@@ -588,32 +578,7 @@ class Formulas(QFrame):
         self.seleccionRangosCambiada.emit(seleccionados)
         self._actualizar_botones()
 
-    def _eliminar_seleccionados(self):
-        seleccionados = self._obtener_visibles_seleccionados()
-        if not seleccionados:
-            return
-        mensaje = (
-            f"¿Eliminar los {len(seleccionados)} rango(s)/sub-rango(s) marcados "
-            "en esta señal? Los sub-rangos de cualquier rango marcado se pierden también."
-        )
-        if not self._confirmar_eliminacion("Eliminar rangos", mensaje):
-            return
-        self.eliminarRangosSolicitado.emit(seleccionados)
-
-    def _eliminar_todos(self):
-        if not self.rangos:
-            return
-        mensaje = (
-            "¿Eliminar todos los rangos y sub-rangos de todas las señales? "
-            "Esta acción no se puede deshacer."
-        )
-        if not self._confirmar_eliminacion("Eliminar todos los rangos", mensaje):
-            return
-        self.limpiarRangosSolicitado.emit()
-
     def _actualizar_botones(self):
-        self.btn_eliminar.setEnabled(bool(self._obtener_visibles_seleccionados()))
-        self.btn_limpiar.setEnabled(bool(self.rangos))
         # El cálculo corre sobre rangos (no sub-rangos): sin ninguno marcado
         # no hay nada que calcular, así que el botón queda gris con la razón en
         # el tooltip. El texto es genérico: vale para cualquier fórmula.

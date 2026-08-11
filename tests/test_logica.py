@@ -13,7 +13,7 @@ from logica.filtros_senales import (
     aplicar_butterworth,
     aplicar_butterworth_pasabajos,
 )
-from logica.lector_csv import leer_csv_rapido
+from logica.lector_csv import calcular_frecuencia_efectiva, leer_csv_rapido
 from logica.rangos import GestorRangos, RangoSuperpuestoError
 
 
@@ -32,6 +32,16 @@ class TestLectorCSV(unittest.TestCase):
         self.assertEqual(metadatos["unidades"]["Cx"], "mm")
         self.assertEqual(metadatos["frecuencia_muestreo"], 2000.0)
         self.assertTrue(all(np.issubdtype(tipo, np.number) for tipo in df.dtypes))
+
+    def test_ajusta_la_frecuencia_original_por_subframes(self):
+        subframes = {"tiene_subframes": True, "max_por_frame": 8}
+
+        self.assertEqual(calcular_frecuencia_efectiva(2000, subframes), 250.0)
+        self.assertEqual(
+            calcular_frecuencia_efectiva(1000, {"tiene_subframes": False}),
+            1000.0,
+        )
+        self.assertIsNone(calcular_frecuencia_efectiva(0, subframes))
 
 
 class TestFiltro(unittest.TestCase):
@@ -121,6 +131,35 @@ class TestRangos(unittest.TestCase):
         gestor.agregar(30, 40)
         gestor.eliminar([1])
         self.assertEqual([rango.numero for rango in gestor.listar()], [2])
+
+    def test_ordena_y_renumera_visualmente_de_izquierda_a_derecha(self):
+        gestor = GestorRangos()
+        primero_creado = gestor.agregar(100, 200)
+        segundo_creado = gestor.agregar(50, 80)
+
+        visibles = gestor.listar()
+
+        self.assertEqual(
+            [(rango.desde, rango.hasta) for rango in visibles],
+            [(50, 80), (100, 200)],
+        )
+        self.assertEqual([rango.orden for rango in visibles], [1, 2])
+        self.assertEqual([rango.nombre for rango in visibles], ["Rango 1", "Rango 2"])
+        # Las identidades no cambian: siguen sirviendo para notas y borrado.
+        self.assertEqual(
+            [rango.numero for rango in visibles],
+            [segundo_creado.numero, primero_creado.numero],
+        )
+
+    def test_conserva_nombres_personalizados_al_reordenar(self):
+        gestor = GestorRangos()
+        gestor.agregar(100, 200, "Despegue")
+        gestor.agregar(50, 80)
+
+        self.assertEqual(
+            [rango.nombre for rango in gestor.listar()],
+            ["Rango 1", "Despegue"],
+        )
 
     def test_ajusta_inicio_ocupado_al_primer_frame_libre(self):
         gestor = GestorRangos()
