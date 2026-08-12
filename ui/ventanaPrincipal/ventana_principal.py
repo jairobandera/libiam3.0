@@ -1,17 +1,20 @@
 import os
 import shutil
 
+from PySide6.QtCore import Qt, QEvent, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QInputDialog,
     QMessageBox,
+    QApplication,
+    QFrame,
+    QLabel,
 )
 
 from ui.cabecera.cabeceraPrincipal.cabecera import Cabecera
 from ui.cabecera.cabeceraPrincipal.cargarProyecto import CargarProyectoDialog
-from ui.cabecera.subCabecera.seleccionarRango import SeleccionarRango
 
 from ui.ventanaPrincipal.areaCentralGraficas import AreaCentralGraficas
 from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
@@ -30,6 +33,7 @@ class VentanaPrincipal(QWidget):
         self.resize(1600, 900)
 
         self.init_ui()
+        self._instalar_drag_drop()
 
     def init_ui(self):
 
@@ -41,10 +45,6 @@ class VentanaPrincipal(QWidget):
         # Cabecera principal
         self.cabecera = Cabecera()
         layout.addWidget(self.cabecera)
-
-        # Subcabecera
-        self.subcabecera = SeleccionarRango()
-        layout.addWidget(self.subcabecera)
 
         # Layout horizontal para el contenido principal
         layout_contenido = QHBoxLayout()
@@ -102,10 +102,6 @@ class VentanaPrincipal(QWidget):
 
         self.panel_derecho.config_columnas.mapeoAplicado.connect(
             self.area_central.actualizar_mapeo
-        )
-
-        self.subcabecera.rangoManualSolicitado.connect(
-            self.area_central.seleccionar_rango_manual
         )
 
         self.panel_derecho.filtros.filtroSolicitado.connect(
@@ -277,3 +273,166 @@ class VentanaPrincipal(QWidget):
                 "graficada en este archivo. Revisá el mapeo de columnas."
             )
         QMessageBox.information(self, "Cargar", mensaje)
+
+    # --- Arrastrar y soltar CSV desde el Explorador ---
+
+    def _instalar_drag_drop(self):
+        """Habilita soltar archivos CSV sobre toda la ventana principal.
+
+        Se registra un filtro de eventos a nivel de aplicación, de modo que el
+        drop funciona sobre cualquier widget de la ventana (presente o futuro,
+        incluidos cabecera, paneles y gráficas) sin tener que tocar cada uno.
+        El resto de la lógica queda concentrada en los handlers heredados
+        dragEnterEvent / dragMoveEvent / dragLeaveEvent / dropEvent.
+        """
+        self.setAcceptDrops(True)
+        self._crear_overlay_drop()
+
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        tipo = event.type()
+
+        if isinstance(obj, QWidget) and obj.window() is self:
+            if tipo == QEvent.DragLeave:
+                self.dragLeaveEvent(event)
+                return True
+
+            if tipo in (QEvent.DragEnter, QEvent.DragMove, QEvent.Drop):
+                # Un drag interno de la app (p. ej. reordenar columnas con
+                # InternalMove) no mimeData con URLs: se deja pasar intacto.
+                if not event.mimeData().hasUrls():
+                    return False
+
+                if tipo == QEvent.DragEnter:
+                    self.dragEnterEvent(event)
+                elif tipo == QEvent.DragMove:
+                    self.dragMoveEvent(event)
+                else:
+                    self.dropEvent(event)
+                return True
+
+        return super().eventFilter(obj, event)
+
+    @staticmethod
+    def _es_csv(ruta):
+        return ruta.lower().endswith(".csv") and os.path.isfile(ruta)
+
+    def _archivos_del_drag(self, event):
+        return [
+            url.toLocalFile()
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        ]
+
+    def _drag_aceptable(self, event):
+        """True si el drag trae al menos un archivo (se decide sobre ello al soltar)."""
+        return self._archivos_del_drag(event) != []
+
+    def _drag_solo_csv(self, event):
+        rutas = self._archivos_del_drag(event)
+        return rutas and all(self._es_csv(r) for r in rutas)
+
+    def dragEnterEvent(self, event):
+        if self._drag_aceptable(event):
+            event.acceptProposedAction()
+            # El indicador solo se muestra cuando el destino es un CSV válido.
+            if self._drag_solo_csv(event):
+                self._mostrar_overlay_drop()
+            else:
+                self._ocultar_overlay_drop()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if self._drag_aceptable(event):
+            event.acceptProposedAction()
+            if self._drag_solo_csv(event):
+                self._mostrar_overlay_drop()
+            else:
+                self._ocultar_overlay_drop()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self._ocultar_overlay_drop()
+        event.accept()
+
+    def dropEvent(self, event):
+        self._ocultar_overlay_drop()
+
+        rutas = self._archivos_del_drag(event)
+        no_csv = [r for r in rutas if not self._es_csv(r)]
+        csvs = [r for r in rutas if self._es_csv(r)]
+
+        if not csvs or no_csv:
+            event.ignore()
+            QTimer.singleShot(
+                0,
+                lambda: QMessageBox.warning(
+                    self, "Cargar CSV", "Solo se pueden cargar archivos CSV."
+                ),
+            )
+            return
+
+        if len(csvs) > 1:
+            event.ignore()
+            QTimer.singleShot(
+                0,
+                lambda: QMessageBox.warning(
+                    self,
+                    "Cargar CSV",
+                    "Solo se puede cargar un archivo CSV a la vez.",
+                ),
+            )
+            return
+
+        # La carga es pesada y además abre un popup modal a mitad de camino.
+        # Nunca debe ejecutarse dentro del stack del QDropEvent: Qt conserva
+        # el drag/mouse-grab activo hasta que el drop termina, y abrir un
+        # modal ahí congela la ventana («No responde»). Se difiere la carga al
+        # próximo ciclo del bucle de eventos, igual que si la disparara el
+        # botón. Mismo flujo que «Cargar CSV»: cargar_archivo_desde_ruta().
+        ruta = csvs[0]
+        event.acceptProposedAction()
+        QTimer.singleShot(
+            0, lambda: self.panel_izquierdo.cargar_archivo_desde_ruta(ruta)
+        )
+
+    def _crear_overlay_drop(self):
+        """Indicador temporal y discreto mientras se arrastra un CSV válido."""
+        self._overlay_drop = QFrame(self)
+        self._overlay_drop.setObjectName("overlayDrop")
+        self._overlay_drop.setStyleSheet(
+            "QFrame#overlayDrop {"
+            "  border: 3px dashed #1976D2;"
+            "  border-radius: 10px;"
+            "  background-color: rgba(25, 118, 210, 0.10);"
+            "}"
+            "QFrame#overlayDrop QLabel {"
+            "  color: #1976D2;"
+            "  font-size: 24px;"
+            "  font-weight: bold;"
+            "}"
+        )
+        caja = QVBoxLayout(self._overlay_drop)
+        caja.addWidget(QLabel("Soltar CSV aquí", alignment=Qt.AlignCenter))
+        self._overlay_drop.hide()
+
+    def _mostrar_overlay_drop(self):
+        if not hasattr(self, "_overlay_drop"):
+            return
+        self._overlay_drop.setGeometry(self.rect().adjusted(6, 6, -6, -6))
+        self._overlay_drop.raise_()
+        self._overlay_drop.show()
+
+    def _ocultar_overlay_drop(self):
+        if hasattr(self, "_overlay_drop"):
+            self._overlay_drop.hide()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_overlay_drop"):
+            self._overlay_drop.setGeometry(self.rect().adjusted(6, 6, -6, -6))
