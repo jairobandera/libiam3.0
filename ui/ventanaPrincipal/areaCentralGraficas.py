@@ -740,14 +740,6 @@ class GraficaSenal(pg.PlotWidget):
             self.addItem(region)
             self.regiones_rangos[rango.numero] = region
 
-    def proponer_rango(self, x_inicio, x_fin):
-        if self.x is None or len(self.x) == 0:
-            return
-        x_inicio = self._normalizar_x_click(float(x_inicio))
-        x_fin = self._normalizar_x_click(float(x_fin))
-        if x_inicio != x_fin:
-            self.rangoPropuesto.emit(self, x_inicio, x_fin)
-
 
 class AreaCentralGraficas(QFrame):
     rangosCambiados = Signal(object)
@@ -1771,18 +1763,6 @@ class AreaCentralGraficas(QFrame):
         self.subgestores = {}
         self.notas = {}
         self.rangosCambiados.emit([])
-
-    def seleccionar_rango_manual(self, categoria, senal, desde, hasta):
-        grafica = None
-        if self.mapeo_actual and categoria in self.mapeo_actual:
-            eje = f"eje_{senal[-1].lower()}" if senal else ""
-            config = self.mapeo_actual[categoria].get(eje)
-            if isinstance(config, dict):
-                grafica = self.graficas_por_columna.get(config.get("columna"))
-        if grafica is None and self.graficas:
-            grafica = self.graficas[0]
-        if grafica is not None:
-            grafica.proponer_rango(desde, hasta)
 
     def obtener_datos_rango(self, columna, desde, hasta):
         """Devuelve los datos activos para cálculos (filtrados si están visibles)."""

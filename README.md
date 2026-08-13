@@ -88,7 +88,7 @@ logica/
 └── rangos.py                Validación de rangos no superpuestos
 
 ui/
-├── cabecera/                Barra superior, selección manual y Acerca de
+├── cabecera/                Barra superior y Acerca de
 └── ventanaPrincipal/
     ├── areaCentralGraficas.py
     ├── panelizquierdo.py
