@@ -21,6 +21,7 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
     noPreguntarSuperposicionCambiada = Signal(bool)
     guardarSolicitado = Signal()
     cargarSolicitado = Signal()
+    exportarSolicitado = Signal()
     # Cambió algún ajuste de accesibilidad; el área central relee el estado.
     accesibilidadCambiada = Signal()
     # Compatibilidad durante la migración: ver ``configuracion.py``.
@@ -112,6 +113,11 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
                     "con sus rangos y notas."
                 )
                 btn.clicked.connect(self.cargarSolicitado.emit)
+            elif texto == "Exportar":
+                btn.setToolTip(
+                    "Exportar los datos, rangos y resultados del análisis."
+                )
+                btn.clicked.connect(self.exportarSolicitado.emit)
 
             right_layout.addWidget(btn)
 

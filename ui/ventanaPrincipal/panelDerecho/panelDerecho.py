@@ -69,7 +69,7 @@ class PanelDerecho(QFrame):
         scroll_formulas.setWidgetResizable(True)
         scroll_formulas.setFrameShape(QFrame.NoFrame)
         scroll_formulas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.formulas = Formulas()
+        self.formulas = Formulas(db_session=self.db_session)
         scroll_formulas.setWidget(self.formulas)
         self.stacked_widget.addWidget(scroll_formulas)
 

@@ -256,7 +256,15 @@ class GraficaSenal(pg.PlotWidget):
         if self.rangos_actuales:
             self.mostrar_rangos(self.rangos_actuales)
 
-    def set_curva_formula(self, x, y, nombre, unidad=None, picos=None):
+    def set_curva_formula(
+        self,
+        x,
+        y,
+        nombre,
+        unidad=None,
+        picos=None,
+        forzar_eje_derecho=False,
+    ):
         """Superpone la curva calculada sobre esta señal.
 
         ``x`` e ``y`` pueden traer NaN intercalados para separar tramos: así
@@ -279,7 +287,10 @@ class GraficaSenal(pg.PlotWidget):
 
         color = paleta.color_senal_formula()
         unidad_formula = (unidad or "").strip()
-        self._formula_en_eje_derecho = self._necesita_eje_propio(y, unidad_formula)
+        self._formula_en_eje_derecho = bool(
+            forzar_eje_derecho
+            or self._necesita_eje_propio(y, unidad_formula)
+        )
 
         etiqueta = f"{nombre} ({unidad_formula})" if unidad_formula else nombre
         self.curva_formula = pg.PlotDataItem(
@@ -506,6 +517,17 @@ class GraficaSenal(pg.PlotWidget):
         """El rango al que pertenece ese punto, para mostrar sus valores."""
         if not self.picos_formula:
             return None
+        contenidos = [
+            pico
+            for pico in self.picos_formula
+            if pico.get("desde") is not None
+            and pico.get("hasta") is not None
+            and min(pico["desde"], pico["hasta"])
+            <= x
+            <= max(pico["desde"], pico["hasta"])
+        ]
+        if contenidos:
+            return min(contenidos, key=lambda pico: abs(pico["x"] - x))
         return min(self.picos_formula, key=lambda pico: abs(pico["x"] - x))
 
     def _indice_mas_cercano(self, x_vista):
@@ -526,9 +548,17 @@ class GraficaSenal(pg.PlotWidget):
 
     def _mostrar_caja_valor(self, x, y, pico, es_pico):
         """Caja con el resumen del rango al que pertenece ese punto."""
-        info = self.info_formula
-        unidad = (info.get("unidad") or "").strip()
-        nombre = info.get("nombre") or "Fórmula"
+        info = self.info_formula or {}
+        unidad = (
+            (pico or {}).get("unidad")
+            or info.get("unidad")
+            or ""
+        ).strip()
+        nombre = (
+            (pico or {}).get("formula")
+            or info.get("nombre")
+            or "Fórmula"
+        )
         if pico and pico.get("etiqueta"):
             nombre = f"{nombre} · {pico['etiqueta']}"
         datos = (pico or {}).get("resumen") or {}
@@ -755,6 +785,7 @@ class AreaCentralGraficas(QFrame):
     rangoAjustado = Signal(str)
     filtroEstadoCambiado = Signal(bool, str)
     senalesDisponiblesCambiaron = Signal(object)
+    variablesFormulaCambiaron = Signal(object)
     formulaEstadoCambiado = Signal(bool, str)
     resultadosFormulaCambiaron = Signal(object)
     # True cuando alguna señal visible tiene filtro: habilita elegir la fuente.
@@ -782,6 +813,11 @@ class AreaCentralGraficas(QFrame):
         self.aplicar_corte_todas = False
         self.superposicion_habilitada = False
         self.no_preguntar_superposicion = False
+        # Configuraciones y cálculos vigentes, una entrada por fórmula. Así una
+        # nueva aplicación no reemplaza las curvas de otras fórmulas.
+        self.formulas_activas = {}
+        self._calculos_formulas = {}
+        # Alias de compatibilidad: apunta a la aplicación más reciente.
         self.formula_activa = None
         self.masa_sujeto = None
         self.gravedad = 9.8
@@ -841,6 +877,8 @@ class AreaCentralGraficas(QFrame):
         self.notas = {}
         self.columnas_filtradas = set()
         self.filtros_por_columna = {}
+        self.formulas_activas = {}
+        self._calculos_formulas = {}
         self.formula_activa = None
         self.rangosCambiados.emit([])
         self.resultadosFormulaCambiaron.emit(None)
@@ -853,9 +891,12 @@ class AreaCentralGraficas(QFrame):
         columnas_ordenadas = self._obtener_todas_columnas_mapeo()
         orden_actual = [grafica.columna for grafica in self.graficas]
         # Reconstruir si aparecen columnas nuevas o si cambió el orden pedido.
-        if columnas_ordenadas != orden_actual:
+        graficas_recreadas = columnas_ordenadas != orden_actual
+        if graficas_recreadas:
             self._crear_graficas()
         self._actualizar_visibilidad()
+        if self.formulas_activas and not graficas_recreadas:
+            self._recalcular_formulas_activas()
 
     def set_frecuencia_grafica(self, frecuencia):
         """Actualiza la frecuencia efectiva elegida en el panel de filtros."""
@@ -867,8 +908,8 @@ class AreaCentralGraficas(QFrame):
         if nueva_frecuencia == self.frecuencia_grafica:
             return
         self.frecuencia_grafica = nueva_frecuencia
-        if self.formula_activa:
-            self.aplicar_formula(self.formula_activa, avisar=False)
+        if self.formulas_activas:
+            self._recalcular_formulas_activas()
 
     def set_modo_seleccion_rango(self, activo):
         self.modo_seleccion_rango = activo
@@ -1063,12 +1104,13 @@ class AreaCentralGraficas(QFrame):
 
         # Las gráficas se rehicieron desde cero: si había una fórmula puesta,
         # se vuelve a aplicar sobre las nuevas curvas.
-        if self.formula_activa:
-            self.aplicar_formula(self.formula_activa, avisar=False)
+        if self.formulas_activas:
+            self._recalcular_formulas_activas()
 
     def _actualizar_visibilidad(self):
         if not self.graficas_por_columna:
             self.senalesDisponiblesCambiaron.emit([])
+            self.variablesFormulaCambiaron.emit([])
             return
         columnas_activas = set(self._obtener_columnas_a_graficar())
         hay_visibles = False
@@ -1081,18 +1123,35 @@ class AreaCentralGraficas(QFrame):
         else:
             self._mostrar_placeholder("No hay columnas activas para graficar.")
         self._emitir_senales_disponibles(columnas_activas)
+        if self._calculos_formulas:
+            self._redibujar_formulas_aplicadas()
 
     def _emitir_senales_disponibles(self, columnas_activas=None):
         if columnas_activas is None:
             columnas_activas = set(self._obtener_columnas_a_graficar())
-        self.senalesDisponiblesCambiaron.emit(
+        senales = [
+            {
+                "columna": columna,
+                "nombre": grafica.nombre_senal,
+                "visible": columna in columnas_activas,
+            }
+            for columna, grafica in self.graficas_por_columna.items()
+        ]
+        self.senalesDisponiblesCambiaron.emit(senales)
+        self.variablesFormulaCambiaron.emit(
             [
                 {
-                    "columna": columna,
-                    "nombre": grafica.nombre_senal,
-                    "visible": columna in columnas_activas,
+                    "token": rol,
+                    "nombre": f"{rol} — {formulas.NOMBRES_ROLES[rol]}",
+                    "detalle": (
+                        f"Usa la señal «{self.graficas_por_columna[columna].nombre_senal}» "
+                        f"de la columna «{columna}». Al calcular toma sus valores "
+                        "en los frames de cada rango seleccionado."
+                    ),
                 }
-                for columna, grafica in self.graficas_por_columna.items()
+                for rol in formulas.ROLES
+                if (columna := self._columna_de_rol(rol)) is not None
+                and columna in self.graficas_por_columna
             ]
         )
 
@@ -1119,8 +1178,8 @@ class AreaCentralGraficas(QFrame):
 
         # set_datos() rehace las curvas, así que la fórmula se vuelve a poner
         # (y se recalcula sobre los datos filtrados, que es lo que se espera).
-        if self.formula_activa:
-            self.aplicar_formula(self.formula_activa, avisar=False)
+        if self.formulas_activas:
+            self._recalcular_formulas_activas()
 
     def set_aplicar_corte_todas(self, activo):
         """Define si el próximo recorte se aplica a todas las gráficas visibles."""
@@ -1149,6 +1208,16 @@ class AreaCentralGraficas(QFrame):
         (grosor, estilos y tooltips) se aplican dentro de ``aplicar_paleta``.
         """
         self._repintar_accesibilidad()
+
+    def actualizar_formulas_abiertas(self):
+        """Refresca los selectores de las ventanas de sub-rangos ya abiertas."""
+        self._ventanas_region = [
+            ventana for ventana in self._ventanas_region if ventana.isVisible()
+        ]
+        for ventana in self._ventanas_region:
+            ventana.panel_calculo.recargar_formulas()
+        if self.formulas_activas:
+            self._recalcular_formulas_activas()
 
     def _repintar_accesibilidad(self):
         """Reasigna los colores y repinta gráficas y ventanas de sub-rangos.
@@ -1645,6 +1714,10 @@ class AreaCentralGraficas(QFrame):
             )
         return filas
 
+    def rangos_para_exportar(self):
+        """Devuelve una copia de los rangos con sus nombres visibles actuales."""
+        return [dict(rango) for rango in self._rangos_para_panel()]
+
     def importar_anotaciones(self, filas):
         """Restaura rangos, sub-rangos y notas de un proyecto guardado.
 
@@ -1721,6 +1794,8 @@ class AreaCentralGraficas(QFrame):
 
     def _emitir_rangos(self):
         self.rangosCambiados.emit(self._rangos_para_panel())
+        if self.formulas_activas:
+            self._recalcular_formulas_activas()
 
     def eliminar_rangos(self, identificadores):
         por_columna = {}
@@ -1770,7 +1845,7 @@ class AreaCentralGraficas(QFrame):
                 grafica.mostrar_rangos([])
         self.subgestores = {}
         self.notas = {}
-        self.rangosCambiados.emit([])
+        self._emitir_rangos()
 
     def seleccionar_rango_manual(self, categoria, senal, desde, hasta):
         grafica = None
@@ -1799,8 +1874,8 @@ class AreaCentralGraficas(QFrame):
         self.masa_sujeto = variables.get("masa")
         self.gravedad = variables.get("gravedad") or self.gravedad
         # Si hay una fórmula que depende de la masa, se recalcula sola.
-        if self.formula_activa:
-            self.aplicar_formula(self.formula_activa, avisar=False)
+        if self.formulas_activas:
+            self._recalcular_formulas_activas()
 
     def _fuente_de_columna(self, columna):
         """Sobre qué serie se calcula esta columna, de verdad.
@@ -1839,10 +1914,10 @@ class AreaCentralGraficas(QFrame):
         if valor == self.fuente_calculo:
             return
         self.fuente_calculo = valor
-        if self.formula_activa:
-            self.aplicar_formula(self.formula_activa, avisar=False)
+        if self.formulas_activas:
+            self._recalcular_formulas_activas()
 
-    def _rangos_seleccionados(self, identificadores):
+    def _rangos_seleccionados(self, identificadores, preservar_por_senal=False):
         """Convierte los IDs marcados en el panel en intervalos de frames.
 
         Se aceptan rangos de cualquier señal visible: todos comparten el eje de
@@ -1860,12 +1935,14 @@ class AreaCentralGraficas(QFrame):
                 continue
             intervalos.append(datos)
 
-        # Sin duplicados: dos señales pueden tener el mismo tramo marcado y la
-        # fórmula se calcularía dos veces exactamente igual.
+        # Las fórmulas generales no repiten un mismo intervalo. Las que usan
+        # «Señal del rango» sí lo conservan por columna porque los datos cambian.
         vistos = set()
         unicos = []
         for datos in sorted(intervalos, key=lambda d: (d["desde"], d["hasta"])):
             clave = (datos["desde"], datos["hasta"])
+            if preservar_por_senal:
+                clave += (datos.get("columna"),)
             if clave not in vistos:
                 vistos.add(clave)
                 unicos.append(datos)
@@ -1914,107 +1991,261 @@ class AreaCentralGraficas(QFrame):
             rol for rol in formulas.ROLES if self._columna_de_rol(rol) is not None
         }
 
-    def aplicar_formula(self, configuracion=None, avisar=True):
-        """Calcula una fórmula sobre cada rango seleccionado.
+    def aplicar_formula(self, configuracion=None, avisar=True, actualizar_vista=True):
+        """Calcula una fórmula sin borrar las demás fórmulas aplicadas.
 
-        Cada resultado se dibuja **únicamente en la gráfica que posee el rango**
-        que lo originó: se agrupan por columna propietaria y cada gráfica recibe
-        solo su tramo de curva y sus picos. El motor (``_calcular_por_intervalos``)
-        es compartido con los sub-rangos y lo alimenta el registro ``FORMULAS``,
-        así cualquier fórmula existe una sola vez en ambos lugares.
+        Cada fórmula mantiene su propia selección de rangos. Volver a aplicar
+        la misma fórmula actualiza únicamente esa selección; aplicar otra
+        agrega sus tramos a los que ya están visibles.
         """
         if self.df_grafica_original is None:
-            self.formulaEstadoCambiado.emit(False, "Primero cargá un archivo CSV.")
-            return
+            if avisar:
+                self.formulaEstadoCambiado.emit(
+                    False, "Primero cargá un archivo CSV."
+                )
+            return False
 
         configuracion = dict(configuracion or {})
         seleccionados = configuracion.get("rangos") or []
         clave = configuracion.get("clave") or formulas.formula_predeterminada()
+        configuracion["clave"] = clave
         if not formulas.hay_formula(clave):
-            self.formulaEstadoCambiado.emit(False, f"Fórmula «{clave}» desconocida.")
-            return
+            if avisar:
+                self.formulaEstadoCambiado.emit(
+                    False, f"Fórmula «{clave}» desconocida."
+                )
+            return False
         desc = formulas.descripcion_formula(clave)
 
-        rangos = self._rangos_seleccionados(seleccionados)
+        rangos = self._rangos_seleccionados(
+            seleccionados,
+            preservar_por_senal=desc.get("usa_senal_rango", False),
+        )
         if not rangos:
-            self.formulaEstadoCambiado.emit(
-                False,
-                "Marcá al menos un rango en una gráfica visible para calcular "
-                f"{formulas.nombre_con_articulo(desc)}.",
-            )
-            return
+            if avisar:
+                self.formulaEstadoCambiado.emit(
+                    False,
+                    "Marcá al menos un rango en una gráfica visible para calcular "
+                    f"{formulas.nombre_con_articulo(desc)}.",
+                )
+            return False
 
         try:
-            columna, resultados, tramos, advertencias, segmentos = (
+            _columna, resultados, _tramos, advertencias, segmentos = (
                 self._calcular_por_intervalos(clave, rangos)
             )
         except ErrorFormula as exc:
-            self.formulaEstadoCambiado.emit(False, str(exc))
-            return
+            if avisar:
+                self.formulaEstadoCambiado.emit(False, str(exc))
+            return False
 
         if not resultados:
-            self.formulaEstadoCambiado.emit(
-                False,
-                "Los rangos marcados no tienen datos válidos para calcular "
-                f"{formulas.nombre_con_articulo(desc)}.",
-            )
-            return
+            if avisar:
+                self.formulaEstadoCambiado.emit(
+                    False,
+                    "Los rangos marcados no tienen datos válidos para calcular "
+                    f"{formulas.nombre_con_articulo(desc)}.",
+                )
+            return False
 
-        self.formula_activa = configuracion
-
-        # Cada resultado se dibuja únicamente en la gráfica que posee su rango.
-        # El ``id`` de cada resultado mapea al rango que lo originó y ese rango
-        # conoce su ``columna``: se agrupan los segmentos REALES de cada tramo
-        # (no se re-filtra la curva combinada por frames, que mezclaría puntos
-        # de otros rangos solapados) y cada gráfica dibuja solo los suyos.
-        columna_por_id = {rango.get("id"): rango.get("columna") for rango in rangos}
+        columna_por_id = {
+            rango.get("id"): rango.get("columna") for rango in rangos
+        }
         por_grafica = {}
-        for res, seg in zip(resultados, segmentos):
-            propietario = columna_por_id.get(res.get("id"))
+        for resultado, segmento in zip(resultados, segmentos):
+            propietario = columna_por_id.get(resultado.get("id"))
             grupo = por_grafica.setdefault(
                 propietario, {"resultados": [], "segmentos": []}
             )
-            grupo["resultados"].append(res)
-            grupo["segmentos"].append(seg)
-
-        # Se limpian todas las curvas y se redibuja el tramo de cada gráfica
-        # que posea al menos un rango seleccionado.
-        for grafica in self.graficas_por_columna.values():
-            grafica.limpiar_curva_formula()
-        for columna_owner, grupo in por_grafica.items():
-            grafica = self.graficas_por_columna.get(columna_owner)
-            if grafica is None or grafica.isHidden():
-                # Se calcula igual (no bloquea): solo no se dibuja.
-                continue
-            curva_owner = formulas.concatenar_curva(grupo["segmentos"])
-            grafica.set_curva_formula(
-                curva_owner["x"], curva_owner["y"], desc["nombre"],
-                desc["unidad"], picos=formulas.picos_de_resultados(grupo["resultados"]),
-            )
+            grupo["resultados"].append(resultado)
+            grupo["segmentos"].append(segmento)
 
         fuentes = [rango["columna"] for rango in rangos]
         fuente, detalle = self._procedencia(fuentes)
-        self.resultadosFormulaCambiaron.emit(
-            {
-                "clave": clave,
-                "nombre": desc["nombre"],
-                "expresion": desc["expresion"],
-                "unidad": desc["unidad"],
-                # Los resultados pertenecen a varias señales: sin senal única.
-                "senal": "",
-                "fuente": fuente,
-                "detalle_filtro": detalle,
-                "resultados": resultados,
-                "advertencias": advertencias,
-            }
+        datos_panel = {
+            "clave": clave,
+            "nombre": desc["nombre"],
+            "expresion": desc["expresion"],
+            "unidad": desc["unidad"],
+            "senal": "",
+            "fuente": fuente,
+            "detalle_filtro": detalle,
+            "resultados": resultados,
+            "advertencias": advertencias,
+        }
+        calculo = {
+            "configuracion": configuracion,
+            "datos_panel": datos_panel,
+            "por_grafica": por_grafica,
+        }
+
+        self.formulas_activas = formulas.registrar_aplicacion_formula(
+            self.formulas_activas, configuracion
         )
+        self.formula_activa = self.formulas_activas[clave]
+        self._calculos_formulas[clave] = calculo
+        self._calculos_formulas = {
+            clave_activa: self._calculos_formulas[clave_activa]
+            for clave_activa in self.formulas_activas
+            if clave_activa in self._calculos_formulas
+        }
+
+        if actualizar_vista:
+            self._redibujar_formulas_aplicadas()
+            self.resultadosFormulaCambiaron.emit(datos_panel)
+
         if avisar:
             cantidad = len(resultados)
             destino = "un rango" if cantidad == 1 else f"{cantidad} rangos"
+            conservadas = (
+                " Las demás fórmulas aplicadas se conservaron."
+                if len(self.formulas_activas) > 1
+                else ""
+            )
             self.formulaEstadoCambiado.emit(
                 True,
-                f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}.",
+                f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}."
+                f"{conservadas}",
             )
+        return True
+
+    def _redibujar_formulas_aplicadas(self):
+        """Combina los tramos vigentes y dibuja una curva por gráfica."""
+        for grafica in self.graficas_por_columna.values():
+            grafica.limpiar_curva_formula()
+
+        por_grafica = {}
+        for clave in self.formulas_activas:
+            calculo = self._calculos_formulas.get(clave)
+            if calculo is None:
+                continue
+            datos_panel = calculo["datos_panel"]
+            for propietario, grupo in calculo["por_grafica"].items():
+                combinado = por_grafica.setdefault(
+                    propietario,
+                    {"segmentos": [], "picos": [], "formulas": []},
+                )
+                combinado["segmentos"].extend(grupo["segmentos"])
+                combinado["formulas"].append(
+                    (clave, datos_panel["nombre"], datos_panel["unidad"])
+                )
+                for pico in formulas.picos_de_resultados(grupo["resultados"]):
+                    pico.update(
+                        {
+                            "formula": datos_panel["nombre"],
+                            "unidad": datos_panel["unidad"],
+                        }
+                    )
+                    combinado["picos"].append(pico)
+
+        for propietario, datos in por_grafica.items():
+            grafica = self.graficas_por_columna.get(propietario)
+            if grafica is None or grafica.isHidden():
+                continue
+            curva = formulas.concatenar_curva(datos["segmentos"])
+            formulas_unicas = list(dict.fromkeys(datos["formulas"]))
+            if len(formulas_unicas) == 1:
+                _clave, nombre, unidad = formulas_unicas[0]
+            else:
+                nombre = " + ".join(
+                    nombre_formula
+                    for _clave, nombre_formula, _unidad in formulas_unicas
+                )
+                unidad = ""
+            grafica.set_curva_formula(
+                curva["x"],
+                curva["y"],
+                nombre,
+                unidad,
+                picos=datos["picos"],
+                forzar_eje_derecho=len(formulas_unicas) > 1,
+            )
+
+    def _recalcular_formulas_activas(self):
+        """Recalcula todas las aplicaciones tras cambiar datos o rangos."""
+        ids_validos = {
+            rango["id"]
+            for rango in self._rangos_para_panel()
+            if not rango.get("es_subrango")
+        }
+        depuradas = {}
+        for clave, configuracion in self.formulas_activas.items():
+            if not formulas.hay_formula(clave):
+                continue
+            seleccion = [
+                identificador
+                for identificador in configuracion.get("rangos") or ()
+                if identificador in ids_validos
+            ]
+            if not seleccion:
+                continue
+            vigente = dict(configuracion)
+            vigente["rangos"] = seleccion
+            depuradas[clave] = vigente
+
+        self.formulas_activas = depuradas
+        configuraciones = list(depuradas.values())
+        self._calculos_formulas = {}
+        for configuracion in configuraciones:
+            self.aplicar_formula(
+                configuracion,
+                avisar=False,
+                actualizar_vista=False,
+            )
+
+        self.formula_activa = (
+            next(reversed(self.formulas_activas.values()))
+            if self.formulas_activas
+            else None
+        )
+        self._redibujar_formulas_aplicadas()
+        self._emitir_resultado_formula_actual()
+
+    def _emitir_resultado_formula_actual(self):
+        for clave in reversed(self.formulas_activas):
+            calculo = self._calculos_formulas.get(clave)
+            if calculo is not None:
+                self.resultadosFormulaCambiaron.emit(calculo["datos_panel"])
+                return
+        self.resultadosFormulaCambiaron.emit(None)
+
+    def resultados_formulas_para_exportar(self):
+        """Resultados vigentes, en el orden en que se aplicaron."""
+        return [
+            self._calculos_formulas[clave]["datos_panel"]
+            for clave in self.formulas_activas
+            if clave in self._calculos_formulas
+        ]
+
+    def curvas_formulas_para_exportar(self, columnas=None):
+        """Curvas vigentes separadas por fórmula y por gráfica."""
+        permitidas = set(columnas) if columnas is not None else None
+        curvas = []
+        for clave in self.formulas_activas:
+            calculo = self._calculos_formulas.get(clave)
+            if calculo is None:
+                continue
+            datos_panel = calculo["datos_panel"]
+            for propietario, grupo in calculo["por_grafica"].items():
+                if permitidas is not None and propietario not in permitidas:
+                    continue
+                grafica = self.graficas_por_columna.get(propietario)
+                if grafica is None:
+                    continue
+                curva = formulas.concatenar_curva(grupo["segmentos"])
+                if not len(curva["x"]) or not np.isfinite(curva["y"]).any():
+                    continue
+                curvas.append(
+                    {
+                        "columna": propietario,
+                        "senal": grafica.nombre_senal,
+                        "nombre": datos_panel["nombre"],
+                        "unidad": datos_panel["unidad"],
+                        "x": curva["x"],
+                        "y": curva["y"],
+                    }
+                )
+        return curvas
 
     def _calcular_por_intervalos(self, clave, intervalos):
         """Motor compartido: resuelve roles, valida y aplica la fórmula.
@@ -2051,7 +2282,8 @@ class AreaCentralGraficas(QFrame):
         roles_a_usar, eleccion, advertencias = formulas.resolver_roles(
             clave, disponibles
         )
-        if not roles_a_usar:
+        usa_senal_rango = bool(desc.get("usa_senal_rango"))
+        if not roles_a_usar and not usa_senal_rango:
             raise ErrorFormula(
                 f"No hay señales disponibles para calcular "
                 f"{formulas.nombre_con_articulo(desc)}."
@@ -2066,7 +2298,7 @@ class AreaCentralGraficas(QFrame):
         if motivo:
             raise ErrorFormula(motivo)
 
-        roles = {}
+        roles_fijos = {}
         x_total = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
         for rol in roles_a_usar:
             columna = self._columna_de_rol(rol)
@@ -2075,19 +2307,43 @@ class AreaCentralGraficas(QFrame):
             datos = self._datos_columna(columna)
             if datos is None:
                 raise ErrorFormula(f"No se pudo leer la señal {rol}.")
-            roles[rol] = datos
+            roles_fijos[rol] = datos
 
-        resultados, segmentos = formulas.computar_formula(
-            clave, roles, x_total, contexto, intervalos, eleccion
-        )
+        if usa_senal_rango:
+            resultados, segmentos = [], []
+            columna_salida = None
+            for intervalo in intervalos:
+                columna_owner = intervalo.get("columna")
+                datos_owner = self._datos_columna(columna_owner)
+                if datos_owner is None:
+                    raise ErrorFormula(
+                        f"No se pudo leer la señal «{columna_owner}» del rango."
+                    )
+                roles_intervalo = dict(roles_fijos)
+                roles_intervalo[formulas.VARIABLE_SENAL_RANGO] = datos_owner
+                parciales, tramos_parciales = formulas.computar_formula(
+                    clave,
+                    roles_intervalo,
+                    x_total,
+                    contexto,
+                    [intervalo],
+                    eleccion,
+                )
+                resultados.extend(parciales)
+                segmentos.extend(tramos_parciales)
+                if columna_salida is None:
+                    columna_salida = columna_owner
+        else:
+            resultados, segmentos = formulas.computar_formula(
+                clave, roles_fijos, x_total, contexto, intervalos, eleccion
+            )
+            salida = desc.get("salida_rol")
+            if salida not in roles_fijos and roles_a_usar:
+                salida = roles_a_usar[0]
+            columna_salida = self._columna_de_rol(salida) if salida else None
+
         curva = formulas.concatenar_curva(segmentos)
         curva["picos"] = formulas.picos_de_resultados(resultados)
-
-        # Rol de salida: el declarado si está en uso, si no el primero usado.
-        salida = desc.get("salida_rol")
-        if salida not in roles and roles_a_usar:
-            salida = roles_a_usar[0]
-        columna_salida = self._columna_de_rol(salida) if salida else None
         return columna_salida, resultados, curva, advertencias, segmentos
 
     def _procedencia(self, columnas_origen):
@@ -2114,12 +2370,14 @@ class AreaCentralGraficas(QFrame):
         )
 
     def quitar_formula(self):
-        """Saca la curva de la fórmula de todas las gráficas."""
+        """Saca todas las fórmulas aplicadas de las gráficas."""
+        self.formulas_activas = {}
+        self._calculos_formulas = {}
         self.formula_activa = None
         for grafica in self.graficas_por_columna.values():
             grafica.limpiar_curva_formula()
         self.resultadosFormulaCambiaron.emit(None)
-        self.formulaEstadoCambiado.emit(True, "Se quitó la curva de la fórmula.")
+        self.formulaEstadoCambiado.emit(True, "Se quitaron las fórmulas aplicadas.")
 
 
     def aplicar_filtro(self, configuracion):

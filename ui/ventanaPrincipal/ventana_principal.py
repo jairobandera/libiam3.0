@@ -5,19 +5,24 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QFileDialog,
     QInputDialog,
     QMessageBox,
 )
 
 from ui.cabecera.cabeceraPrincipal.cabecera import Cabecera
 from ui.cabecera.cabeceraPrincipal.cargarProyecto import CargarProyectoDialog
+from ui.cabecera.cabeceraPrincipal.exportar import (
+    ExportarDialog,
+    ExportacionCompletadaDialog,
+)
 from ui.cabecera.subCabecera.seleccionarRango import SeleccionarRango
 
 from ui.ventanaPrincipal.areaCentralGraficas import AreaCentralGraficas
 from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
 from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
 from ui.ventanaPrincipal.barraBotones import BarraBotones
-from logica import app_info, proyecto
+from logica import app_info, exportacion, proyecto
 
 
 class VentanaPrincipal(QWidget):
@@ -89,6 +94,7 @@ class VentanaPrincipal(QWidget):
         )
         self.cabecera.guardarSolicitado.connect(self._guardar_proyecto)
         self.cabecera.cargarSolicitado.connect(self._cargar_proyecto)
+        self.cabecera.exportarSolicitado.connect(self._exportar)
 
         # Conectar panel izquierdo con panel derecho
         self.panel_izquierdo.panel_derecho_ref = self.panel_derecho
@@ -122,6 +128,9 @@ class VentanaPrincipal(QWidget):
         )
         self.area_central.senalesDisponiblesCambiaron.connect(
             self.panel_derecho.filtros.cargar_senales
+        )
+        self.area_central.variablesFormulaCambiaron.connect(
+            self.panel_derecho.formulas.cargar_variables_formula
         )
 
         self.area_central.rangosCambiados.connect(
@@ -165,6 +174,178 @@ class VentanaPrincipal(QWidget):
         self.area_central.fuenteDatosCambiada.connect(
             self.panel_derecho.formulas.set_hay_filtro
         )
+        self.panel_derecho.formulas.formulasCambiaron.connect(
+            self.area_central.actualizar_formulas_abiertas
+        )
+
+    def _exportar(self):
+        """Exporta el estado actual sin alterar el proyecto guardado."""
+        area = self.area_central
+        if area.df_grafica_original is None or area.columna_x is None:
+            QMessageBox.warning(
+                self, "Exportar", "Primero cargá un archivo CSV para poder exportar."
+            )
+            return
+
+        columnas = [
+            columna
+            for columna in area._obtener_columnas_a_graficar()
+            if columna in area.df_grafica_original.columns
+        ]
+        if not columnas:
+            columnas = [
+                columna
+                for columna in area.graficas_por_columna
+                if columna in area.df_grafica_original.columns
+            ]
+        rangos = area.rangos_para_exportar()
+        resultados_formulas = area.resultados_formulas_para_exportar()
+        cantidad_resultados = sum(
+            len(datos.get("resultados") or ()) for datos in resultados_formulas
+        )
+        nombres_formulas = list(
+            dict.fromkeys(
+                datos.get("nombre", "")
+                for datos in resultados_formulas
+                if datos.get("nombre")
+            )
+        )
+        nombre_formula = (
+            nombres_formulas[0]
+            if len(nombres_formulas) == 1
+            else f"{len(nombres_formulas)} fórmulas aplicadas"
+            if nombres_formulas
+            else ""
+        )
+        curvas_formula = self._curvas_formula_para_exportar(columnas)
+
+        dialogo = ExportarDialog(
+            self,
+            nombre_archivo=area.nombre_archivo,
+            cantidad_frames=len(area.df_grafica_original),
+            cantidad_senales=len(columnas),
+            cantidad_rangos=len(rangos),
+            cantidad_resultados=cantidad_resultados,
+            nombre_formula=nombre_formula,
+            hay_filtros=bool(set(columnas) & set(area.columnas_filtradas)),
+            hay_curvas_formula=bool(curvas_formula),
+        )
+        if dialogo.exec() != ExportarDialog.Accepted:
+            return
+
+        modo = dialogo.modo_seleccionado()
+        titulo_modo = dialogo.titulo_modo_seleccionado()
+        resumen_modo = dialogo.resumen_modo_seleccionado()
+        extension = exportacion.EXTENSIONES_MODO[modo]
+        base = exportacion.nombre_base(area.nombre_archivo)
+        sufijos = {
+            exportacion.MODO_DATOS: "datos",
+            exportacion.MODO_RANGOS: "rangos",
+            exportacion.MODO_RESULTADOS: "resultados",
+            exportacion.MODO_COMPLETO: "analisis",
+        }
+        sugerido = f"{base}_{sufijos[modo]}{extension}"
+        filtro = (
+            "Archivo ZIP (*.zip)"
+            if extension == ".zip"
+            else "CSV compatible con Excel (*.csv)"
+        )
+        ruta, _ = QFileDialog.getSaveFileName(
+            self, f"Guardar {titulo_modo.lower()}", sugerido, filtro
+        )
+        if not ruta:
+            return
+        ruta = exportacion.asegurar_extension(ruta, extension)
+
+        try:
+            if modo == exportacion.MODO_DATOS:
+                tabla_datos = self._tabla_datos_para_exportar(columnas)
+                exportacion.escribir_csv(ruta, tabla_datos)
+            elif modo == exportacion.MODO_RANGOS:
+                tabla_muestras = exportacion.preparar_muestras_rangos(
+                    rangos,
+                    area.df_grafica_original,
+                    area.df_grafica,
+                    area.columna_x,
+                    area.columnas_filtradas,
+                )
+                exportacion.escribir_csv(ruta, tabla_muestras)
+            elif modo == exportacion.MODO_RESULTADOS:
+                tabla_resultados = exportacion.preparar_resultados_formulas(
+                    resultados_formulas
+                )
+                exportacion.escribir_csv(ruta, tabla_resultados)
+            else:
+                tabla_datos = self._tabla_datos_para_exportar(columnas)
+                tabla_rangos = exportacion.preparar_rangos(rangos)
+                tabla_muestras = exportacion.preparar_muestras_rangos(
+                    rangos,
+                    area.df_grafica_original,
+                    area.df_grafica,
+                    area.columna_x,
+                    area.columnas_filtradas,
+                )
+                tabla_resultados = exportacion.preparar_resultados_formulas(
+                    resultados_formulas
+                )
+                informacion = exportacion.preparar_informacion(
+                    area.nombre_archivo,
+                    area.columna_x,
+                    columnas,
+                    area.unidades,
+                    area.frecuencia_grafica,
+                    area.filtros_por_columna,
+                    resultados_formulas,
+                    nombres=self._nombres_senales_para_exportar(columnas),
+                )
+                tablas = {"datos.csv": tabla_datos}
+                if len(tabla_rangos):
+                    tablas["rangos.csv"] = tabla_rangos
+                    tablas["muestras_rangos.csv"] = tabla_muestras
+                if len(tabla_resultados):
+                    tablas["resultados_formula.csv"] = tabla_resultados
+                exportacion.escribir_paquete(ruta, tablas, informacion)
+        except (OSError, ValueError) as exc:
+            QMessageBox.critical(
+                self,
+                "Error al exportar",
+                "No se pudo crear el archivo. El destino no fue reemplazado.\n\n"
+                f"Detalle: {exc}",
+            )
+            return
+
+        ExportacionCompletadaDialog(
+            self,
+            os.path.normpath(ruta),
+            titulo_modo,
+            resumen_modo,
+        ).exec()
+
+    def _tabla_datos_para_exportar(self, columnas):
+        area = self.area_central
+        return exportacion.preparar_datos(
+            area.df_grafica_original,
+            area.df_grafica,
+            area.columna_x,
+            columnas,
+            area.columnas_filtradas,
+            self._curvas_formula_para_exportar(columnas),
+            nombres=self._nombres_senales_para_exportar(columnas),
+            unidades=area.unidades,
+        )
+
+    def _nombres_senales_para_exportar(self, columnas):
+        """Usa los títulos visibles sin perder la referencia a la señal."""
+        nombres = {}
+        for columna in columnas:
+            grafica = self.area_central.graficas_por_columna.get(columna)
+            if grafica is not None and grafica.nombre_senal:
+                nombres[columna] = grafica.nombre_senal
+        return nombres
+
+    def _curvas_formula_para_exportar(self, columnas):
+        """Toma cada fórmula por separado, aunque convivan en una gráfica."""
+        return self.area_central.curvas_formulas_para_exportar(columnas)
 
     def _guardar_proyecto(self):
         """Guarda una copia del CSV y sus rangos/notas en la carpeta del proyecto.

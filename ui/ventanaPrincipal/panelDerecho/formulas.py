@@ -18,7 +18,14 @@ from PySide6.QtWidgets import (
 )
 
 from logica import formulas as formulas_logica
+from logica.config_db import (
+    eliminar_formula_personalizada,
+    formula_personalizada_a_dict,
+    guardar_formula_personalizada,
+    listar_formulas_personalizadas,
+)
 
+from ui.ventanaPrincipal.panelDerecho.constructorFormula import ConstructorFormula
 from ui.ventanaPrincipal.panelDerecho.panelCalculo import PanelCalculo
 
 
@@ -37,16 +44,33 @@ class Formulas(QFrame):
     formulaSolicitada = Signal(object)
     quitarFormulaSolicitado = Signal()
     fuenteCalculoCambiada = Signal(str)
+    formulasCambiaron = Signal()
 
-    def __init__(self):
+    def __init__(self, db_session=None):
         super().__init__()
+        self.db_session = db_session
         self.setObjectName("formulasPanel")
         self.checkboxes = {}
         self.rangos = []
         self.estados_seleccion = {}
         self.subrangos_colapsados = set()
         self.modo_seleccion = None
+        self.variables_formula = []
+        self._cargar_formulas_guardadas()
         self.init_ui()
+
+    def _cargar_formulas_guardadas(self):
+        if self.db_session is None:
+            return
+        formulas_logica.limpiar_formulas_personalizadas()
+        for registro in listar_formulas_personalizadas(self.db_session):
+            try:
+                formulas_logica.registrar_formula_personalizada(
+                    formula_personalizada_a_dict(registro)
+                )
+            except formulas_logica.ErrorFormula:
+                # Una fórmula antigua o dañada no debe impedir que abra la app.
+                continue
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -124,7 +148,9 @@ class Formulas(QFrame):
         seleccion_layout.addWidget(self.scroll)
         seleccion_layout.addWidget(self.lbl_resumen)
         seleccion_layout.addWidget(self.lbl_error)
-        self.panel_calculo = PanelCalculo()
+        self.panel_calculo = PanelCalculo(
+            permitir_gestion=self.db_session is not None
+        )
         self.panel_calculo.calcularSolicitado.connect(self._solicitar_formula)
         self.panel_calculo.quitarFormulaSolicitado.connect(
             self.quitarFormulaSolicitado.emit
@@ -132,6 +158,16 @@ class Formulas(QFrame):
         self.panel_calculo.fuenteCalculoCambiada.connect(
             self.fuenteCalculoCambiada.emit
         )
+        if self.db_session is not None:
+            self.panel_calculo.crearFormulaSolicitado.connect(
+                self._crear_formula_personalizada
+            )
+            self.panel_calculo.editarFormulaSolicitado.connect(
+                self._editar_formula_personalizada
+            )
+            self.panel_calculo.eliminarFormulaSolicitado.connect(
+                self._eliminar_formula_personalizada
+            )
         seleccion_layout.addWidget(self.panel_calculo)
         seleccion.setLayout(seleccion_layout)
 
@@ -147,6 +183,104 @@ class Formulas(QFrame):
     def set_hay_filtro(self, hay_filtro):
         """Solo tiene sentido elegir la fuente si alguna señal visible tiene filtro."""
         self.panel_calculo.set_hay_filtro(hay_filtro)
+
+    def cargar_variables_formula(self, variables):
+        """Datos que el constructor puede ofrecer como piezas clicables."""
+        self.variables_formula = list(variables or [])
+
+    def _crear_formula_personalizada(self):
+        self._abrir_constructor_formula()
+
+    def _editar_formula_personalizada(self, clave):
+        descripcion = formulas_logica.FORMULAS.get(clave)
+        if not descripcion or not descripcion.get("personalizada"):
+            return
+        existente = dict(descripcion)
+        existente["clave"] = clave
+        self._abrir_constructor_formula(existente)
+
+    def _abrir_constructor_formula(self, formula_existente=None):
+        dialogo = ConstructorFormula(
+            self,
+            variables_disponibles=self.variables_formula,
+            formula_existente=formula_existente,
+        )
+        if not dialogo.exec():
+            return
+        self._guardar_formula_personalizada(
+            dialogo.datos_formula(),
+            es_edicion=bool(formula_existente),
+        )
+
+    def _guardar_formula_personalizada(self, datos, es_edicion=False):
+        clave_anterior = datos.get("clave")
+        if formulas_logica.nombre_formula_en_uso(
+            datos.get("nombre"), excluir_clave=clave_anterior
+        ):
+            QMessageBox.warning(
+                self,
+                "Guardar fórmula",
+                "Ya existe una fórmula con ese nombre. Elegí otro para distinguirla.",
+            )
+            return
+        try:
+            registro = guardar_formula_personalizada(
+                self.db_session,
+                nombre=datos["nombre"],
+                expresion=datos["expresion"],
+                unidad=datos.get("unidad", ""),
+                descripcion=datos.get("descripcion", ""),
+                reutilizable=datos.get("reutilizable", False),
+                clave=clave_anterior,
+            )
+            persistida = formula_personalizada_a_dict(registro)
+            clave = formulas_logica.registrar_formula_personalizada(persistida)
+        except Exception as exc:
+            if self.db_session is not None:
+                self.db_session.rollback()
+            QMessageBox.warning(
+                self,
+                "Guardar fórmula",
+                f"No se pudo guardar la fórmula:\n{exc}",
+            )
+            return
+
+        self.panel_calculo.recargar_formulas(seleccionar=clave)
+        self.formulasCambiaron.emit()
+        accion = "actualizada" if es_edicion else "guardada"
+        self.panel_calculo.actualizar_estado(
+            True,
+            f"Fórmula «{persistida['nombre']}» {accion}. Ya está disponible en la lista.",
+        )
+
+    def _eliminar_formula_personalizada(self, clave):
+        descripcion = formulas_logica.FORMULAS.get(clave)
+        if not descripcion or not descripcion.get("personalizada"):
+            return
+        nombre = descripcion["nombre"]
+        if not self._confirmar_eliminacion(
+            "Eliminar fórmula",
+            f"¿Eliminar la fórmula guardada «{nombre}»?",
+        ):
+            return
+        try:
+            eliminada = eliminar_formula_personalizada(self.db_session, clave)
+        except Exception as exc:
+            self.db_session.rollback()
+            QMessageBox.warning(
+                self,
+                "Eliminar fórmula",
+                f"No se pudo eliminar la fórmula:\n{exc}",
+            )
+            return
+        if not eliminada:
+            return
+        formulas_logica.quitar_formula_personalizada(clave)
+        self.panel_calculo.recargar_formulas()
+        self.formulasCambiaron.emit()
+        self.panel_calculo.actualizar_estado(
+            True, f"Se eliminó la fórmula guardada «{nombre}»."
+        )
 
     def _rangos_padre_seleccionados(self):
         """Solo los rangos, sin sub-rangos.
