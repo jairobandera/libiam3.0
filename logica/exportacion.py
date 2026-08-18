@@ -10,6 +10,8 @@ from __future__ import annotations
 import io
 import os
 import re
+import shutil
+import stat
 import tempfile
 import zipfile
 from datetime import datetime
@@ -543,13 +545,44 @@ def _ruta_temporal(ruta):
     return ruta, temporal
 
 
+def _reemplazar_destino(temporal, ruta):
+    """Reemplaza el destino y usa escritura directa si el sistema la exige."""
+    try:
+        os.replace(temporal, ruta)
+        return
+    except (PermissionError, FileExistsError) as error_reemplazo:
+        if not os.path.isfile(ruta) or os.path.islink(ruta):
+            raise error_reemplazo
+
+    try:
+        try:
+            modo = os.stat(ruta).st_mode
+            os.chmod(ruta, modo | stat.S_IWUSR)
+        except OSError:
+            pass
+        with open(temporal, "rb") as origen, open(ruta, "wb") as destino:
+            shutil.copyfileobj(origen, destino)
+            destino.flush()
+            os.fsync(destino.fileno())
+        try:
+            os.remove(temporal)
+        except OSError:
+            pass
+    except PermissionError as exc:
+        nombre = os.path.basename(ruta)
+        raise PermissionError(
+            f"No se puede sobrescribir «{nombre}» porque está abierto o "
+            "bloqueado por otra aplicación. Cerralo y volvé a exportar."
+        ) from exc
+
+
 def escribir_csv(ruta, tabla) -> str:
     """Escribe un CSV UTF-8 compatible con Excel sin dejar archivos parciales."""
     ruta, temporal = _ruta_temporal(ruta)
     try:
         with open(temporal, "wb") as archivo:
             archivo.write(_csv_en_bytes(tabla))
-        os.replace(temporal, ruta)
+        _reemplazar_destino(temporal, ruta)
     except Exception:
         try:
             os.remove(temporal)
@@ -577,7 +610,7 @@ def escribir_paquete(ruta, tablas, informacion="") -> str:
             archivo_danado = paquete.testzip()
             if archivo_danado:
                 raise OSError(f"No se pudo verificar {archivo_danado}.")
-        os.replace(temporal, ruta)
+        _reemplazar_destino(temporal, ruta)
     except Exception:
         try:
             os.remove(temporal)

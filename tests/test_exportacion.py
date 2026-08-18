@@ -3,6 +3,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -257,6 +258,40 @@ class TestExportacion(unittest.TestCase):
                     {"datos.csv", "rangos.csv", "informacion.txt"},
                 )
                 self.assertTrue(archivo.read("datos.csv").startswith(codecs.BOM_UTF8))
+
+    def test_sobrescribe_csv_y_zip_exportados_previamente(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            carpeta = Path(carpeta)
+            primera = pd.DataFrame({"valor": [1]})
+            segunda = pd.DataFrame({"valor": [2]})
+
+            csv = carpeta / "datos.csv"
+            exportacion.escribir_csv(csv, primera)
+            exportacion.escribir_csv(csv, segunda)
+            leido = pd.read_csv(csv, sep=";", decimal=",")
+            pd.testing.assert_frame_equal(leido, segunda)
+
+            paquete = carpeta / "analisis.zip"
+            exportacion.escribir_paquete(paquete, {"primero.csv": primera})
+            exportacion.escribir_paquete(paquete, {"segundo.csv": segunda})
+            with zipfile.ZipFile(paquete) as archivo:
+                self.assertEqual(archivo.namelist(), ["segundo.csv"])
+                self.assertIsNone(archivo.testzip())
+
+    def test_usa_respaldo_si_el_reemplazo_atomico_es_rechazado(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            destino = Path(carpeta) / "datos.csv"
+            destino.write_text("contenido anterior", encoding="utf-8")
+            tabla = pd.DataFrame({"valor": [7]})
+
+            with mock.patch(
+                "logica.exportacion.os.replace",
+                side_effect=PermissionError("reemplazo no permitido"),
+            ):
+                exportacion.escribir_csv(destino, tabla)
+
+            leido = pd.read_csv(destino, sep=";", decimal=",")
+            pd.testing.assert_frame_equal(leido, tabla)
 
     def test_resumen_del_paquete_es_legible(self):
         texto = exportacion.preparar_informacion(

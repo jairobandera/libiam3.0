@@ -793,25 +793,26 @@ def formula_predeterminada():
 
 
 def registrar_aplicacion_formula(aplicaciones, configuracion):
-    """Agrega o actualiza una fórmula sin borrar las demás aplicaciones.
-
-    Una misma fórmula conserva una sola selección activa: al volver a
-    aplicarla se reemplazan únicamente sus rangos. Las otras fórmulas siguen
-    en el orden en que fueron aplicadas.
-    """
+    """Agrega rangos a una fórmula sin borrar aplicaciones anteriores."""
     configuracion = dict(configuracion or {})
     clave = str(configuracion.get("clave") or "").strip()
     if not clave:
         raise ErrorFormula("La aplicación no identifica qué fórmula debe usar.")
 
-    configuracion["clave"] = clave
-    configuracion["rangos"] = list(
-        dict.fromkeys(configuracion.get("rangos") or ())
-    )
     resultado = {
         str(clave_existente): dict(datos)
         for clave_existente, datos in (aplicaciones or {}).items()
     }
+    anterior = resultado.get(clave, {})
+    configuracion = {**anterior, **configuracion, "clave": clave}
+    configuracion["rangos"] = list(
+        dict.fromkeys(
+            [
+                *(anterior.get("rangos") or ()),
+                *(configuracion.get("rangos") or ()),
+            ]
+        )
+    )
     # Sacarla y volverla a insertar deja al final la aplicación más reciente.
     resultado.pop(clave, None)
     resultado[clave] = configuracion
@@ -1026,3 +1027,37 @@ def concatenar_curva(segmentos):
         x.append(sx)
         y.append(sy)
     return {"x": np.concatenate(x), "y": np.concatenate(y)}
+
+
+def preparar_curvas_formulas_por_grafica(calculos, orden=None):
+    """Prepara cada formula como una curva independiente por grafica."""
+    calculos = calculos or {}
+    claves = list(orden) if orden is not None else list(calculos)
+    por_grafica = {}
+
+    for clave in claves:
+        calculo = calculos.get(clave)
+        if calculo is None:
+            continue
+        datos_panel = calculo.get("datos_panel") or {}
+        nombre = datos_panel.get("nombre") or clave
+        unidad = datos_panel.get("unidad") or ""
+
+        for propietario, grupo in (calculo.get("por_grafica") or {}).items():
+            curva = concatenar_curva(grupo.get("segmentos") or [])
+            picos = picos_de_resultados(grupo.get("resultados") or [])
+            for pico in picos:
+                pico.update({"formula": nombre, "unidad": unidad})
+
+            por_grafica.setdefault(propietario, []).append(
+                {
+                    "clave": clave,
+                    "nombre": nombre,
+                    "unidad": unidad,
+                    "x": curva["x"],
+                    "y": curva["y"],
+                    "picos": picos,
+                }
+            )
+
+    return por_grafica

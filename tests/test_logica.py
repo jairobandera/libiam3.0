@@ -422,19 +422,60 @@ class TestRegistroFormulas(unittest.TestCase):
             aplicaciones["impulso"]["rangos"], ["Fz::2", "Fz::4"]
         )
 
-    def test_reaplicar_una_formula_actualiza_solo_sus_rangos(self):
+    def test_reaplicar_una_formula_agrega_rangos_sin_borrar_los_anteriores(self):
         aplicaciones = {
-            "potencia": {"clave": "potencia", "rangos": ["Fz::1"]},
-            "impulso": {"clave": "impulso", "rangos": ["Fz::2"]},
+            "potencia": {
+                "clave": "potencia",
+                "rangos": ["Fz::1", "Fz::2"],
+            },
+            "impulso": {"clave": "impulso", "rangos": ["Fz::4"]},
         }
         aplicaciones = formulas.registrar_aplicacion_formula(
             aplicaciones,
             {"clave": "potencia", "rangos": ["Fz::3", "Fz::3"]},
         )
 
-        self.assertEqual(aplicaciones["impulso"]["rangos"], ["Fz::2"])
-        self.assertEqual(aplicaciones["potencia"]["rangos"], ["Fz::3"])
+        self.assertEqual(aplicaciones["impulso"]["rangos"], ["Fz::4"])
+        self.assertEqual(
+            aplicaciones["potencia"]["rangos"],
+            ["Fz::1", "Fz::2", "Fz::3"],
+        )
         self.assertEqual(list(aplicaciones), ["impulso", "potencia"])
+
+    def test_cada_formula_conserva_su_curva_visual_al_agregar_otra(self):
+        potencia_y = np.array([10.0, 40.0, 20.0])
+        impulso_y = np.array([900.0, 1200.0, 950.0])
+        calculos = {
+            "potencia": {
+                "datos_panel": {"nombre": "Potencia", "unidad": "W"},
+                "por_grafica": {
+                    "Fz": {
+                        "segmentos": [(np.array([1, 2, 3]), potencia_y)],
+                        "resultados": [],
+                    }
+                },
+            },
+            "impulso": {
+                "datos_panel": {"nombre": "Impulso", "unidad": "N·s"},
+                "por_grafica": {
+                    "Fz": {
+                        "segmentos": [(np.array([4, 5, 6]), impulso_y)],
+                        "resultados": [],
+                    }
+                },
+            },
+        }
+
+        potencia_sola = formulas.preparar_curvas_formulas_por_grafica(
+            calculos, ["potencia"]
+        )["Fz"][0]
+        juntas = formulas.preparar_curvas_formulas_por_grafica(
+            calculos, ["potencia", "impulso"]
+        )["Fz"]
+
+        self.assertEqual([curva["clave"] for curva in juntas], ["potencia", "impulso"])
+        np.testing.assert_array_equal(juntas[0]["y"], potencia_sola["y"])
+        np.testing.assert_array_equal(juntas[1]["y"], impulso_y)
 
     def test_solo_el_impulso_trae_detalles(self):
         # La potencia se describe con pico y media; el impulso necesita los suyos.

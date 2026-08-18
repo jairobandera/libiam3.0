@@ -305,11 +305,18 @@ class VentanaPrincipal(QWidget):
                 if len(tabla_resultados):
                     tablas["resultados_formula.csv"] = tabla_resultados
                 exportacion.escribir_paquete(ruta, tablas, informacion)
+        except PermissionError as exc:
+            QMessageBox.critical(
+                self,
+                "No se puede sobrescribir",
+                str(exc),
+            )
+            return
         except (OSError, ValueError) as exc:
             QMessageBox.critical(
                 self,
                 "Error al exportar",
-                "No se pudo crear el archivo. El destino no fue reemplazado.\n\n"
+                "No se pudo completar la exportación.\n\n"
                 f"Detalle: {exc}",
             )
             return

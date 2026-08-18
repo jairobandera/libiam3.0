@@ -108,6 +108,8 @@ class GraficaSenal(pg.PlotWidget):
         self.rangos_actuales = []
         self.curva_original = None
         self.curva_filtrada = None
+        self._curvas_formula_dibujadas = []
+        self._vistas_formula_extra = []
         self.curva_formula = None
         self.x_formula = None
         self.y_formula = None
@@ -138,13 +140,14 @@ class GraficaSenal(pg.PlotWidget):
         self.leyenda = self.addLegend(offset=(-10, 10))
         self.leyenda.hide()
 
-        # ViewBox propio para la curva de fórmula: se usa solo cuando su unidad
-        # no coincide con la de la señal (ej. BW sobre newtons), porque si no
-        # una curva quedaría aplastada contra el piso de la otra.
+        # Cada fórmula se dibuja en un ViewBox superpuesto. El primero se
+        # reutiliza; los adicionales se crean solo mientras sean necesarios.
         self.vb_formula = pg.ViewBox()
         self.plotItem.scene().addItem(self.vb_formula)
         self.plotItem.getAxis("right").linkToView(self.vb_formula)
         self.vb_formula.setXLink(self.plotItem.vb)
+        self.vb_formula.setMouseEnabled(x=False, y=False)
+        self.vb_formula.setMenuEnabled(False)
         # Sin esto la curva de fórmula se dibuja por detrás de la original.
         self.vb_formula.setZValue(self.plotItem.vb.zValue() + 1)
         self.plotItem.vb.sigResized.connect(self._sincronizar_eje_formula)
@@ -154,9 +157,11 @@ class GraficaSenal(pg.PlotWidget):
         self.scene().sigMouseMoved.connect(self._manejar_mouse_movido)
 
     def _sincronizar_eje_formula(self):
-        """Mantiene el ViewBox de la fórmula pegado al principal al redimensionar."""
-        self.vb_formula.setGeometry(self.plotItem.vb.sceneBoundingRect())
-        self.vb_formula.linkedViewChanged(self.plotItem.vb, self.vb_formula.XAxis)
+        """Mantiene todas las vistas de fórmula pegadas a la señal."""
+        rectangulo = self.plotItem.vb.sceneBoundingRect()
+        for vista in [self.vb_formula, *self._vistas_formula_extra]:
+            vista.setGeometry(rectangulo)
+            vista.linkedViewChanged(self.plotItem.vb, vista.XAxis)
 
     def set_datos(self, x, y_original, y_filtrada=None):
         self.x = np.asarray(x, dtype=float)
@@ -244,13 +249,14 @@ class GraficaSenal(pg.PlotWidget):
             self.curva_original.setPen(self._pen_original())
         if self.curva_filtrada is not None:
             self.curva_filtrada.setPen(self._pen_filtrada())
-        if self.curva_formula is not None:
+        if self._curvas_formula_dibujadas:
             color = paleta.color_senal_formula()
-            self.curva_formula.setPen(self._pen_formula())
-            if self.marcador_pico is not None:
-                self.marcador_pico.setBrush(pg.mkBrush(color))
-            if self.caja_valor is not None:
-                self.caja_valor.border = pg.mkPen(color, width=1)
+            for registro in self._curvas_formula_dibujadas:
+                registro["curva"].setPen(self._pen_formula())
+                if registro["marcador"] is not None:
+                    registro["marcador"].setBrush(pg.mkBrush(color))
+                if registro["caja"] is not None:
+                    registro["caja"].border = pg.mkPen(color, width=1)
             self.plotItem.getAxis("right").setPen(pg.mkPen(color))
             self.plotItem.getAxis("right").setTextPen(pg.mkPen(color))
         if self.rangos_actuales:
@@ -265,63 +271,140 @@ class GraficaSenal(pg.PlotWidget):
         picos=None,
         forzar_eje_derecho=False,
     ):
-        """Superpone la curva calculada sobre esta señal.
+        """Compatibilidad para las ventanas que muestran una sola fórmula."""
+        self.set_curvas_formulas(
+            [
+                {
+                    "clave": nombre,
+                    "x": x,
+                    "y": y,
+                    "nombre": nombre,
+                    "unidad": unidad,
+                    "picos": picos,
+                    "forzar_eje_derecho": forzar_eje_derecho,
+                }
+            ]
+        )
 
-        ``x`` e ``y`` pueden traer NaN intercalados para separar tramos: así
-        una sola curva dibuja varios rangos sin unirlos con un trazo que no
-        existe. ``picos`` lleva un punto por rango, cada uno con su resumen.
-        """
+    def set_curvas_formulas(self, curvas):
+        """Dibuja fórmulas simultáneas sin mezclar sus escalas verticales."""
         self.limpiar_curva_formula()
-        if y is None or x is None:
-            return
-
-        x = np.asarray(x, dtype=float)
-        y = np.asarray(y, dtype=float)
-        if len(y) != len(x) or not np.isfinite(y).any():
-            return
-
-        self.x_formula = x
-        self.y_formula = y
-        self.picos_formula = list(picos or [])
-        self.info_formula = {"nombre": nombre, "unidad": unidad}
-
         color = paleta.color_senal_formula()
-        unidad_formula = (unidad or "").strip()
+
+        for datos in curvas or ():
+            x = datos.get("x")
+            y = datos.get("y")
+            if x is None or y is None:
+                continue
+            x = np.asarray(x, dtype=float)
+            y = np.asarray(y, dtype=float)
+            if len(y) != len(x) or not np.isfinite(y).any():
+                continue
+
+            vista = (
+                self.vb_formula
+                if not self._curvas_formula_dibujadas
+                else self._crear_vista_formula_adicional()
+            )
+            unidad = (datos.get("unidad") or "").strip()
+            nombre = datos.get("nombre") or "Fórmula"
+            eje_propio = bool(
+                datos.get("forzar_eje_derecho")
+                or self._necesita_eje_propio(y, unidad)
+            )
+
+            vista.linkView(vista.YAxis, None)
+            if eje_propio:
+                vista.enableAutoRange(axis="y", enable=True)
+            else:
+                vista.enableAutoRange(axis="y", enable=False)
+                vista.setYLink(self.plotItem.vb)
+
+            etiqueta = f"{nombre} ({unidad})" if unidad else nombre
+            curva = pg.PlotDataItem(
+                x, y, pen=self._pen_formula(), name=etiqueta, connect="finite"
+            )
+            curva.setZValue(10)
+            vista.addItem(curva)
+
+            registro = {
+                "clave": datos.get("clave") or nombre,
+                "vista": vista,
+                "curva": curva,
+                "x": x,
+                "y": y,
+                "picos": list(datos.get("picos") or []),
+                "info": {"nombre": nombre, "unidad": unidad},
+                "eje_propio": eje_propio,
+                "marcador": None,
+                "caja": None,
+            }
+            self._crear_items_formula(registro, color)
+            self._curvas_formula_dibujadas.append(registro)
+            self.leyenda.addItem(curva, etiqueta)
+
+        self._sincronizar_eje_formula()
+        self._configurar_eje_derecho_formulas(color)
+        self._actualizar_alias_formula()
+        if self._curvas_formula_dibujadas:
+            self.leyenda.show()
+
+    def _crear_vista_formula_adicional(self):
+        vista = pg.ViewBox()
+        self.plotItem.scene().addItem(vista)
+        vista.setXLink(self.plotItem.vb)
+        vista.setMouseEnabled(x=False, y=False)
+        vista.setMenuEnabled(False)
+        vista.setZValue(
+            self.plotItem.vb.zValue() + 1 + len(self._vistas_formula_extra) / 100
+        )
+        self._vistas_formula_extra.append(vista)
+        return vista
+
+    def _configurar_eje_derecho_formulas(self, color):
+        eje = self.plotItem.getAxis("right")
+        independientes = [
+            registro
+            for registro in self._curvas_formula_dibujadas
+            if registro["eje_propio"]
+        ]
+        if not independientes:
+            self.plotItem.showAxis("right", False)
+            return
+
+        # El eje visible corresponde a la fórmula aplicada más recientemente.
+        # Las anteriores conservan su escala y sus valores mediante el tooltip.
+        activa = independientes[-1]
+        info = activa["info"]
+        etiqueta = (
+            f"{info['nombre']} ({info['unidad']})"
+            if info["unidad"]
+            else info["nombre"]
+        )
+        eje.linkToView(activa["vista"])
+        eje.setLabel(etiqueta)
+        eje.setPen(pg.mkPen(color))
+        eje.setTextPen(pg.mkPen(color))
+        eje.enableAutoSIPrefix(False)
+        self.plotItem.showAxis("right", True)
+
+    def _actualizar_alias_formula(self):
+        registro = (
+            self._curvas_formula_dibujadas[-1]
+            if self._curvas_formula_dibujadas
+            else None
+        )
+        self.curva_formula = registro["curva"] if registro else None
+        self.x_formula = registro["x"] if registro else None
+        self.y_formula = registro["y"] if registro else None
+        self.picos_formula = registro["picos"] if registro else []
+        self.info_formula = registro["info"] if registro else None
+        self.marcador_pico = registro["marcador"] if registro else None
+        self.caja_valor = registro["caja"] if registro else None
+        self._vista_items = registro["vista"] if registro else None
         self._formula_en_eje_derecho = bool(
-            forzar_eje_derecho
-            or self._necesita_eje_propio(y, unidad_formula)
+            registro and registro["eje_propio"]
         )
-
-        etiqueta = f"{nombre} ({unidad_formula})" if unidad_formula else nombre
-        self.curva_formula = pg.PlotDataItem(
-            x, y, pen=self._pen_formula(), name=etiqueta, connect="finite"
-        )
-        # Siempre por encima de la original y de la filtrada.
-        self.curva_formula.setZValue(10)
-
-        if self._formula_en_eje_derecho:
-            self.vb_formula.addItem(self.curva_formula)
-            eje = self.plotItem.getAxis("right")
-            eje.setLabel(etiqueta)
-            eje.setPen(pg.mkPen(color))
-            eje.setTextPen(pg.mkPen(color))
-            eje.enableAutoSIPrefix(False)
-            self.plotItem.showAxis("right", True)
-            self._sincronizar_eje_formula()
-            # Solo en Y: autoRange() tocaría también la X y, como este ViewBox
-            # está X-linkeado al principal, arrastraría la vista de la señal al
-            # tramo de los rangos y la desincronizaría de las demás gráficas.
-            self.vb_formula.enableAutoRange(axis="y", enable=True)
-            # La leyenda vive en el plot principal: se agrega la entrada a mano.
-            self.leyenda.addItem(self.curva_formula, etiqueta)
-        else:
-            self.addItem(self.curva_formula)
-            # Comparten eje: hay que reencuadrar en Y o la curva nueva puede
-            # quedar fuera de la vista (|F| ronda los 800 N y Fx los ±100 N).
-            self.enableAutoRange(axis="y", enable=True)
-
-        self._crear_marcador_pico(color)
-        self.leyenda.show()
 
     # Si al compartir eje una de las dos curvas ocupara menos que esta fracción
     # del alto del gráfico, se considera aplastada y va a su propio eje.
@@ -370,74 +453,63 @@ class GraficaSenal(pg.PlotWidget):
             return None
         return min(e[0] for e in extremos), max(e[1] for e in extremos)
 
-    def _crear_marcador_pico(self, color):
-        """Un punto sobre el máximo de cada rango, con su caja de valor oculta."""
-        if not self.picos_formula:
+    def _crear_items_formula(self, registro, color):
+        """Crea los picos y la caja de valor de una curva de fórmula."""
+        picos = registro["picos"]
+        if not picos:
             return
 
-        # Se guarda el ViewBox usado: hay que sacarlos del mismo lugar donde se
-        # pusieron, o quedan colgados en la gráfica para siempre.
-        self._vista_items = self._vista_formula()
-
-        self.marcador_pico = pg.ScatterPlotItem(
-            [pico["x"] for pico in self.picos_formula],
-            [pico["y"] for pico in self.picos_formula],
+        vista = registro["vista"]
+        marcador = pg.ScatterPlotItem(
+            [pico["x"] for pico in picos],
+            [pico["y"] for pico in picos],
             size=11,
             brush=pg.mkBrush(color),
             pen=pg.mkPen("#1E1E1E", width=1.5),
             symbol="o",
         )
-        self.marcador_pico.setZValue(20)
+        marcador.setZValue(20)
         # ignoreBounds: ni el punto ni la caja deben estirar el autorango.
-        self._vista_items.addItem(self.marcador_pico, ignoreBounds=True)
+        vista.addItem(marcador, ignoreBounds=True)
 
-        self.caja_valor = pg.TextItem(
+        caja = pg.TextItem(
             border=pg.mkPen(color, width=1),
             fill=pg.mkBrush(30, 30, 30, 235),
         )
-        self.caja_valor.setZValue(30)
-        self.caja_valor.hide()
-        self._vista_items.addItem(self.caja_valor, ignoreBounds=True)
+        caja.setZValue(30)
+        caja.hide()
+        vista.addItem(caja, ignoreBounds=True)
+        registro["marcador"] = marcador
+        registro["caja"] = caja
 
     def _vista_formula(self):
-        return self.vb_formula if self._formula_en_eje_derecho else self.plotItem.vb
+        return self._vista_items or self.vb_formula
 
     def limpiar_curva_formula(self):
-        """Saca la curva de fórmula y todo lo que la acompaña.
-
-        Cada elemento se quita del mismo contenedor donde se agregó: la curva
-        del plot (o del ViewBox derecho) y el punto y la caja del ViewBox que
-        guardó ``_crear_marcador_pico``. Mezclarlos deja ítems colgados.
-        """
-        if self.curva_formula is not None:
-            if self._formula_en_eje_derecho:
-                self.vb_formula.removeItem(self.curva_formula)
-            else:
-                self.removeItem(self.curva_formula)
-            self.leyenda.removeItem(self.curva_formula)
-
-        if self._vista_items is not None:
-            for item in (self.marcador_pico, self.caja_valor):
+        """Saca todas las curvas de fórmula y sus vistas auxiliares."""
+        for registro in self._curvas_formula_dibujadas:
+            vista = registro["vista"]
+            for item in (
+                registro["curva"],
+                registro["marcador"],
+                registro["caja"],
+            ):
                 if item is not None:
-                    self._vista_items.removeItem(item)
+                    vista.removeItem(item)
+            self.leyenda.removeItem(registro["curva"])
 
-        tenia_eje_propio = self._formula_en_eje_derecho
+        self.plotItem.getAxis("right").linkToView(self.vb_formula)
+        for vista in self._vistas_formula_extra:
+            vista.linkView(vista.XAxis, None)
+            vista.linkView(vista.YAxis, None)
+            self.plotItem.scene().removeItem(vista)
 
-        self.curva_formula = None
-        self.marcador_pico = None
-        self.caja_valor = None
-        self.x_formula = None
-        self.y_formula = None
-        self.picos_formula = []
-        self.info_formula = None
-        self._vista_items = None
-        self._formula_en_eje_derecho = False
+        self._curvas_formula_dibujadas = []
+        self._vistas_formula_extra = []
+        self.vb_formula.linkView(self.vb_formula.YAxis, None)
+        self.vb_formula.enableAutoRange(axis="y", enable=False)
+        self._actualizar_alias_formula()
         self.plotItem.showAxis("right", False)
-
-        # Si la curva compartía eje, el rango quedó estirado por ella: se
-        # reencuadra para que la señal vuelva a ocupar toda la altura.
-        if not tenia_eje_propio:
-            self.enableAutoRange(axis="y", enable=True)
 
         if self.y_filtrada is None:
             self.leyenda.hide()
@@ -468,58 +540,71 @@ class GraficaSenal(pg.PlotWidget):
         self._mostrar_preview(x_inicio, x_fin, x_actual)
 
     def _actualizar_caja_valor(self, posicion):
-        """Muestra la caja de valor solo mientras el mouse está sobre la curva.
-
-        Primero se prueba el pico (tiene un radio más generoso porque es el dato
-        que más se busca) y después el resto de la curva. Al alejarse, se
-        esconde.
-        """
-        if self.caja_valor is None or self.y_formula is None:
+        """Muestra el valor de la fórmula más cercana al cursor."""
+        registros = [
+            registro
+            for registro in self._curvas_formula_dibujadas
+            if registro["caja"] is not None
+        ]
+        if not registros:
             return
 
-        vista = self._vista_items or self._vista_formula()
+        for registro in registros:
+            registro["caja"].hide()
         if not self.plotItem.vb.sceneBoundingRect().contains(posicion):
-            self.caja_valor.hide()
             return
 
-        # Primero los picos: tienen un radio más generoso porque son el dato
-        # que más se busca, y cada uno trae el resumen de su rango.
-        for pico in self.picos_formula:
+        candidatos = []
+        for registro in registros:
+            vista = registro["vista"]
+            for pico in registro["picos"]:
+                distancia = self._distancia_en_pixeles(
+                    vista, posicion, pico["x"], pico["y"]
+                )
+                if distancia is not None and distancia <= self.RADIO_HOVER_PICO:
+                    candidatos.append(
+                        (0, distancia, registro, pico["x"], pico["y"], pico, True)
+                    )
+
+            x_vista = float(vista.mapSceneToView(posicion).x())
+            indice = self._indice_mas_cercano(x_vista, registro["x"])
+            if indice is None:
+                continue
+            x_punto = float(registro["x"][indice])
+            y_punto = float(registro["y"][indice])
+            if not math.isfinite(y_punto):
+                continue
             distancia = self._distancia_en_pixeles(
-                vista, posicion, pico["x"], pico["y"]
+                vista, posicion, x_punto, y_punto
             )
-            if distancia is not None and distancia <= self.RADIO_HOVER_PICO:
-                self._mostrar_caja_valor(pico["x"], pico["y"], pico, es_pico=True)
-                return
+            if distancia is not None and distancia <= self.RADIO_HOVER_CURVA:
+                candidatos.append(
+                    (
+                        1,
+                        distancia,
+                        registro,
+                        x_punto,
+                        y_punto,
+                        self._pico_que_contiene(x_punto, registro["picos"]),
+                        False,
+                    )
+                )
 
-        # Fuera de los picos: el punto de la curva más cercano en X.
-        x_vista = float(vista.mapSceneToView(posicion).x())
-        indice = self._indice_mas_cercano(x_vista)
-        if indice is None:
-            self.caja_valor.hide()
+        if not candidatos:
             return
+        _, _, registro, x, y, pico, es_pico = min(
+            candidatos, key=lambda candidato: (candidato[0], candidato[1])
+        )
+        self._mostrar_caja_valor(registro, x, y, pico, es_pico)
 
-        x_punto = float(self.x_formula[indice])
-        y_punto = float(self.y_formula[indice])
-        if not math.isfinite(y_punto):
-            self.caja_valor.hide()
-            return
-
-        distancia = self._distancia_en_pixeles(vista, posicion, x_punto, y_punto)
-        if distancia is not None and distancia <= self.RADIO_HOVER_CURVA:
-            self._mostrar_caja_valor(
-                x_punto, y_punto, self._pico_que_contiene(x_punto), es_pico=False
-            )
-        else:
-            self.caja_valor.hide()
-
-    def _pico_que_contiene(self, x):
+    def _pico_que_contiene(self, x, picos=None):
         """El rango al que pertenece ese punto, para mostrar sus valores."""
-        if not self.picos_formula:
+        picos = self.picos_formula if picos is None else picos
+        if not picos:
             return None
         contenidos = [
             pico
-            for pico in self.picos_formula
+            for pico in picos
             if pico.get("desde") is not None
             and pico.get("hasta") is not None
             and min(pico["desde"], pico["hasta"])
@@ -528,12 +613,13 @@ class GraficaSenal(pg.PlotWidget):
         ]
         if contenidos:
             return min(contenidos, key=lambda pico: abs(pico["x"] - x))
-        return min(self.picos_formula, key=lambda pico: abs(pico["x"] - x))
+        return min(picos, key=lambda pico: abs(pico["x"] - x))
 
-    def _indice_mas_cercano(self, x_vista):
-        if self.x_formula is None or len(self.x_formula) == 0:
+    def _indice_mas_cercano(self, x_vista, x_datos=None):
+        x_datos = self.x_formula if x_datos is None else x_datos
+        if x_datos is None or len(x_datos) == 0:
             return None
-        diferencias = np.abs(self.x_formula - x_vista)
+        diferencias = np.abs(x_datos - x_vista)
         if not np.isfinite(diferencias).any():
             return None
         return int(np.nanargmin(diferencias))
@@ -546,9 +632,10 @@ class GraficaSenal(pg.PlotWidget):
         punto = vista.mapViewToScene(QPointF(x, y))
         return math.hypot(punto.x() - posicion.x(), punto.y() - posicion.y())
 
-    def _mostrar_caja_valor(self, x, y, pico, es_pico):
+    def _mostrar_caja_valor(self, registro, x, y, pico, es_pico):
         """Caja con el resumen del rango al que pertenece ese punto."""
-        info = self.info_formula or {}
+        info = registro["info"]
+        caja = registro["caja"]
         unidad = (
             (pico or {}).get("unidad")
             or info.get("unidad")
@@ -590,20 +677,20 @@ class GraficaSenal(pg.PlotWidget):
         filas += fila("Media", datos.get("media"))
         filas += fila("RMS", datos.get("rms"))
 
-        self.caja_valor.setHtml(
+        caja.setHtml(
             f'<div style="font-size:9pt;">'
             f'<div style="color:{color};"><b>{nombre}</b></div>'
             f'<table cellspacing="0">{filas}</table></div>'
         )
-        self.caja_valor.setAnchor(self._anclaje_caja(y))
-        self.caja_valor.setPos(x, y)
-        self.caja_valor.show()
+        caja.setAnchor(self._anclaje_caja(y, registro))
+        caja.setPos(x, y)
+        caja.show()
 
     # Anclajes de la caja: debajo del punto (preferido) y encima.
     ANCLA_DEBAJO = (0.5, -0.2)
     ANCLA_ENCIMA = (0.5, 1.2)
 
-    def _anclaje_caja(self, y):
+    def _anclaje_caja(self, y, registro):
         """Ubica la caja del lado donde entra, prefiriendo debajo del punto.
 
         No alcanza con mirar si el punto está alto o bajo: la caja cambia de
@@ -611,14 +698,15 @@ class GraficaSenal(pg.PlotWidget):
         real contra el espacio libre a cada lado. Se llama después de
         ``setHtml`` para que ``boundingRect`` ya esté actualizado.
         """
-        vista = self._vista_items or self._vista_formula()
+        vista = registro["vista"]
+        caja = registro["caja"]
         y_min, y_max = vista.viewRange()[1]
         if y_max <= y_min:
             return self.ANCLA_DEBAJO
 
         # La caja se dibuja en píxeles: hay que pasarla a unidades de dato.
         alto_pixel = vista.viewPixelSize()[1]
-        alto_caja = self.caja_valor.boundingRect().height() * alto_pixel
+        alto_caja = caja.boundingRect().height() * alto_pixel
         espacio_abajo = y - y_min
         espacio_arriba = y_max - y
 
@@ -1216,6 +1304,7 @@ class AreaCentralGraficas(QFrame):
         ]
         for ventana in self._ventanas_region:
             ventana.panel_calculo.recargar_formulas()
+            self._recalcular_formulas_subrangos(ventana)
         if self.formulas_activas:
             self._recalcular_formulas_activas()
 
@@ -1486,6 +1575,12 @@ class AreaCentralGraficas(QFrame):
         from ui.ventanaRegion.ventanaRegion import VentanaRegion
 
         titulo = f"{grafica.nombre_senal} · {rango.nombre} ({rango.desde}–{rango.hasta})"
+        panel_derecho = getattr(self.window(), "panel_derecho", None)
+        gestor_formulas = getattr(panel_derecho, "formulas", None)
+        permitir_gestion = bool(
+            gestor_formulas is not None
+            and getattr(gestor_formulas, "db_session", None) is not None
+        )
         ventana = VentanaRegion(
             self.window(),
             titulo=titulo,
@@ -1495,6 +1590,7 @@ class AreaCentralGraficas(QFrame):
             y_original=y_original[mascara],
             y_filtrada=y_filtrada,
             columna=columna,
+            permitir_gestion_formulas=permitir_gestion,
         )
         subgestor = self.subgestores.setdefault((columna, numero), GestorRangos("Sub-rango"))
         # Deja rastro del subgestor para poder repintarla si cambia la paleta.
@@ -1516,6 +1612,16 @@ class AreaCentralGraficas(QFrame):
         )
         ventana.panel_calculo.fuenteCalculoCambiada.connect(self.set_fuente_calculo)
         ventana.panel_calculo.set_fuente(self.fuente_calculo)
+        if permitir_gestion:
+            ventana.panel_calculo.crearFormulaSolicitado.connect(
+                gestor_formulas.panel_calculo.crearFormulaSolicitado.emit
+            )
+            ventana.panel_calculo.editarFormulaSolicitado.connect(
+                gestor_formulas.panel_calculo.editarFormulaSolicitado.emit
+            )
+            ventana.panel_calculo.eliminarFormulaSolicitado.connect(
+                gestor_formulas.panel_calculo.eliminarFormulaSolicitado.emit
+            )
         # Guardar referencia para que la ventana no se destruya y limpiar cerradas.
         self._ventanas_region = [v for v in self._ventanas_region if v.isVisible()]
         self._ventanas_region.append(ventana)
@@ -1544,12 +1650,12 @@ class AreaCentralGraficas(QFrame):
 
         columna, numero_padre = ventana.clave_subgestor
         padre_id = self._id_rango(columna, numero_padre)
-        intervalos = [
+        disponibles = [
             rango
             for rango in self._rangos_para_panel()
             if rango.get("padre") == padre_id
         ]
-        if not intervalos:
+        if not disponibles:
             ventana.panel_calculo.actualizar_estado(
                 False,
                 "Creá al menos un sub-rango para poder calcular "
@@ -1557,53 +1663,149 @@ class AreaCentralGraficas(QFrame):
             )
             return
 
+        seleccionados = ventana.subrangos_seleccionados()
+        if not seleccionados:
+            ventana.panel_calculo.actualizar_estado(
+                False, "Marcá al menos un sub-rango para poder calcular."
+            )
+            return
+
+        aplicaciones_propuestas = formulas.registrar_aplicacion_formula(
+            ventana.formulas_activas,
+            {
+                "clave": clave,
+                "rangos": seleccionados,
+            },
+        )
+        configuracion = aplicaciones_propuestas[clave]
+        por_id = {rango["id"]: rango for rango in disponibles}
+        intervalos = [
+            por_id[identificador]
+            for identificador in configuracion["rangos"]
+            if identificador in por_id
+        ]
+
         try:
-            columna_origen, resultados, tramos, advertencias, _ = (
-                self._calcular_por_intervalos(clave, intervalos)
+            calculo = self._preparar_calculo_subrangos(
+                ventana,
+                clave,
+                configuracion,
+                intervalos,
             )
         except ErrorFormula as exc:
             ventana.panel_calculo.actualizar_estado(False, str(exc))
             return
 
-        if not resultados:
+        if calculo is None:
             ventana.panel_calculo.actualizar_estado(
                 False, "Los sub-rangos no tienen datos válidos para calcular "
                 f"{formulas.nombre_con_articulo(desc)}."
             )
             return
 
-        ventana.grafica.set_curva_formula(
-            tramos["x"], tramos["y"], desc["nombre"],
-            desc["unidad"], picos=tramos["picos"],
+        ventana.registrar_calculo_formula(
+            aplicaciones_propuestas,
+            clave,
+            calculo,
         )
-        fuente, detalle = self._procedencia([columna_origen])
-        grafica_origen = self.graficas_por_columna.get(columna_origen)
-        ventana.mostrar_resultados_formula(
-            {
-                "clave": clave,
-                "nombre": desc["nombre"],
-                "expresion": desc["expresion"],
-                "unidad": desc["unidad"],
-                "senal": (
-                    grafica_origen.nombre_senal if grafica_origen else columna_origen
-                ),
-                "fuente": fuente,
-                "detalle_filtro": detalle,
-                "resultados": resultados,
-                "advertencias": advertencias,
-            }
-        )
+        resultados = calculo["datos_panel"]["resultados"]
         cantidad = len(resultados)
         destino = "un sub-rango" if cantidad == 1 else f"{cantidad} sub-rangos"
+        conservadas = (
+            " Las demás fórmulas aplicadas se conservaron."
+            if len(ventana.formulas_activas) > 1
+            else ""
+        )
         ventana.panel_calculo.actualizar_estado(
             True,
-                f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}.",
+            f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}."
+            f"{conservadas}",
         )
 
+    def _preparar_calculo_subrangos(
+        self,
+        ventana,
+        clave,
+        configuracion,
+        intervalos,
+    ):
+        desc = formulas.descripcion_formula(clave)
+        columna_origen, resultados, _tramos, advertencias, segmentos = (
+            self._calcular_por_intervalos(clave, intervalos)
+        )
+        if not resultados:
+            return None
+
+        fuente, detalle = self._procedencia([columna_origen])
+        grafica_origen = self.graficas_por_columna.get(columna_origen)
+        datos_panel = {
+            "clave": clave,
+            "nombre": desc["nombre"],
+            "expresion": desc["expresion"],
+            "unidad": desc["unidad"],
+            "senal": (
+                grafica_origen.nombre_senal if grafica_origen else columna_origen
+            ),
+            "fuente": fuente,
+            "detalle_filtro": detalle,
+            "resultados": resultados,
+            "advertencias": advertencias,
+        }
+        return {
+            "configuracion": configuracion,
+            "datos_panel": datos_panel,
+            "por_grafica": {
+                ventana.grafica.columna: {
+                    "resultados": resultados,
+                    "segmentos": segmentos,
+                }
+            },
+        }
+
+    def _recalcular_formulas_subrangos(self, ventana):
+        """Actualiza las fórmulas de una ventana sin sumar sub-rangos nuevos."""
+        if not ventana.formulas_activas:
+            return
+        columna, numero_padre = ventana.clave_subgestor
+        padre_id = self._id_rango(columna, numero_padre)
+        disponibles = {
+            rango["id"]: rango
+            for rango in self._rangos_para_panel()
+            if rango.get("padre") == padre_id
+        }
+        aplicaciones = {}
+        calculos = {}
+        for clave, configuracion in ventana.formulas_activas.items():
+            if not formulas.hay_formula(clave):
+                continue
+            seleccion = [
+                identificador
+                for identificador in configuracion.get("rangos") or ()
+                if identificador in disponibles
+            ]
+            if not seleccion:
+                continue
+            vigente = dict(configuracion)
+            vigente["rangos"] = seleccion
+            intervalos = [disponibles[identificador] for identificador in seleccion]
+            try:
+                calculo = self._preparar_calculo_subrangos(
+                    ventana,
+                    clave,
+                    vigente,
+                    intervalos,
+                )
+            except ErrorFormula:
+                continue
+            if calculo is None:
+                continue
+            aplicaciones[clave] = vigente
+            calculos[clave] = calculo
+        ventana.establecer_calculos_formulas(aplicaciones, calculos)
+
     def _quitar_formula_subrangos(self, ventana):
-        """Saca la curva de la ventana de sub-rangos y limpia sus resultados."""
-        ventana.grafica.limpiar_curva_formula()
-        ventana.panel_calculo.limpiar_resultados()
+        """Saca todas las fórmulas aplicadas en la ventana de sub-rangos."""
+        ventana.quitar_formulas_aplicadas()
 
     def _registrar_subrango(self, columna, numero_padre, desde, hasta, ventana):
         """Agrega un sub-rango respetando la configuración de superposición."""
@@ -1796,6 +1998,13 @@ class AreaCentralGraficas(QFrame):
         self.rangosCambiados.emit(self._rangos_para_panel())
         if self.formulas_activas:
             self._recalcular_formulas_activas()
+        self._ventanas_region = [
+            ventana for ventana in self._ventanas_region if ventana.isVisible()
+        ]
+        for ventana in self._ventanas_region:
+            subgestor = self.subgestores.get(ventana.clave_subgestor)
+            ventana.mostrar_subrangos(subgestor.listar() if subgestor else [])
+            self._recalcular_formulas_subrangos(ventana)
 
     def eliminar_rangos(self, identificadores):
         por_columna = {}
@@ -1994,9 +2203,8 @@ class AreaCentralGraficas(QFrame):
     def aplicar_formula(self, configuracion=None, avisar=True, actualizar_vista=True):
         """Calcula una fórmula sin borrar las demás fórmulas aplicadas.
 
-        Cada fórmula mantiene su propia selección de rangos. Volver a aplicar
-        la misma fórmula actualiza únicamente esa selección; aplicar otra
-        agrega sus tramos a los que ya están visibles.
+        Cada fórmula acumula sus rangos. Volver a aplicarla sobre rangos nuevos
+        amplía la curva existente; aplicar otra conserva las anteriores.
         """
         if self.df_grafica_original is None:
             if avisar:
@@ -2006,7 +2214,6 @@ class AreaCentralGraficas(QFrame):
             return False
 
         configuracion = dict(configuracion or {})
-        seleccionados = configuracion.get("rangos") or []
         clave = configuracion.get("clave") or formulas.formula_predeterminada()
         configuracion["clave"] = clave
         if not formulas.hay_formula(clave):
@@ -2016,6 +2223,11 @@ class AreaCentralGraficas(QFrame):
                 )
             return False
         desc = formulas.descripcion_formula(clave)
+        aplicaciones_propuestas = formulas.registrar_aplicacion_formula(
+            self.formulas_activas, configuracion
+        )
+        configuracion = aplicaciones_propuestas[clave]
+        seleccionados = configuracion.get("rangos") or []
 
         rangos = self._rangos_seleccionados(
             seleccionados,
@@ -2079,9 +2291,7 @@ class AreaCentralGraficas(QFrame):
             "por_grafica": por_grafica,
         }
 
-        self.formulas_activas = formulas.registrar_aplicacion_formula(
-            self.formulas_activas, configuracion
-        )
+        self.formulas_activas = aplicaciones_propuestas
         self.formula_activa = self.formulas_activas[clave]
         self._calculos_formulas[clave] = calculo
         self._calculos_formulas = {
@@ -2110,56 +2320,19 @@ class AreaCentralGraficas(QFrame):
         return True
 
     def _redibujar_formulas_aplicadas(self):
-        """Combina los tramos vigentes y dibuja una curva por gráfica."""
+        """Dibuja cada fórmula en una escala vertical independiente."""
         for grafica in self.graficas_por_columna.values():
             grafica.limpiar_curva_formula()
 
-        por_grafica = {}
-        for clave in self.formulas_activas:
-            calculo = self._calculos_formulas.get(clave)
-            if calculo is None:
-                continue
-            datos_panel = calculo["datos_panel"]
-            for propietario, grupo in calculo["por_grafica"].items():
-                combinado = por_grafica.setdefault(
-                    propietario,
-                    {"segmentos": [], "picos": [], "formulas": []},
-                )
-                combinado["segmentos"].extend(grupo["segmentos"])
-                combinado["formulas"].append(
-                    (clave, datos_panel["nombre"], datos_panel["unidad"])
-                )
-                for pico in formulas.picos_de_resultados(grupo["resultados"]):
-                    pico.update(
-                        {
-                            "formula": datos_panel["nombre"],
-                            "unidad": datos_panel["unidad"],
-                        }
-                    )
-                    combinado["picos"].append(pico)
-
-        for propietario, datos in por_grafica.items():
+        por_grafica = formulas.preparar_curvas_formulas_por_grafica(
+            self._calculos_formulas,
+            self.formulas_activas,
+        )
+        for propietario, curvas in por_grafica.items():
             grafica = self.graficas_por_columna.get(propietario)
             if grafica is None or grafica.isHidden():
                 continue
-            curva = formulas.concatenar_curva(datos["segmentos"])
-            formulas_unicas = list(dict.fromkeys(datos["formulas"]))
-            if len(formulas_unicas) == 1:
-                _clave, nombre, unidad = formulas_unicas[0]
-            else:
-                nombre = " + ".join(
-                    nombre_formula
-                    for _clave, nombre_formula, _unidad in formulas_unicas
-                )
-                unidad = ""
-            grafica.set_curva_formula(
-                curva["x"],
-                curva["y"],
-                nombre,
-                unidad,
-                picos=datos["picos"],
-                forzar_eje_derecho=len(formulas_unicas) > 1,
-            )
+            grafica.set_curvas_formulas(curvas)
 
     def _recalcular_formulas_activas(self):
         """Recalcula todas las aplicaciones tras cambiar datos o rangos."""
