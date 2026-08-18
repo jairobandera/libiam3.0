@@ -33,9 +33,13 @@ class PanelCalculo(QFrame):
     calcularSolicitado = Signal()
     quitarFormulaSolicitado = Signal()
     fuenteCalculoCambiada = Signal(str)
+    crearFormulaSolicitado = Signal()
+    editarFormulaSolicitado = Signal(str)
+    eliminarFormulaSolicitado = Signal(str)
 
-    def __init__(self):
+    def __init__(self, permitir_gestion=False):
         super().__init__()
+        self.permitir_gestion = bool(permitir_gestion)
         self.setObjectName("seccionFormulas")
         self.ultimos_resultados = None
         self.init_ui()
@@ -79,6 +83,9 @@ class PanelCalculo(QFrame):
         self.btn_quitar_formula.setObjectName("btnResetMapeo")
         self.btn_quitar_formula.setCursor(Qt.PointingHandCursor)
         self.btn_quitar_formula.setEnabled(False)
+        self.btn_quitar_formula.setToolTip(
+            "Quita todas las fórmulas aplicadas de las gráficas."
+        )
         self.btn_quitar_formula.clicked.connect(self.quitarFormulaSolicitado.emit)
         fila.addWidget(self.btn_aplicar_formula)
         fila.addWidget(self.btn_quitar_formula)
@@ -165,10 +172,88 @@ class PanelCalculo(QFrame):
         for clave, descripcion in formulas_logica.FORMULAS.items():
             self.cmb_formula.addItem(descripcion["nombre"], clave)
         self.cmb_formula.setCurrentIndex(0)
+        self.cmb_formula.currentIndexChanged.connect(
+            self._actualizar_formula_seleccionada
+        )
         bloque_layout.addWidget(self.cmb_formula)
 
+        self.lbl_expresion_formula = QLabel("")
+        self.lbl_expresion_formula.setWordWrap(True)
+        self.lbl_expresion_formula.setObjectName("lblExpresionFormula")
+        bloque_layout.addWidget(self.lbl_expresion_formula)
+
+        if self.permitir_gestion:
+            fila = QHBoxLayout()
+            fila.setSpacing(5)
+            self.btn_crear_formula = QPushButton("Crear fórmula")
+            self.btn_crear_formula.setObjectName("btnAplicarMapeo")
+            self.btn_crear_formula.setCursor(Qt.PointingHandCursor)
+            self.btn_crear_formula.clicked.connect(self.crearFormulaSolicitado.emit)
+
+            self.btn_editar_formula = QPushButton("Editar")
+            self.btn_editar_formula.setObjectName("btnResetMapeo")
+            self.btn_editar_formula.setCursor(Qt.PointingHandCursor)
+            self.btn_editar_formula.clicked.connect(self._pedir_edicion)
+
+            self.btn_eliminar_formula = QPushButton("Eliminar")
+            self.btn_eliminar_formula.setObjectName("btnResetMapeo")
+            self.btn_eliminar_formula.setCursor(Qt.PointingHandCursor)
+            self.btn_eliminar_formula.clicked.connect(self._pedir_eliminacion)
+
+            fila.addWidget(self.btn_crear_formula, 1)
+            fila.addWidget(self.btn_editar_formula)
+            fila.addWidget(self.btn_eliminar_formula)
+            bloque_layout.addLayout(fila)
+
         bloque.setLayout(bloque_layout)
+        self.recargar_formulas()
         return bloque
+
+    def recargar_formulas(self, seleccionar=None):
+        """Actualiza el combo conservando la selección cuando todavía existe."""
+        anterior = seleccionar or self.formula_seleccionada()
+        self.cmb_formula.blockSignals(True)
+        self.cmb_formula.clear()
+        for clave, descripcion in formulas_logica.FORMULAS.items():
+            nombre = descripcion["nombre"]
+            if descripcion.get("personalizada"):
+                nombre = f"{nombre} (propia)"
+            self.cmb_formula.addItem(nombre, clave)
+        indice = self.cmb_formula.findData(anterior)
+        self.cmb_formula.setCurrentIndex(indice if indice >= 0 else 0)
+        self.cmb_formula.blockSignals(False)
+        self._actualizar_formula_seleccionada()
+
+    def _actualizar_formula_seleccionada(self, _indice=None):
+        clave = self.formula_seleccionada()
+        descripcion = formulas_logica.FORMULAS.get(clave, {})
+        expresion = descripcion.get("expresion") or ""
+        ayuda = descripcion.get("descripcion") or ""
+        texto = expresion
+        if ayuda:
+            texto = f"{texto}\n{ayuda}" if texto else ayuda
+        self.lbl_expresion_formula.setText(texto)
+        personalizada = bool(descripcion.get("personalizada"))
+        if self.permitir_gestion:
+            self.btn_editar_formula.setEnabled(personalizada)
+            self.btn_eliminar_formula.setEnabled(personalizada)
+            motivo = (
+                ""
+                if personalizada
+                else "Las fórmulas incorporadas no se modifican."
+            )
+            self.btn_editar_formula.setToolTip(motivo)
+            self.btn_eliminar_formula.setToolTip(motivo)
+
+    def _pedir_edicion(self):
+        clave = self.formula_seleccionada()
+        if formulas_logica.es_formula_personalizada(clave):
+            self.editarFormulaSolicitado.emit(clave)
+
+    def _pedir_eliminacion(self):
+        clave = self.formula_seleccionada()
+        if formulas_logica.es_formula_personalizada(clave):
+            self.eliminarFormulaSolicitado.emit(clave)
 
     def formula_seleccionada(self):
         """Clave de la fórmula elegida (p. ej. ``"potencia"``)."""
@@ -304,7 +389,10 @@ class PanelCalculo(QFrame):
         if senal:
             lineas.insert(1, (f"en {senal}", "color:#8A8A8A; font-size:10px;"))
 
-        if pico is None:
+        if resultado.get("valor") is not None:
+            valor = formulas_logica.formatear_valor(resultado["valor"])
+            lineas.append((f"resultado <b>{valor}{sufijo}</b>", ""))
+        elif pico is None:
             lineas.append(("sin datos válidos", "color:#8A8A8A;"))
         else:
             valor_pico = formulas_logica.formatear_valor(pico)

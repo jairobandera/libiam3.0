@@ -246,11 +246,97 @@
     padding: 6px 8px;
 }
 
-#lblValidacionFormula {
+#tarjetaConstructorFormula QLabel#lblValidacionFormula {
+    color: #B0B0B0;
     font-size: 11px;
 }
 
-#inputFormula {
+#tarjetaConstructorFormula QLabel#lblValidacionFormula[estado="ok"] {
+    color: #66BB6A;
+}
+
+#tarjetaConstructorFormula QLabel#lblValidacionFormula[estado="error"] {
+    color: #EF5350;
+}
+
+QDialog#constructorFormulaDialog {
+    background-color: #2D2D30;
+    font-family: Segoe UI;
+}
+
+#encabezadoConstructorFormula,
+#pieConstructorFormula {
+    background-color: #2D2D30;
+    border: none;
+}
+
+#encabezadoConstructorFormula {
+    border-bottom: 1px solid #3E3E42;
+}
+
+#pieConstructorFormula {
+    border-top: 1px solid #3E3E42;
+}
+
+#encabezadoConstructorFormula QLabel,
+#pieConstructorFormula QLabel,
+#tarjetaConstructorFormula QLabel,
+#cuerpoConstructorFormula,
+#columnaConstructorFormula,
+#filaUnidadFormula {
+    background-color: transparent;
+}
+
+#cuerpoConstructorFormula {
+    background-color: #2D2D30;
+}
+
+#scrollEditorFormula,
+#viewportEditorFormula {
+    background-color: transparent;
+    border: none;
+}
+
+#tituloConstructorFormula {
+    color: #FFFFFF;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+#subtituloConstructorFormula,
+#ayudaConstructorFormula {
+    color: #B0B0B0;
+    font-size: 11px;
+}
+
+#tarjetaConstructorFormula {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+}
+
+#tituloTarjetaFormula {
+    color: #B0B0B0;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#tarjetaConstructorFormula QLabel#pasoConstructorFormula {
+    color: #B0B0B0;
+    font-size: 12px;
+    font-weight: 600;
+    min-width: 14px;
+}
+
+#etiquetaCampoFormula,
+#etiquetaGrupoFormula {
+    color: #D0D0D0;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+#inputFormula,
+#inputExpresionFormula {
     background-color: #1E1E1E;
     color: #FFFFFF;
     border: 1px solid #3E3E42;
@@ -258,10 +344,202 @@
     padding: 7px 9px;
     font-family: Consolas;
     font-size: 13px;
+    selection-background-color: #1976D2;
+    selection-color: #FFFFFF;
 }
 
-#inputFormula:focus {
+#inputFormula:focus,
+#inputExpresionFormula:focus {
     border-color: #1976D2;
+}
+
+#comboUnidadFormula,
+#comboConstructorFormula {
+    background-color: #1E1E1E;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 12px;
+}
+
+#comboUnidadFormula:focus,
+#comboConstructorFormula:focus {
+    border-color: #42A5F5;
+}
+
+#comboUnidadFormula QLineEdit {
+    background-color: transparent;
+    border: none;
+    color: #FFFFFF;
+    padding: 0;
+}
+
+#comboUnidadFormula QAbstractItemView,
+#comboConstructorFormula QAbstractItemView {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    color: #FFFFFF;
+    selection-background-color: #1976D2;
+}
+
+#btnSimboloUnidad {
+    background-color: #333337;
+    color: #FFFFFF;
+    border: 1px solid #454549;
+    border-radius: 4px;
+    padding: 6px;
+    min-width: 24px;
+    max-width: 28px;
+}
+
+#btnSimboloUnidad:hover,
+#btnSimboloUnidad:focus {
+    background-color: #3D4F63;
+    border-color: #42A5F5;
+}
+
+#tarjetaConstructorFormula QLabel#detalleCalculoReutilizable {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    color: #D7D7D7;
+    padding: 7px 9px;
+    font-family: Consolas;
+    font-size: 11px;
+}
+
+#tabsConstructorFormula {
+    background-color: transparent;
+}
+
+#tabsConstructorFormula::pane {
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    top: -1px;
+}
+
+#tabsConstructorFormula QTabBar::tab {
+    background-color: #2D2D30;
+    border: 1px solid #3E3E42;
+    color: #B0B0B0;
+    font-size: 11px;
+    padding: 7px 8px;
+}
+
+#tabsConstructorFormula QTabBar::tab:hover {
+    background-color: #333337;
+    border-color: #1976D2;
+    color: #FFFFFF;
+}
+
+#tabsConstructorFormula QTabBar::tab:selected {
+    background-color: #333337;
+    border-bottom-color: #333337;
+    color: #FFFFFF;
+}
+
+#scrollPaletaFormula,
+#viewportPaletaFormula,
+#contenidoTabFormula {
+    background-color: #252526;
+    border: none;
+}
+
+#vistaFormula {
+    background-color: #252526;
+    color: #E0E0E0;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+}
+
+#btnPiezaFormula {
+    background-color: #333337;
+    color: #FFFFFF;
+    border: 1px solid #454549;
+    border-radius: 4px;
+    padding: 7px 10px;
+    min-width: 52px;
+}
+
+#btnPiezaFormula:hover {
+    background-color: #3D4F63;
+    border-color: #1976D2;
+}
+
+#btnPiezaFormula:pressed {
+    background-color: #1976D2;
+}
+
+#btnPiezaFormula:focus {
+    border-color: #42A5F5;
+}
+
+#btnPlantillaFormula,
+#btnCancelarFormula {
+    background-color: transparent;
+    color: #FFFFFF;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#btnPlantillaFormula:hover,
+#btnPlantillaFormula:focus,
+#btnCancelarFormula:hover,
+#btnCancelarFormula:focus {
+    background-color: #333337;
+    border-color: #1976D2;
+}
+
+#btnInsertarCalculoFormula,
+#btnGuardarFormula {
+    background-color: #1976D2;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: Segoe UI;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#btnInsertarCalculoFormula:hover,
+#btnGuardarFormula:hover {
+    background-color: #1565C0;
+}
+
+#btnInsertarCalculoFormula:pressed,
+#btnGuardarFormula:pressed {
+    background-color: #0D47A1;
+}
+
+#btnInsertarCalculoFormula:disabled,
+#btnGuardarFormula:disabled {
+    background-color: #454549;
+    color: #898989;
+}
+
+#chkFormulaReutilizable {
+    color: #B0B0B0;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#estadoGuardadoFormula {
+    color: #B0B0B0;
+    font-size: 11px;
+}
+
+#estadoGuardadoFormula[estado="ok"] {
+    color: #66BB6A;
+}
+
+#estadoGuardadoFormula[estado="error"] {
+    color: #EF5350;
 }
 
 #tablaResultados {

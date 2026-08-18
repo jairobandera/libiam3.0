@@ -406,6 +406,77 @@ class TestRegistroFormulas(unittest.TestCase):
         # El combo abre en la primera del registro; que no cambie sin querer.
         self.assertEqual(formulas.formula_predeterminada(), "potencia")
 
+    def test_aplicar_impulso_no_reemplaza_la_potencia(self):
+        aplicaciones = formulas.registrar_aplicacion_formula(
+            {}, {"clave": "potencia", "rangos": ["Fz::1", "Fz::3"]}
+        )
+        aplicaciones = formulas.registrar_aplicacion_formula(
+            aplicaciones,
+            {"clave": "impulso", "rangos": ["Fz::2", "Fz::4"]},
+        )
+
+        self.assertEqual(
+            aplicaciones["potencia"]["rangos"], ["Fz::1", "Fz::3"]
+        )
+        self.assertEqual(
+            aplicaciones["impulso"]["rangos"], ["Fz::2", "Fz::4"]
+        )
+
+    def test_reaplicar_una_formula_agrega_rangos_sin_borrar_los_anteriores(self):
+        aplicaciones = {
+            "potencia": {
+                "clave": "potencia",
+                "rangos": ["Fz::1", "Fz::2"],
+            },
+            "impulso": {"clave": "impulso", "rangos": ["Fz::4"]},
+        }
+        aplicaciones = formulas.registrar_aplicacion_formula(
+            aplicaciones,
+            {"clave": "potencia", "rangos": ["Fz::3", "Fz::3"]},
+        )
+
+        self.assertEqual(aplicaciones["impulso"]["rangos"], ["Fz::4"])
+        self.assertEqual(
+            aplicaciones["potencia"]["rangos"],
+            ["Fz::1", "Fz::2", "Fz::3"],
+        )
+        self.assertEqual(list(aplicaciones), ["impulso", "potencia"])
+
+    def test_cada_formula_conserva_su_curva_visual_al_agregar_otra(self):
+        potencia_y = np.array([10.0, 40.0, 20.0])
+        impulso_y = np.array([900.0, 1200.0, 950.0])
+        calculos = {
+            "potencia": {
+                "datos_panel": {"nombre": "Potencia", "unidad": "W"},
+                "por_grafica": {
+                    "Fz": {
+                        "segmentos": [(np.array([1, 2, 3]), potencia_y)],
+                        "resultados": [],
+                    }
+                },
+            },
+            "impulso": {
+                "datos_panel": {"nombre": "Impulso", "unidad": "N·s"},
+                "por_grafica": {
+                    "Fz": {
+                        "segmentos": [(np.array([4, 5, 6]), impulso_y)],
+                        "resultados": [],
+                    }
+                },
+            },
+        }
+
+        potencia_sola = formulas.preparar_curvas_formulas_por_grafica(
+            calculos, ["potencia"]
+        )["Fz"][0]
+        juntas = formulas.preparar_curvas_formulas_por_grafica(
+            calculos, ["potencia", "impulso"]
+        )["Fz"]
+
+        self.assertEqual([curva["clave"] for curva in juntas], ["potencia", "impulso"])
+        np.testing.assert_array_equal(juntas[0]["y"], potencia_sola["y"])
+        np.testing.assert_array_equal(juntas[1]["y"], impulso_y)
+
     def test_solo_el_impulso_trae_detalles(self):
         # La potencia se describe con pico y media; el impulso necesita los suyos.
         self.assertIsNone(formulas.FORMULAS["potencia"].get("detalles"))
@@ -419,6 +490,141 @@ class TestRegistroFormulas(unittest.TestCase):
             roles_disponibles=("Fz",),
         )
         self.assertIn("masa", motivo.lower())
+
+
+class TestConstructorFormulas(unittest.TestCase):
+    def test_los_roles_tienen_nombres_entendibles(self):
+        self.assertEqual(formulas.NOMBRES_ROLES["Fx"], "Fuerza en X")
+        self.assertEqual(formulas.NOMBRES_ROLES["Fz"], "Fuerza en Z")
+        self.assertEqual(
+            formulas.NOMBRES_ROLES["Cx"], "Centro de presión en X"
+        )
+        self.assertEqual(
+            formulas.nombre_variable_constructor("Fz"),
+            "Fz (fuerza en z)",
+        )
+
+    def test_ofrece_unidades_con_simbolos_dificiles(self):
+        unidades = {valor for _etiqueta, valor in formulas.UNIDADES_CONSTRUCTOR}
+        self.assertIn("N·s", unidades)
+        self.assertIn("N·m", unidades)
+        self.assertIn("N·mm", unidades)
+        self.assertIn("m/s²", unidades)
+        self.assertIn("µV", unidades)
+
+    def test_normaliza_unidades_escritas_con_el_teclado(self):
+        self.assertEqual(formulas.normalizar_unidad_formula("N*s"), "N·s")
+        self.assertEqual(formulas.normalizar_unidad_formula("N.s"), "N·s")
+        self.assertEqual(formulas.normalizar_unidad_formula("N.mm"), "N·mm")
+        self.assertEqual(formulas.normalizar_unidad_formula("m/s^2"), "m/s²")
+        self.assertEqual(formulas.normalizar_unidad_formula("uV"), "µV")
+
+    def test_los_calculos_auxiliares_son_formulas_validas(self):
+        disponibles = formulas.calculos_reutilizables()
+        auxiliares = [d for d in disponibles if d["tipo"] == "Cálculo auxiliar"]
+
+        self.assertEqual(len(auxiliares), 3)
+        self.assertIn("Velocidad vertical", {d["nombre"] for d in auxiliares})
+        for calculo in auxiliares:
+            with self.subTest(calculo=calculo["nombre"]):
+                analisis = formulas.analizar_expresion_personalizada(
+                    calculo["expresion"]
+                )
+                self.assertIn("Fz", analisis["variables"])
+
+    def test_la_velocidad_reutilizada_permite_construir_potencia(self):
+        velocidad = next(
+            calculo
+            for calculo in formulas.calculos_reutilizables()
+            if calculo["clave"] == "aux_velocidad_vertical"
+        )
+        expresion = f"Fz * ({velocidad['expresion']})"
+        fz = np.array([700.0, 840.0, 980.0, 1120.0])
+        variables = {"Fz": fz, "masa": 70.0, "gravedad": 10.0}
+
+        construida = formulas.evaluar_expresion_personalizada(
+            expresion, variables, frecuencia=100.0
+        )
+        esperada = formulas.potencia(fz, 70.0, 10.0, 100.0)
+
+        np.testing.assert_allclose(construida, esperada)
+
+    def test_puede_copiar_una_formula_personalizada_dentro_de_otra(self):
+        clave = "formula_reutilizable_test"
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave,
+                "nombre": "Fuerza duplicada de prueba",
+                "expresion": "Fz * 2",
+                "unidad": "N",
+            }
+        )
+        try:
+            disponibles = formulas.calculos_reutilizables()
+            reutilizable = next(d for d in disponibles if d["clave"] == clave)
+
+            self.assertEqual(reutilizable["expresion"], "Fz * 2")
+            self.assertEqual(reutilizable["tipo"], "Fórmula propia")
+            compuesta = f"({reutilizable['expresion']}) + Fz"
+            salida = formulas.evaluar_expresion_personalizada(
+                compuesta, {"Fz": np.array([1.0, 2.0])}
+            )
+            np.testing.assert_allclose(salida, [3.0, 6.0])
+        finally:
+            formulas.quitar_formula_personalizada(clave)
+
+    def test_solo_reutiliza_la_formula_marcada_y_conserva_su_nombre(self):
+        clave_visible = "formula_reutilizable_visible_test"
+        clave_oculta = "formula_reutilizable_oculta_test"
+        nombre = "Índice vertical — sujeto A"
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave_visible,
+                "nombre": nombre,
+                "expresion": "Fz / 2",
+                "unidad": "N",
+                "reutilizable": True,
+            }
+        )
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave_oculta,
+                "nombre": "Solo para resultados",
+                "expresion": "Fz * 3",
+                "unidad": "N",
+                "reutilizable": False,
+            }
+        )
+        try:
+            disponibles = {
+                calculo["clave"]: calculo
+                for calculo in formulas.calculos_reutilizables()
+            }
+
+            self.assertEqual(disponibles[clave_visible]["nombre"], nombre)
+            self.assertNotIn(clave_oculta, disponibles)
+        finally:
+            formulas.quitar_formula_personalizada(clave_visible)
+            formulas.quitar_formula_personalizada(clave_oculta)
+
+    def test_al_editar_no_ofrece_insertar_la_misma_formula(self):
+        clave = "formula_excluida_test"
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave,
+                "nombre": "Fórmula excluida de prueba",
+                "expresion": "senal * 2",
+                "unidad": "",
+            }
+        )
+        try:
+            claves = {
+                calculo["clave"]
+                for calculo in formulas.calculos_reutilizables(clave)
+            }
+            self.assertNotIn(clave, claves)
+        finally:
+            formulas.quitar_formula_personalizada(clave)
 
 
 class TestResumenFormula(unittest.TestCase):

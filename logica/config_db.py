@@ -1,4 +1,5 @@
 import os
+import uuid
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, Float, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -37,6 +38,19 @@ class VariableArchivo(Base):
     ruta_archivo = Column(String, nullable=False)
     nombre = Column(String, nullable=False)
     valor = Column(Float, nullable=False)
+
+
+class FormulaPersonalizada(Base):
+    __tablename__ = "formula_personalizada"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    clave = Column(String, unique=True, nullable=False)
+    nombre = Column(String, nullable=False)
+    expresion = Column(String, nullable=False)
+    unidad = Column(String, nullable=False, default="")
+    descripcion = Column(String, nullable=False, default="")
+    reutilizable = Column(Boolean, nullable=False, default=True)
+    activo = Column(Boolean, nullable=False, default=True)
 
 
 class CabeceraAsignada(Base):
@@ -96,6 +110,15 @@ def _migrar_db(engine):
         columnas = [row[1] for row in result]
         if "activo" not in columnas:
             conn.execute(text("ALTER TABLE seccion_archivo ADD COLUMN activo BOOLEAN DEFAULT 1"))
+            conn.commit()
+
+        result = conn.execute(text("PRAGMA table_info(formula_personalizada)"))
+        columnas = [row[1] for row in result]
+        if "reutilizable" not in columnas:
+            conn.execute(text(
+                "ALTER TABLE formula_personalizada "
+                "ADD COLUMN reutilizable BOOLEAN NOT NULL DEFAULT 1"
+            ))
             conn.commit()
 
 
@@ -258,6 +281,81 @@ def obtener_variable_archivo(session, ruta_archivo, nombre):
         ruta_archivo=ruta_archivo, nombre=nombre.lower()
     ).first()
     return variable.valor if variable else None
+
+
+def formula_personalizada_a_dict(formula):
+    return {
+        "id": formula.id,
+        "clave": formula.clave,
+        "nombre": formula.nombre,
+        "expresion": formula.expresion,
+        "unidad": formula.unidad or "",
+        "descripcion": formula.descripcion or "",
+        "reutilizable": bool(formula.reutilizable),
+    }
+
+
+def listar_formulas_personalizadas(session):
+    """Fórmulas guardadas por el usuario, listas para cargar en el registro."""
+    return session.query(FormulaPersonalizada).filter_by(
+        activo=True
+    ).order_by(FormulaPersonalizada.nombre).all()
+
+
+def guardar_formula_personalizada(
+    session,
+    nombre,
+    expresion,
+    unidad="",
+    descripcion="",
+    reutilizable=True,
+    clave=None,
+):
+    """Crea o actualiza una fórmula sin modificar las incorporadas al programa."""
+    nombre = str(nombre or "").strip()
+    if not nombre:
+        raise ValueError("Ingresá un nombre para la fórmula.")
+
+    existente = (
+        session.query(FormulaPersonalizada).filter_by(clave=clave).first()
+        if clave
+        else None
+    )
+    repetida = next(
+        (
+            formula
+            for formula in session.query(FormulaPersonalizada).filter_by(activo=True)
+            if formula.nombre.strip().casefold() == nombre.casefold()
+            and (existente is None or formula.id != existente.id)
+        ),
+        None,
+    )
+    if repetida is not None:
+        raise ValueError("Ya existe una fórmula guardada con ese nombre.")
+
+    if existente is None:
+        clave = f"personalizada_{uuid.uuid4().hex}"
+        existente = FormulaPersonalizada(clave=clave)
+        session.add(existente)
+
+    existente.nombre = nombre
+    existente.expresion = str(expresion or "").strip()
+    existente.unidad = str(unidad or "").strip()
+    existente.descripcion = str(descripcion or "").strip()
+    existente.reutilizable = bool(reutilizable)
+    existente.activo = True
+    session.commit()
+    session.refresh(existente)
+    return existente
+
+
+def eliminar_formula_personalizada(session, clave):
+    formula = session.query(FormulaPersonalizada).filter_by(clave=clave).first()
+    if formula is None:
+        return False
+    formula.activo = False
+    session.commit()
+    return True
 
 
 def guardar_seccion_archivo(session, ruta_archivo, fila_inicio, fila_fin, columnas):
