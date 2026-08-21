@@ -70,6 +70,24 @@ class ViewBoxZoom(pg.ViewBox):
         ev.accept()
 
 
+class ViewBoxFormula(pg.ViewBox):
+    """Capa visual que deja la interacción en manos de la gráfica principal."""
+
+    def hoverEvent(self, ev):
+        # Un ViewBox ubicado encima puede reservar el próximo arrastre incluso
+        # con sus ejes deshabilitados. Esta capa solo dibuja resultados.
+        return
+
+    def mouseDragEvent(self, ev, axis=None):
+        ev.ignore()
+
+    def mouseClickEvent(self, ev):
+        ev.ignore()
+
+    def wheelEvent(self, ev, axis=None):
+        ev.ignore()
+
+
 class GraficaSenal(pg.PlotWidget):
     """Gráfica que propone rangos enteros; el área central los valida."""
 
@@ -133,6 +151,7 @@ class GraficaSenal(pg.PlotWidget):
         )
         self.getAxis("left").setWidth(100)
         self.showGrid(x=True, y=True, alpha=0.25)
+        self.getViewBox().setMouseMode(pg.ViewBox.PanMode)
         self.setMouseEnabled(x=True, y=False)
         self.getViewBox().setMenuEnabled(False)
         self.plotItem.setDownsampling(auto=True, mode="peak")
@@ -142,7 +161,7 @@ class GraficaSenal(pg.PlotWidget):
 
         # Cada fórmula se dibuja en un ViewBox superpuesto. El primero se
         # reutiliza; los adicionales se crean solo mientras sean necesarios.
-        self.vb_formula = pg.ViewBox()
+        self.vb_formula = ViewBoxFormula()
         self.plotItem.scene().addItem(self.vb_formula)
         self.plotItem.getAxis("right").linkToView(self.vb_formula)
         self.vb_formula.setXLink(self.plotItem.vb)
@@ -350,7 +369,7 @@ class GraficaSenal(pg.PlotWidget):
             self.leyenda.show()
 
     def _crear_vista_formula_adicional(self):
-        vista = pg.ViewBox()
+        vista = ViewBoxFormula()
         self.plotItem.scene().addItem(vista)
         vista.setXLink(self.plotItem.vb)
         vista.setMouseEnabled(x=False, y=False)
