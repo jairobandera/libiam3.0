@@ -215,7 +215,7 @@ class LimpiarArchivosDialog(QDialog):
             self,
             "Confirmar eliminación",
             f"Se van a eliminar {len(nombres)} proyecto(s) de la carpeta "
-            "«archivos», junto con sus rangos y notas:\n\n"
+            "«archivos», junto con sus intervalos y notas:\n\n"
             f"{listado}\n\nEsta acción no se puede deshacer. ¿Continuar?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,

@@ -2,7 +2,7 @@
 
 Deliberadamente **no** es un explorador de archivos: no se puede navegar a otra
 ruta ni escribir una. Solo lista los CSV que guardó el botón «Guardar», que son
-los únicos que pueden traer rangos y notas asociados.
+los únicos que pueden traer intervalos y notas asociados.
 """
 
 from datetime import datetime
@@ -44,7 +44,7 @@ class CargarProyectoDialog(QDialog):
 
         subtitulo = QLabel(
             "Proyectos guardados en la carpeta «archivos». "
-            "Al abrirlos se restauran sus rangos, sub-rangos y notas."
+            "Al abrirlos se restauran sus intervalos, sub-intervalos y notas."
         )
         subtitulo.setObjectName("dialogoCargarAyuda")
         subtitulo.setWordWrap(True)
@@ -119,9 +119,9 @@ class CargarProyectoDialog(QDialog):
         if datos["tiene_anotaciones"]:
             cantidad = len(proyecto.leer_anotaciones(datos["ruta_anotaciones"]))
             if cantidad:
-                partes.append(f"{cantidad} rango(s)/sub-rango(s) con sus notas")
+                partes.append(f"{cantidad} intervalo(s)/sub-intervalo(s) con sus notas")
             else:
-                partes.append("Sin rangos guardados")
+                partes.append("Sin intervalos guardados")
         else:
             partes.append("Sin archivo de anotaciones")
 

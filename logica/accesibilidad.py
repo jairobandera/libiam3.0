@@ -5,7 +5,7 @@ Separa dos responsabilidades que antes convivían en la paleta:
 * ``logica/paleta.py`` es la única fuente de verdad de los **colores**.
 * Este módulo guarda el **estado** del modo accesible (activado o no), el tipo
   de visión cromática elegido y las opciones adicionales de renderizado (grosor
-  de líneas, estilos de línea diferenciados y nombre del color en el rango).
+  de líneas, estilos de línea diferenciados y nombre del color en el intervalo).
 
 Como en las demás opciones de sesión, nada de esto se persiste: se elige en
 «Configurar» y vuelve a los valores por defecto al reiniciar la aplicación.
@@ -41,12 +41,12 @@ TIPOS_DISPONIBLES = (
 TIPO_LINEA_ORIGINAL = "original"
 TIPO_LINEA_FILTRADA = "filtrada"
 TIPO_LINEA_FORMULA = "formula"
-TIPO_LINEA_RANGO = "rango"
+TIPO_LINEA_INTERVALO = "intervalo"
 TIPOS_LINEA = (
     TIPO_LINEA_ORIGINAL,
     TIPO_LINEA_FILTRADA,
     TIPO_LINEA_FORMULA,
-    TIPO_LINEA_RANGO,
+    TIPO_LINEA_INTERVALO,
 )
 # Estilos simbólicos: la capa gráfica los traduce al enum de Qt (SolidLine,
 # DashLine, DotLine). Mantenerlos aquí evita hardcodear estilos en la UI.
@@ -59,7 +59,7 @@ _ANCHO_BASE = {
     TIPO_LINEA_ORIGINAL: 1.2,
     TIPO_LINEA_FILTRADA: 2.2,
     TIPO_LINEA_FORMULA: 2.0,
-    TIPO_LINEA_RANGO: 2.0,
+    TIPO_LINEA_INTERVALO: 2.0,
 }
 
 # Factor de ampliación del grosor cuando está activa «Aumentar las líneas».
@@ -83,7 +83,7 @@ def tipo_vision():
     return _tipo_vision
 
 def mostrar_nombre_color() -> bool:
-    """Opcion «Mostrar nombre del color en el rango» (independiente del modo)."""
+    """Opcion «Mostrar nombre del color en el intervalo» (independiente del modo)."""
     return _mostrar_nombre_color
 
 def estilos_linea_activos() -> bool:
@@ -147,9 +147,9 @@ def grosor_senal(tipo_linea: str) -> float:
         return round(base * _FACTOR_GROSOR, 2)
     return base
 
-def grosor_rango() -> float:
-    """Grosor de los bordes de los rangos/sub-rangos según las opciones."""
-    return grosor_senal(TIPO_LINEA_RANGO)
+def grosor_intervalo() -> float:
+    """Grosor de los bordes de los intervalos/sub-intervalos según las opciones."""
+    return grosor_senal(TIPO_LINEA_INTERVALO)
 
 def estilo_linea(tipo_linea: str) -> str:
     """Estilo simbólico de la línea ``tipo_linea``.

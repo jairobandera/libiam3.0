@@ -21,7 +21,17 @@ NOMBRE_IMPULSO = "Impulso"
 EXPRESION_IMPULSO = "J = ∫ (Fz − m·g) dt"
 UNIDAD_IMPULSO = "N·s"
 
+NOMBRE_ACELERACION = "Aceleración"
+EXPRESION_ACELERACION = "a = (Fz − m·g) / m"
+UNIDAD_ACELERACION = "m/s²"
+
+NOMBRE_VELOCIDAD = "Velocidad"
+EXPRESION_VELOCIDAD = "v = ∫ (Fz − m·g)/m dt"
 UNIDAD_VELOCIDAD = "m/s"
+
+NOMBRE_FUERZA_NETA = "Fuerza neta"
+EXPRESION_FUERZA_NETA = "Fn = Fz − m·g"
+UNIDAD_FUERZA_NETA = "N"
 
 
 def _validar_parametros(masa, gravedad, frecuencia):
@@ -162,6 +172,28 @@ def _impulso_desde(roles, contexto, eleccion=None):
         contexto["frecuencia"],
     )
 
+def _aceleracion_desde(roles, contexto, eleccion=None):
+    return aceleracion(
+        roles["Fz"],
+        contexto["masa"],
+        contexto.get("gravedad", 9.8),
+    )
+
+def _velocidad_desde(roles, contexto, eleccion=None):
+    return velocidad(
+        roles["Fz"],
+        contexto["masa"],
+        contexto.get("gravedad", 9.8),
+        contexto["frecuencia"],
+    )
+
+def _fuerza_neta_desde(roles, contexto, eleccion=None):
+    return fuerza_neta(
+        roles["Fz"],
+        contexto["masa"],
+        contexto.get("gravedad", 9.8),
+    )
+
 ROLES = {
     "Fx": ("Fuerza", "eje_x"), "Fy": ("Fuerza", "eje_y"),
     "Fz": ("Fuerza", "eje_z"),
@@ -183,7 +215,7 @@ NOMBRES_ROLES = {
 # --- Fórmulas creadas por el usuario ----------------------------------------
 # El texto nunca pasa por eval(). Se analiza con ast y se interpreta solo si
 # todos sus componentes pertenecen a esta lista blanca.
-VARIABLE_SENAL_RANGO = "senal"
+VARIABLE_SENAL_INTERVALO = "senal"
 VARIABLES_CONTEXTO = {
     "masa": "Cargá la masa del sujeto en el panel izquierdo.",
     "gravedad": "La gravedad debe ser mayor que cero.",
@@ -215,8 +247,8 @@ UNIDADES_CONSTRUCTOR = (
 
 def nombre_variable_constructor(variable) -> str:
     """Nombre entendible para los datos que aparecen en el constructor."""
-    if variable == VARIABLE_SENAL_RANGO:
-        return "Señal del rango"
+    if variable == VARIABLE_SENAL_INTERVALO:
+        return "Señal del intervalo"
     if variable in NOMBRES_ROLES:
         return f"{variable} ({NOMBRES_ROLES[variable].lower()})"
     return {
@@ -287,11 +319,11 @@ FUNCIONES_CONSTRUCTOR = (
     ("Raíz", "raiz", "Raíz cuadrada"),
     ("Integral", "integral", "Integral acumulada usando la frecuencia"),
     ("Derivada", "derivada", "Cambio por segundo"),
-    ("Promedio", "promedio", "Promedio del rango"),
-    ("Máximo", "maximo", "Máximo del rango"),
-    ("Mínimo", "minimo", "Mínimo del rango"),
-    ("RMS", "rms", "Valor cuadrático medio del rango"),
-    ("Suma", "suma", "Suma de las muestras del rango"),
+    ("Promedio", "promedio", "Promedio del intervalo"),
+    ("Máximo", "maximo", "Máximo del intervalo"),
+    ("Mínimo", "minimo", "Mínimo del intervalo"),
+    ("RMS", "rms", "Valor cuadrático medio del intervalo"),
+    ("Suma", "suma", "Suma de las muestras del intervalo"),
     ("Log", "log", "Logaritmo natural"),
     ("Exp", "exp", "Exponencial"),
 )
@@ -333,10 +365,10 @@ def normalizar_expresion_personalizada(expresion) -> str:
         .replace("^", "**")
     )
     texto = re.sub(r"(?<=\d),(?=\d)", ".", texto)
-    texto = re.sub(r"\bseñal\b", VARIABLE_SENAL_RANGO, texto, flags=re.IGNORECASE)
+    texto = re.sub(r"\bseñal\b", VARIABLE_SENAL_INTERVALO, texto, flags=re.IGNORECASE)
     texto = re.sub(r"\bfs\b", "frecuencia", texto, flags=re.IGNORECASE)
     texto = re.sub(r"\bg\b", "gravedad", texto, flags=re.IGNORECASE)
-    texto = re.sub(r"\bF\b", VARIABLE_SENAL_RANGO, texto)
+    texto = re.sub(r"\bF\b", VARIABLE_SENAL_INTERVALO, texto)
     for rol in ROLES:
         texto = re.sub(rf"\b{re.escape(rol)}\b", rol, texto, flags=re.IGNORECASE)
     for nombre in (*VARIABLES_CONTEXTO, "tiempo", "pi", "e"):
@@ -371,7 +403,7 @@ def _validar_nodo_expresion(nodo, variables, funciones):
     if isinstance(nodo, ast.Name):
         permitidas = (
             set(ROLES)
-            | {VARIABLE_SENAL_RANGO, "tiempo"}
+            | {VARIABLE_SENAL_INTERVALO, "tiempo"}
             | set(VARIABLES_CONTEXTO)
             | set(CONSTANTES_PERSONALIZADAS)
         )
@@ -416,7 +448,7 @@ def _nodo_devuelve_vector(nodo):
     if isinstance(nodo, ast.Constant):
         return False
     if isinstance(nodo, ast.Name):
-        return nodo.id in set(ROLES) | {VARIABLE_SENAL_RANGO, "tiempo"}
+        return nodo.id in set(ROLES) | {VARIABLE_SENAL_INTERVALO, "tiempo"}
     if isinstance(nodo, ast.UnaryOp):
         return _nodo_devuelve_vector(nodo.operand)
     if isinstance(nodo, ast.BinOp):
@@ -447,11 +479,11 @@ def analizar_expresion_personalizada(expresion) -> dict:
 
     variables, funciones = set(), set()
     _validar_nodo_expresion(arbol, variables, funciones)
-    senales = (variables & set(ROLES)) | ({VARIABLE_SENAL_RANGO} & variables)
+    senales = (variables & set(ROLES)) | ({VARIABLE_SENAL_INTERVALO} & variables)
     if not senales:
         raise ErrorFormula(
             "La fórmula debe usar al menos una señal, por ejemplo «Señal del "
-            "rango» o Fz."
+            "intervalo» o Fz."
         )
 
     return {
@@ -551,6 +583,52 @@ def evaluar_expresion_personalizada(expresion, variables, frecuencia=None):
 
 
 FORMULAS = {
+    "aceleracion": {
+        "nombre": NOMBRE_ACELERACION,
+        "articulo": "la",
+        "expresion": EXPRESION_ACELERACION,
+        "expresion_constructor": "(Fz - masa * gravedad) / masa",
+        "unidad": UNIDAD_ACELERACION,
+        "salida_rol": "Fz",
+        "integra_en_registro": False,
+        "requiere_roles": ("Fz",),
+        "intervalos_en_rol": {
+            "rol": "Fz",
+            "mensaje": "La aceleración se calcula sobre la componente vertical "
+                       "de la fuerza (Fz), que es la que acelera al sujeto "
+                       "contra la gravedad.",
+        },
+        "requiere": {
+            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+                    "poder calcular la aceleración.",
+            "gravedad": "La gravedad debe ser mayor que cero.",
+        },
+        "computar": _aceleracion_desde,
+    },
+    "velocidad": {
+        "nombre": NOMBRE_VELOCIDAD,
+        "articulo": "la",
+        "expresion": EXPRESION_VELOCIDAD,
+        "expresion_constructor": "integral((Fz - masa * gravedad) / masa)",
+        "unidad": UNIDAD_VELOCIDAD,
+        "salida_rol": "Fz",
+        "integra_en_registro": True,
+        "requiere_roles": ("Fz",),
+        "intervalos_en_rol": {
+            "rol": "Fz",
+            "mensaje": "La velocidad se calcula sobre la componente vertical "
+                       "de la fuerza (Fz), que es la que acelera al sujeto "
+                       "contra la gravedad.",
+        },
+        "requiere": {
+            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+                    "poder calcular la velocidad.",
+            "gravedad": "La gravedad debe ser mayor que cero.",
+            "frecuencia": "No se pudo determinar la frecuencia de muestreo "
+                          "del archivo, necesaria para calcular la velocidad.",
+        },
+        "computar": _velocidad_desde,
+    },
     "potencia": {
         "nombre": NOMBRE_POTENCIA,
         "articulo": "la",
@@ -562,7 +640,7 @@ FORMULAS = {
         "salida_rol": "Fz",
         "integra_en_registro": True,
         "requiere_roles": ("Fz",),
-        "rangos_en_rol": {
+        "intervalos_en_rol": {
             "rol": "Fz",
             "mensaje": "La potencia implementada en el sistema corresponde a la "
                        "potencia mecánica vertical y únicamente puede calcularse "
@@ -586,7 +664,7 @@ FORMULAS = {
         "salida_rol": "Fz",
         "integra_en_registro": True,
         "requiere_roles": ("Fz",),
-        "rangos_en_rol": {
+        "intervalos_en_rol": {
             "rol": "Fz",
             "mensaje": "El impulso se calcula sobre la componente vertical de "
                        "la fuerza (Fz), que es la que acelera al sujeto contra "
@@ -601,6 +679,28 @@ FORMULAS = {
         },
         "computar": _impulso_desde,
         "detalles": detalles_impulso,
+    },
+    "fuerza_neta": {
+        "nombre": NOMBRE_FUERZA_NETA,
+        "articulo": "la",
+        "expresion": EXPRESION_FUERZA_NETA,
+        "expresion_constructor": "Fz - masa * gravedad",
+        "unidad": UNIDAD_FUERZA_NETA,
+        "salida_rol": "Fz",
+        "integra_en_registro": False,
+        "requiere_roles": ("Fz",),
+        "intervalos_en_rol": {
+            "rol": "Fz",
+            "mensaje": "La fuerza neta se calcula sobre la componente vertical "
+                       "de la fuerza (Fz), que es la que acelera al sujeto "
+                       "contra la gravedad.",
+        },
+        "requiere": {
+            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+                    "poder calcular la fuerza neta.",
+            "gravedad": "La gravedad debe ser mayor que cero.",
+        },
+        "computar": _fuerza_neta_desde,
     },
 }
 
@@ -622,7 +722,7 @@ def crear_descriptor_personalizado(datos) -> dict:
     analisis = analizar_expresion_personalizada(datos.get("expresion"))
     variables = analisis["variables"]
     roles_requeridos = tuple(rol for rol in ROLES if rol in variables)
-    usa_senal = VARIABLE_SENAL_RANGO in variables
+    usa_senal = VARIABLE_SENAL_INTERVALO in variables
     funciones_temporales = bool(analisis["funciones"] & _FUNCIONES_TEMPORALES)
 
     requiere = {
@@ -663,7 +763,7 @@ def crear_descriptor_personalizado(datos) -> dict:
         "expresion_constructor": analisis["texto"],
         "descripcion": descripcion,
         "unidad": unidad,
-        "salida_rol": VARIABLE_SENAL_RANGO if usa_senal else roles_requeridos[0],
+        "salida_rol": VARIABLE_SENAL_INTERVALO if usa_senal else roles_requeridos[0],
         "integra_en_registro": (
             (funciones_temporales or "tiempo" in variables)
             and not analisis["resultado_escalar"]
@@ -671,7 +771,7 @@ def crear_descriptor_personalizado(datos) -> dict:
         "resultado_escalar": analisis["resultado_escalar"],
         "requiere_roles": roles_requeridos,
         "requiere": requiere,
-        "usa_senal_rango": usa_senal,
+        "usa_senal_intervalo": usa_senal,
         "personalizada": True,
         "reutilizable": bool(datos.get("reutilizable", True)),
         "id_db": datos.get("id"),
@@ -679,10 +779,10 @@ def crear_descriptor_personalizado(datos) -> dict:
     }
     if not usa_senal and len(roles_requeridos) == 1:
         rol = roles_requeridos[0]
-        descriptor["rangos_en_rol"] = {
+        descriptor["intervalos_en_rol"] = {
             "rol": rol,
             "mensaje": (
-                f"«{nombre}» usa {rol} como señal principal. Seleccioná rangos "
+                f"«{nombre}» usa {rol} como señal principal. Seleccioná intervalos "
                 f"de la gráfica correspondiente a {rol}."
             ),
         }
@@ -789,11 +889,13 @@ def hay_formula(clave):
 
 
 def formula_predeterminada():
-    return next(iter(FORMULAS), None)
+    # Potencia es la primera de siempre y el mensaje y los tests la asumen;
+    # el orden del combo sale del registro (aceleración, velocidad, ...).
+    return "potencia" if "potencia" in FORMULAS else next(iter(FORMULAS), None)
 
 
 def registrar_aplicacion_formula(aplicaciones, configuracion):
-    """Agrega rangos a una fórmula sin borrar aplicaciones anteriores."""
+    """Agrega intervalos a una fórmula sin borrar aplicaciones anteriores."""
     configuracion = dict(configuracion or {})
     clave = str(configuracion.get("clave") or "").strip()
     if not clave:
@@ -805,11 +907,11 @@ def registrar_aplicacion_formula(aplicaciones, configuracion):
     }
     anterior = resultado.get(clave, {})
     configuracion = {**anterior, **configuracion, "clave": clave}
-    configuracion["rangos"] = list(
+    configuracion["intervalos"] = list(
         dict.fromkeys(
             [
-                *(anterior.get("rangos") or ()),
-                *(configuracion.get("rangos") or ()),
+                *(anterior.get("intervalos") or ()),
+                *(configuracion.get("intervalos") or ()),
             ]
         )
     )
@@ -926,12 +1028,12 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
             x_seg = x_reg[base]
             valores = valores_registro[base]
             datos_resumen = resumen(x_seg, valores)
-            nombre_rango = datos.get("nombre") or f"Rango {datos.get('numero')}"
+            nombre_intervalo = datos.get("nombre") or f"Intervalo {datos.get('numero')}"
 
             resultados.append(
                 {
                     "id": datos.get("id"),
-                    "nombre": nombre_rango,
+                    "nombre": nombre_intervalo,
                     "senal": datos.get("senal", ""),
                     "desde": desde,
                     "hasta": hasta,
@@ -952,7 +1054,7 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
 
         return resultados, segmentos
 
-    # Las demás fórmulas se calculan por separado en cada rango.
+    # Las demás fórmulas se calculan por separado en cada intervalo.
     for datos in intervalos:
         desde, hasta = int(datos["desde"]), int(datos["hasta"])
         base = (x >= desde) & (x <= hasta)
@@ -967,11 +1069,11 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
         if valor_escalar is None and valores is None:
             continue
         datos_resumen = resumen(x_seg, valores) if valores is not None else resumen([], [])
-        nombre_rango = datos.get("nombre") or f"Rango {datos.get('numero')}"
+        nombre_intervalo = datos.get("nombre") or f"Intervalo {datos.get('numero')}"
 
         resultado = {
             "id": datos.get("id"),
-            "nombre": nombre_rango,
+            "nombre": nombre_intervalo,
             "senal": datos.get("senal", ""),
             "desde": desde,
             "hasta": hasta,

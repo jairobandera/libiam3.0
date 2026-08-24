@@ -1,12 +1,12 @@
 """Componente reutilizable de cálculo de fórmulas.
 
 Bloque que muestra la fuente de datos (señal filtrada/original), el selector de
-fórmula, los botones Aplicar/Quitar, el estado y los resultados por rango. Es
-**solo interfaz**: no sabe nada de rangos ni de cálculo. Emite solicitudes y
+fórmula, los botones Aplicar/Quitar, el estado y los resultados por intervalo. Es
+**solo interfaz**: no sabe nada de intervalos ni de cálculo. Emite solicitudes y
 recibe resultados.
 
 Lo usan tanto el panel derecho de la ventana principal (dentro de ``Formulas``)
-como la ventana que se abre sobre un rango (``VentanaRegion``), para que ambos
+como la ventana que se abre sobre un intervalo (``VentanaRegion``), para que ambos
 usen exactamente el mismo componente sin duplicar código. La matemática sigue
 en ``logica.formulas``.
 """
@@ -29,7 +29,7 @@ from logica import paleta
 class PanelCalculo(QFrame):
     """Bloque de UI de una fórmula, sin conocimiento del origen de los datos."""
 
-    # Pedido de cálculo: el contenedor decide qué rangos/parámetros envía.
+    # Pedido de cálculo: el contenedor decide qué intervalos/parámetros envía.
     calcularSolicitado = Signal()
     quitarFormulaSolicitado = Signal()
     fuenteCalculoCambiada = Signal(str)
@@ -308,7 +308,7 @@ class PanelCalculo(QFrame):
         self.btn_quitar_formula.setEnabled(False)
 
     def mostrar_resultados(self, datos):
-        """Un bloque por rango calculado, con sus valores destacados."""
+        """Un bloque por intervalo calculado, con sus valores destacados."""
         if not datos or not datos.get("resultados"):
             self.limpiar_resultados()
             return
@@ -371,7 +371,7 @@ class PanelCalculo(QFrame):
     SEPARACION_ENTRADAS = 12
 
     def _bloque_valores(self, resultado, sufijo):
-        """Un rango como bloque con salto de línea, no como renglón corrido."""
+        """Un intervalo como bloque con salto de línea, no como renglón corrido."""
         resumen = resultado.get("resumen") or {}
         pico = resumen.get("pico")
 
@@ -384,7 +384,7 @@ class PanelCalculo(QFrame):
             (tramo, "color:#8A8A8A; font-size:10px;"),
         ]
 
-        # La gráfica que posee el rango, para no mezclar resultados de señales.
+        # La gráfica que posee el intervalo, para no mezclar resultados de señales.
         senal = (resultado.get("senal") or "").strip()
         if senal:
             lineas.insert(1, (f"en {senal}", "color:#8A8A8A; font-size:10px;"))

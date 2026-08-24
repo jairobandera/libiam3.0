@@ -22,24 +22,24 @@ import pandas as pd
 
 
 MODO_DATOS = "datos"
-MODO_RANGOS = "rangos"
+MODO_INTERVALOS = "intervalos"
 MODO_RESULTADOS = "resultados"
 MODO_COMPLETO = "completo"
 
 EXTENSIONES_MODO = {
     MODO_DATOS: ".csv",
-    MODO_RANGOS: ".csv",
+    MODO_INTERVALOS: ".csv",
     MODO_RESULTADOS: ".csv",
     MODO_COMPLETO: ".zip",
 }
 
-COLUMNAS_RANGOS = (
+COLUMNAS_INTERVALOS = (
     "Tipo",
     "ID",
     "Señal",
     "Columna de origen",
     "Número",
-    "Rango padre",
+    "Intervalo padre",
     "Desde",
     "Hasta",
     "Nombre",
@@ -49,7 +49,7 @@ COLUMNAS_RANGOS = (
 
 COLUMNAS_RESULTADOS = (
     "Fórmula",
-    "Rango",
+    "Intervalo",
     "Señal",
     "Desde",
     "Hasta",
@@ -58,7 +58,7 @@ COLUMNAS_RESULTADOS = (
     "Unidad",
     "Datos utilizados",
     "Expresión",
-    "ID del rango",
+    "ID del intervalo",
 )
 
 ETIQUETAS_FUENTE = {
@@ -144,7 +144,7 @@ def preparar_datos(
     Cada filtro se agrega en una columna independiente con el sufijo
     ``[filtrada]``. Los nombres visibles y sus unidades pueden reemplazar los
     encabezados técnicos sin alterar los datos. Las curvas de fórmulas se
-    alinean por el eje horizontal y quedan vacías fuera de sus rangos.
+    alinean por el eje horizontal y quedan vacías fuera de sus intervalos.
     """
     if df_original is None or len(df_original.columns) == 0:
         raise ValueError("No hay datos cargados para exportar.")
@@ -196,7 +196,7 @@ def preparar_datos(
             etiqueta += f" ({unidad})"
         etiqueta = _nombre_unico(etiqueta, existentes)
 
-        # Los rangos de una misma grafica no se superponen. Si una entrada
+        # Los intervalos de una misma grafica no se superponen. Si una entrada
         # externa repitiera el eje, se conserva el ultimo valor de ese punto.
         por_x = pd.Series(y[mascara], index=x[mascara]).groupby(level=0).last()
         salida[etiqueta] = eje_exportado.map(por_x)
@@ -205,51 +205,51 @@ def preparar_datos(
     return salida.reset_index(drop=True)
 
 
-def preparar_rangos(rangos) -> pd.DataFrame:
-    """Una fila por rango o sub-rango, con limites, nombre y nota."""
+def preparar_intervalos(intervalos) -> pd.DataFrame:
+    """Una fila por intervalo o sub-intervalo, con limites, nombre y nota."""
     filas = []
-    for rango in rangos or ():
-        es_subrango = bool(rango.get("es_subrango")) or rango.get("tipo") == "subrango"
-        identificador = rango.get("id") or _identificador_rango(rango, es_subrango)
+    for intervalo in intervalos or ():
+        es_subintervalo = bool(intervalo.get("es_subintervalo")) or intervalo.get("tipo") == "subintervalo"
+        identificador = intervalo.get("id") or _identificador_intervalo(intervalo, es_subintervalo)
         filas.append(
             {
-                "Tipo": "Sub-rango" if es_subrango else "Rango",
+                "Tipo": "Sub-intervalo" if es_subintervalo else "Intervalo",
                 "ID": identificador,
-                "Señal": rango.get("senal", ""),
-                "Columna de origen": rango.get("columna", ""),
-                "Número": rango.get("numero", ""),
-                "Rango padre": rango.get("padre") or "",
-                "Desde": rango.get("desde", ""),
-                "Hasta": rango.get("hasta", ""),
-                "Nombre": rango.get("nombre", ""),
-                "Nota": rango.get("nota", ""),
-                "Datos utilizados": _fuente_legible(rango.get("fuente", "")),
+                "Señal": intervalo.get("senal", ""),
+                "Columna de origen": intervalo.get("columna", ""),
+                "Número": intervalo.get("numero", ""),
+                "Intervalo padre": intervalo.get("padre") or "",
+                "Desde": intervalo.get("desde", ""),
+                "Hasta": intervalo.get("hasta", ""),
+                "Nombre": intervalo.get("nombre", ""),
+                "Nota": intervalo.get("nota", ""),
+                "Datos utilizados": _fuente_legible(intervalo.get("fuente", "")),
             }
         )
-    return pd.DataFrame(filas, columns=COLUMNAS_RANGOS)
+    return pd.DataFrame(filas, columns=COLUMNAS_INTERVALOS)
 
 
-def _identificador_rango(rango, es_subrango=False) -> str:
-    columna = str(rango.get("columna") or "")
-    numero = rango.get("numero", "")
-    if es_subrango:
-        padre = str(rango.get("padre") or "")
+def _identificador_intervalo(intervalo, es_subintervalo=False) -> str:
+    columna = str(intervalo.get("columna") or "")
+    numero = intervalo.get("numero", "")
+    if es_subintervalo:
+        padre = str(intervalo.get("padre") or "")
         return f"{padre}::sub::{numero}" if padre else f"{columna}::sub::{numero}"
     return f"{columna}::{numero}"
 
 
-def preparar_muestras_rangos(
-    rangos,
+def preparar_muestras_intervalos(
+    intervalos,
     df_original,
     df_filtrado=None,
     columna_x=None,
     columnas_filtradas=(),
 ) -> pd.DataFrame:
-    """Exporta las muestras reales que pertenecen a cada rango."""
+    """Exporta las muestras reales que pertenecen a cada intervalo."""
     metadatos = [
         "Tipo",
-        "ID del rango",
-        "Rango",
+        "ID del intervalo",
+        "Intervalo",
         "Señal",
         "Columna de origen",
         "Desde",
@@ -270,18 +270,18 @@ def preparar_muestras_rangos(
     filtradas = set(columnas_filtradas or ())
     filas = []
 
-    for rango in rangos or ():
-        columna = rango.get("columna")
+    for intervalo in intervalos or ():
+        columna = intervalo.get("columna")
         if columna not in df_original.columns:
             continue
         try:
-            desde = float(rango.get("desde"))
-            hasta = float(rango.get("hasta"))
+            desde = float(intervalo.get("desde"))
+            hasta = float(intervalo.get("hasta"))
         except (TypeError, ValueError):
             continue
 
-        es_subrango = bool(rango.get("es_subrango")) or rango.get("tipo") == "subrango"
-        identificador = rango.get("id") or _identificador_rango(rango, es_subrango)
+        es_subintervalo = bool(intervalo.get("es_subintervalo")) or intervalo.get("tipo") == "subintervalo"
+        identificador = intervalo.get("id") or _identificador_intervalo(intervalo, es_subintervalo)
         mascara = eje.between(min(desde, hasta), max(desde, hasta), inclusive="both")
         indices = np.flatnonzero(mascara.to_numpy(dtype=bool))
         tiene_filtrado = (
@@ -294,15 +294,15 @@ def preparar_muestras_rangos(
         for indice in indices:
             filas.append(
                 {
-                    "Tipo": "Sub-rango" if es_subrango else "Rango",
-                    "ID del rango": identificador,
-                    "Rango": rango.get("nombre", ""),
-                    "Señal": rango.get("senal", ""),
+                    "Tipo": "Sub-intervalo" if es_subintervalo else "Intervalo",
+                    "ID del intervalo": identificador,
+                    "Intervalo": intervalo.get("nombre", ""),
+                    "Señal": intervalo.get("senal", ""),
                     "Columna de origen": columna,
-                    "Desde": rango.get("desde", ""),
-                    "Hasta": rango.get("hasta", ""),
-                    "Nota": rango.get("nota", ""),
-                    "Datos utilizados": _fuente_legible(rango.get("fuente", "")),
+                    "Desde": intervalo.get("desde", ""),
+                    "Hasta": intervalo.get("hasta", ""),
+                    "Nota": intervalo.get("nota", ""),
+                    "Datos utilizados": _fuente_legible(intervalo.get("fuente", "")),
                     nombre_eje: df_original.iloc[indice][columna_x],
                     "Valor original": df_original.iloc[indice][columna],
                     "Valor filtrado": (
@@ -339,8 +339,8 @@ def preparar_resultados_formula(datos) -> pd.DataFrame:
         resumen = resultado.get("resumen") or {}
         fila = {
             **comunes,
-            "ID del rango": resultado.get("id", ""),
-            "Rango": resultado.get("nombre", ""),
+            "ID del intervalo": resultado.get("id", ""),
+            "Intervalo": resultado.get("nombre", ""),
             "Señal": resultado.get("senal", ""),
             "Desde": resultado.get("desde", ""),
             "Hasta": resultado.get("hasta", ""),
@@ -359,7 +359,7 @@ def preparar_resultados_formula(datos) -> pd.DataFrame:
             etiqueta = etiqueta[:1].upper() + etiqueta[1:]
             unidad = str(detalle.get("unidad") or "").strip()
             base_columna = f"{etiqueta} ({unidad})" if unidad else etiqueta
-            # La misma magnitud de distintos rangos debe caer en la misma
+            # La misma magnitud de distintos intervalos debe caer en la misma
             # columna. Solo se numera cuando una unica fila trae dos detalles
             # con exactamente la misma etiqueta.
             columna = (
@@ -373,7 +373,7 @@ def preparar_resultados_formula(datos) -> pd.DataFrame:
         filas.append(fila)
 
     tabla = pd.DataFrame(filas)
-    esenciales = ["Fórmula", "Rango", "Señal", "Desde", "Hasta", "Duración (s)"]
+    esenciales = ["Fórmula", "Intervalo", "Señal", "Desde", "Hasta", "Duración (s)"]
     # Si la fórmula ya define medidas propias (por ejemplo, impulso neto y
     # propulsivo), esas son más útiles que repetir un resumen estadístico
     # genérico de la curva. Las fórmulas sin detalles sí conservan pico,
@@ -399,7 +399,7 @@ def preparar_resultados_formula(datos) -> pd.DataFrame:
         "Filtro",
         "Advertencias",
         "Expresión",
-        "ID del rango",
+        "ID del intervalo",
     ]
     columnas = list(esenciales)
     columnas.extend(
@@ -416,7 +416,7 @@ def preparar_resultados_formula(datos) -> pd.DataFrame:
         columna
         for columna in metadatos
         if columna in tabla
-        and (columna in {"Unidad", "Datos utilizados", "Expresión", "ID del rango"}
+        and (columna in {"Unidad", "Datos utilizados", "Expresión", "ID del intervalo"}
              or _serie_tiene_datos(tabla[columna]))
     )
     return tabla.reindex(columns=columnas)

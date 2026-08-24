@@ -62,7 +62,7 @@ class BarraBotones(QFrame):
         self.btn_formulas.setIconSize(QSize(20, 20))
         self.btn_formulas.setCursor(Qt.PointingHandCursor)
         self.btn_formulas.setProperty("activo", "false")
-        self.btn_formulas.setToolTip("Rangos para cálculos")
+        self.btn_formulas.setToolTip("Intervalos para cálculos")
         self.btn_formulas.clicked.connect(lambda: self.toggle_panel("formulas"))
 
         # Boton toggle Detectar Cabeceras

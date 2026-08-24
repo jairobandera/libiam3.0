@@ -24,7 +24,7 @@ from logica.lector_csv import leer_csv_rapido
 class PanelIzquierdo(QFrame):
     archivoCargado = Signal(str, object, object)
     archivoSeleccionado = Signal(str, object, object)
-    modoSeleccionRangoCambiado = Signal(bool)
+    modoSeleccionIntervaloCambiado = Signal(bool)
     # Masa del archivo activo y gravedad de la sesión: las usan las fórmulas.
     variablesCambiaron = Signal(object)
 
@@ -91,15 +91,15 @@ class PanelIzquierdo(QFrame):
         self.btn_cargar.setCursor(Qt.PointingHandCursor)
         self.btn_cargar.clicked.connect(self.cargar_csv)
 
-        # Boton seleccionar rango
-        self.btn_rango = QPushButton("Seleccionar rango")
-        self.btn_rango.setObjectName("btnSeleccionarRango")
-        self.btn_rango.setCursor(Qt.PointingHandCursor)
-        self.btn_rango.setCheckable(True)
-        self.btn_rango.toggled.connect(self.modoSeleccionRangoCambiado.emit)
+        # Boton seleccionar intervalo
+        self.btn_intervalo = QPushButton("Seleccionar intervalo")
+        self.btn_intervalo.setObjectName("btnSeleccionarIntervalo")
+        self.btn_intervalo.setCursor(Qt.PointingHandCursor)
+        self.btn_intervalo.setCheckable(True)
+        self.btn_intervalo.toggled.connect(self.modoSeleccionIntervaloCambiado.emit)
 
         layout.addWidget(self.btn_cargar)
-        layout.addWidget(self.btn_rango)
+        layout.addWidget(self.btn_intervalo)
 
         frame.setLayout(layout)
         return frame

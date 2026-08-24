@@ -145,8 +145,8 @@
     background-color: #0D47A1;
 }
 
-/* Boton seleccionar rango */
-#btnSeleccionarRango {
+/* Boton seleccionar intervalo */
+#btnSeleccionarIntervalo {
     background-color: transparent;
     color: #FFFFFF;
     border: 1px solid #3E3E42;
@@ -157,16 +157,16 @@
     font-weight: 500;
 }
 
-#btnSeleccionarRango:hover {
+#btnSeleccionarIntervalo:hover {
     background-color: #333337;
     border-color: #1976D2;
 }
 
-#btnSeleccionarRango:pressed {
+#btnSeleccionarIntervalo:pressed {
     background-color: #2D2D30;
 }
 
-#btnSeleccionarRango:checked {
+#btnSeleccionarIntervalo:checked {
     background-color: #1976D2;
     border-color: #1976D2;
 }

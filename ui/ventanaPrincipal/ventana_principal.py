@@ -77,7 +77,7 @@ class VentanaPrincipal(QWidget):
         self.setLayout(layout)
 
         # Conectar la configuración de la cabecera con el área de gráficas
-        self.cabecera.superposicionRangosCambiada.connect(
+        self.cabecera.superposicionIntervalosCambiada.connect(
             self.area_central.set_superposicion_habilitada
         )
         self.cabecera.noPreguntarSuperposicionCambiada.connect(
@@ -99,11 +99,11 @@ class VentanaPrincipal(QWidget):
         # Conectar panel izquierdo con panel derecho
         self.panel_izquierdo.panel_derecho_ref = self.panel_derecho
 
-        # Conectar carga de datos y selección de rango con las gráficas
+        # Conectar carga de datos y selección de intervalo con las gráficas
         self.panel_izquierdo.archivoCargado.connect(self.area_central.cargar_dataframe)
         self.panel_izquierdo.archivoSeleccionado.connect(self.area_central.cargar_dataframe)
-        self.panel_izquierdo.modoSeleccionRangoCambiado.connect(
-            self.area_central.set_modo_seleccion_rango
+        self.panel_izquierdo.modoSeleccionIntervaloCambiado.connect(
+            self.area_central.set_modo_seleccion_intervalo
         )
 
         self.panel_derecho.config_columnas.mapeoAplicado.connect(
@@ -129,14 +129,14 @@ class VentanaPrincipal(QWidget):
             self.panel_derecho.formulas.cargar_variables_formula
         )
 
-        self.area_central.rangosCambiados.connect(
-            self.panel_derecho.formulas.cargar_rangos
+        self.area_central.intervalosCambiados.connect(
+            self.panel_derecho.formulas.cargar_intervalos
         )
-        self.area_central.rangoRechazado.connect(
-            self.panel_derecho.formulas.mostrar_error_rango
+        self.area_central.intervaloRechazado.connect(
+            self.panel_derecho.formulas.mostrar_error_intervalo
         )
-        self.area_central.rangoAjustado.connect(
-            self.panel_derecho.formulas.mostrar_aviso_rango
+        self.area_central.intervaloAjustado.connect(
+            self.panel_derecho.formulas.mostrar_aviso_intervalo
         )
         self.panel_derecho.formulas.aplicarATodasCambiado.connect(
             self.area_central.set_aplicar_corte_todas
@@ -144,8 +144,8 @@ class VentanaPrincipal(QWidget):
         self.panel_derecho.formulas.notaGuardada.connect(
             self.area_central.set_nota
         )
-        self.panel_derecho.formulas.eliminarRangosSolicitado.connect(
-            self.area_central.eliminar_rangos
+        self.panel_derecho.formulas.eliminarIntervalosSolicitado.connect(
+            self.area_central.eliminar_intervalos
         )
 
         # --- Fórmulas ---
@@ -194,7 +194,7 @@ class VentanaPrincipal(QWidget):
                 for columna in area.graficas_por_columna
                 if columna in area.df_grafica_original.columns
             ]
-        rangos = area.rangos_para_exportar()
+        intervalos = area.intervalos_para_exportar()
         resultados_formulas = area.resultados_formulas_para_exportar()
         cantidad_resultados = sum(
             len(datos.get("resultados") or ()) for datos in resultados_formulas
@@ -220,7 +220,7 @@ class VentanaPrincipal(QWidget):
             nombre_archivo=area.nombre_archivo,
             cantidad_frames=len(area.df_grafica_original),
             cantidad_senales=len(columnas),
-            cantidad_rangos=len(rangos),
+            cantidad_intervalos=len(intervalos),
             cantidad_resultados=cantidad_resultados,
             nombre_formula=nombre_formula,
             hay_filtros=bool(set(columnas) & set(area.columnas_filtradas)),
@@ -236,7 +236,7 @@ class VentanaPrincipal(QWidget):
         base = exportacion.nombre_base(area.nombre_archivo)
         sufijos = {
             exportacion.MODO_DATOS: "datos",
-            exportacion.MODO_RANGOS: "rangos",
+            exportacion.MODO_INTERVALOS: "intervalos",
             exportacion.MODO_RESULTADOS: "resultados",
             exportacion.MODO_COMPLETO: "analisis",
         }
@@ -257,9 +257,9 @@ class VentanaPrincipal(QWidget):
             if modo == exportacion.MODO_DATOS:
                 tabla_datos = self._tabla_datos_para_exportar(columnas)
                 exportacion.escribir_csv(ruta, tabla_datos)
-            elif modo == exportacion.MODO_RANGOS:
-                tabla_muestras = exportacion.preparar_muestras_rangos(
-                    rangos,
+            elif modo == exportacion.MODO_INTERVALOS:
+                tabla_muestras = exportacion.preparar_muestras_intervalos(
+                    intervalos,
                     area.df_grafica_original,
                     area.df_grafica,
                     area.columna_x,
@@ -273,9 +273,9 @@ class VentanaPrincipal(QWidget):
                 exportacion.escribir_csv(ruta, tabla_resultados)
             else:
                 tabla_datos = self._tabla_datos_para_exportar(columnas)
-                tabla_rangos = exportacion.preparar_rangos(rangos)
-                tabla_muestras = exportacion.preparar_muestras_rangos(
-                    rangos,
+                tabla_intervalos = exportacion.preparar_intervalos(intervalos)
+                tabla_muestras = exportacion.preparar_muestras_intervalos(
+                    intervalos,
                     area.df_grafica_original,
                     area.df_grafica,
                     area.columna_x,
@@ -295,9 +295,9 @@ class VentanaPrincipal(QWidget):
                     nombres=self._nombres_senales_para_exportar(columnas),
                 )
                 tablas = {"datos.csv": tabla_datos}
-                if len(tabla_rangos):
-                    tablas["rangos.csv"] = tabla_rangos
-                    tablas["muestras_rangos.csv"] = tabla_muestras
+                if len(tabla_intervalos):
+                    tablas["intervalos.csv"] = tabla_intervalos
+                    tablas["muestras_intervalos.csv"] = tabla_muestras
                 if len(tabla_resultados):
                     tablas["resultados_formula.csv"] = tabla_resultados
                 exportacion.escribir_paquete(ruta, tablas, informacion)
@@ -351,7 +351,7 @@ class VentanaPrincipal(QWidget):
         return self.area_central.curvas_formulas_para_exportar(columnas)
 
     def _guardar_proyecto(self):
-        """Guarda una copia del CSV y sus rangos/notas en la carpeta del proyecto.
+        """Guarda una copia del CSV y sus intervalos/notas en la carpeta del proyecto.
 
         Se dispara solo desde el botón «Guardar» de la cabecera. Pide el nombre
         con un cuadro de diálogo propio (no el de Windows) y escribe todo dentro
@@ -395,7 +395,7 @@ class VentanaPrincipal(QWidget):
             else:
                 df_original.to_csv(ruta_csv, index=False)
 
-            # Rangos, sub-rangos y notas trabajados.
+            # Intervalos, sub-intervalos y notas trabajados.
             anotaciones = self.area_central.exportar_anotaciones()
             proyecto.escribir_anotaciones(ruta_anotaciones, anotaciones)
         except OSError as exc:
@@ -408,11 +408,11 @@ class VentanaPrincipal(QWidget):
             "Proyecto guardado en la carpeta «archivos»:\n\n"
             f"• {os.path.basename(ruta_csv)} (copia del CSV)\n"
             f"• {os.path.basename(ruta_anotaciones)} "
-            f"({len(anotaciones)} rango(s)/sub-rango(s) con sus notas)",
+            f"({len(anotaciones)} intervalo(s)/sub-intervalo(s) con sus notas)",
         )
 
     def _cargar_proyecto(self):
-        """Abre un proyecto de la carpeta «archivos» con sus rangos y notas.
+        """Abre un proyecto de la carpeta «archivos» con sus intervalos y notas.
 
         El diálogo solo lista esa carpeta: no se puede navegar a otra ruta,
         porque un CSV de cualquier otro lado no tiene anotaciones asociadas.
@@ -430,7 +430,7 @@ class VentanaPrincipal(QWidget):
         if self.panel_izquierdo.cargar_archivo_desde_ruta(datos["ruta"]) is None:
             return
 
-        # El CSV ya está graficado: recién ahora se pueden reponer los rangos,
+        # El CSV ya está graficado: recién ahora se pueden reponer los intervalos,
         # porque cargar_dataframe() limpia los gestores.
         try:
             anotaciones = proyecto.leer_anotaciones(datos["ruta_anotaciones"])
@@ -445,7 +445,7 @@ class VentanaPrincipal(QWidget):
                 self,
                 "Cargar",
                 f"Se cargó «{datos['nombre']}».\n\n"
-                "El proyecto no tenía rangos ni notas guardados.",
+                "El proyecto no tenía intervalos ni notas guardados.",
             )
             return
 
@@ -453,7 +453,7 @@ class VentanaPrincipal(QWidget):
 
         mensaje = (
             f"Se cargó «{datos['nombre']}» con "
-            f"{restaurados} rango(s)/sub-rango(s) y sus notas."
+            f"{restaurados} intervalo(s)/sub-intervalo(s) y sus notas."
         )
         if descartados:
             mensaje += (

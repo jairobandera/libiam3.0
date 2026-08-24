@@ -25,10 +25,10 @@ from logica.filtros_senales import (
 )
 from logica import accesibilidad, formulas, paleta
 from logica.formulas import ErrorFormula
-from logica.rangos import GestorRangos, RangoSuperpuestoError
+from logica.intervalos import GestorIntervalos, IntervaloSuperpuestoError
 
 
-# Vocabulario compartido con los rangos (ver ``_rangos_para_panel``) para decir
+# Vocabulario compartido con los intervalos (ver ``_intervalos_para_panel``) para decir
 # sobre qué serie se trabajó.
 FUENTE_ORIGINAL = "original"
 FUENTE_FILTRADA = "filtrada"
@@ -70,11 +70,29 @@ class ViewBoxZoom(pg.ViewBox):
         ev.accept()
 
 
-class GraficaSenal(pg.PlotWidget):
-    """Gráfica que propone rangos enteros; el área central los valida."""
+class ViewBoxFormula(pg.ViewBox):
+    """Vista superpuesta para curvas de fórmula: no consume el mouse.
 
-    rangoPropuesto = Signal(object, int, int)
-    rangoDobleClick = Signal(object, int)
+    La escena entrega el arrastre al primer item que lo acepte, probando por
+    Z descendente; estas vistas van encima del ViewBox principal, así que si
+    aceptaran (como hace pg.ViewBox por defecto) secuestrarían el pan.
+    Al ignorar, el evento cae al ViewBox de la señal y el arrastre panea.
+    """
+
+    def mouseDragEvent(self, ev, axis=None):
+        ev.ignore()
+
+    def mouseClickEvent(self, ev):
+        # También se ignora el clic: evita que un doble clic dispare el
+        # autoRange embebido de pg.ViewBox sobre una vista enlazada en X.
+        ev.ignore()
+
+
+class GraficaSenal(pg.PlotWidget):
+    """Gráfica que propone intervalos enteros; el área central los valida."""
+
+    intervaloPropuesto = Signal(object, int, int)
+    intervaloDobleClick = Signal(object, int)
 
     def __init__(
         self,
@@ -99,13 +117,13 @@ class GraficaSenal(pg.PlotWidget):
         self.y = None
         self.y_original = None
         self.y_filtrada = None
-        self.modo_seleccion_rango = False
+        self.modo_seleccion_intervalo = False
         self.x_inicio = None
         self.linea_inicio = None
         self.linea_preview = None
         self.region_preview = None
-        self.regiones_rangos = {}
-        self.rangos_actuales = []
+        self.regiones_intervalos = {}
+        self.intervalos_actuales = []
         self.curva_original = None
         self.curva_filtrada = None
         self._curvas_formula_dibujadas = []
@@ -119,6 +137,7 @@ class GraficaSenal(pg.PlotWidget):
         self.caja_valor = None
         self._vista_items = None
         self._formula_en_eje_derecho = False
+        self._registro_caja_actual = None
 
         self.setMinimumHeight(210)
         self.setBackground("#1E1E1E")
@@ -142,7 +161,7 @@ class GraficaSenal(pg.PlotWidget):
 
         # Cada fórmula se dibuja en un ViewBox superpuesto. El primero se
         # reutiliza; los adicionales se crean solo mientras sean necesarios.
-        self.vb_formula = pg.ViewBox()
+        self.vb_formula = ViewBoxFormula()
         self.plotItem.scene().addItem(self.vb_formula)
         self.plotItem.getAxis("right").linkToView(self.vb_formula)
         self.vb_formula.setXLink(self.plotItem.vb)
@@ -178,8 +197,8 @@ class GraficaSenal(pg.PlotWidget):
         self.linea_inicio = None
         self.linea_preview = None
         self.region_preview = None
-        self.regiones_rangos = {}
-        self.rangos_actuales = []
+        self.regiones_intervalos = {}
+        self.intervalos_actuales = []
         self.x_inicio = None
 
         self.curva_original = self.plot(
@@ -244,7 +263,7 @@ class GraficaSenal(pg.PlotWidget):
         )
 
     def aplicar_paleta(self):
-        """Repinta curvas y rangos con la paleta activa, sin perder el zoom."""
+        """Repinta curvas y intervalos con la paleta activa, sin perder el zoom."""
         if self.curva_original is not None:
             self.curva_original.setPen(self._pen_original())
         if self.curva_filtrada is not None:
@@ -259,8 +278,8 @@ class GraficaSenal(pg.PlotWidget):
                     registro["caja"].border = pg.mkPen(color, width=1)
             self.plotItem.getAxis("right").setPen(pg.mkPen(color))
             self.plotItem.getAxis("right").setTextPen(pg.mkPen(color))
-        if self.rangos_actuales:
-            self.mostrar_rangos(self.rangos_actuales)
+        if self.intervalos_actuales:
+            self.mostrar_intervalos(self.intervalos_actuales)
 
     def set_curva_formula(
         self,
@@ -350,7 +369,7 @@ class GraficaSenal(pg.PlotWidget):
             self.leyenda.show()
 
     def _crear_vista_formula_adicional(self):
-        vista = pg.ViewBox()
+        vista = ViewBoxFormula()
         self.plotItem.scene().addItem(vista)
         vista.setXLink(self.plotItem.vb)
         vista.setMouseEnabled(x=False, y=False)
@@ -469,7 +488,7 @@ class GraficaSenal(pg.PlotWidget):
             symbol="o",
         )
         marcador.setZValue(20)
-        # ignoreBounds: ni el punto ni la caja deben estirar el autorango.
+        # ignoreBounds: ni el punto ni la caja deben estirar el autointervalo.
         vista.addItem(marcador, ignoreBounds=True)
 
         caja = pg.TextItem(
@@ -506,6 +525,7 @@ class GraficaSenal(pg.PlotWidget):
 
         self._curvas_formula_dibujadas = []
         self._vistas_formula_extra = []
+        self._registro_caja_actual = None
         self.vb_formula.linkView(self.vb_formula.YAxis, None)
         self.vb_formula.enableAutoRange(axis="y", enable=False)
         self._actualizar_alias_formula()
@@ -514,8 +534,8 @@ class GraficaSenal(pg.PlotWidget):
         if self.y_filtrada is None:
             self.leyenda.hide()
 
-    def set_modo_seleccion_rango(self, activo):
-        self.modo_seleccion_rango = activo
+    def set_modo_seleccion_intervalo(self, activo):
+        self.modo_seleccion_intervalo = activo
         self.setCursor(Qt.CrossCursor if activo else Qt.ArrowCursor)
         if not activo:
             self._cancelar_propuesta()
@@ -523,11 +543,18 @@ class GraficaSenal(pg.PlotWidget):
     # Radio en píxeles alrededor del pico / de la curva para que aparezca la caja.
     RADIO_HOVER_PICO = 16
     RADIO_HOVER_CURVA = 12
+    # El pico desempata por cercanía con este bono, pero nunca le gana a una
+    # curva que esté claramente más cerca del cursor.
+    BONO_HOVER_PICO = 4
+    # Histéresis: para quitarle la caja al registro ya mostrado, otro candidato
+    # debe superar su distancia por este margen. Evita alternar entre curvas
+    # superpuestas (Velocidad e Impulso son proporcionales y quedan pegadas).
+    MARGEN_HOVER_HISTERESIS = 3.0
 
     def _manejar_mouse_movido(self, posicion):
         self._actualizar_caja_valor(posicion)
 
-        if not self.modo_seleccion_rango or self.x_inicio is None:
+        if not self.modo_seleccion_intervalo or self.x_inicio is None:
             return
 
         view_box = self.plotItem.vb
@@ -591,14 +618,39 @@ class GraficaSenal(pg.PlotWidget):
                 )
 
         if not candidatos:
+            self._registro_caja_actual = None
             return
-        _, _, registro, x, y, pico, es_pico = min(
-            candidatos, key=lambda candidato: (candidato[0], candidato[1])
-        )
+
+        # Gana la menor distancia real en píxeles; el pico solo aporta su bono
+        # de desempate, así no le roba la caja a una curva tocada de lleno.
+        def distancia_efectiva(candidato):
+            return candidato[1] - (self.BONO_HOVER_PICO if candidato[6] else 0)
+
+        mejor = min(candidatos, key=distancia_efectiva)
+        elegido = mejor
+        anterior = self._registro_caja_actual
+        if anterior is not None and any(
+            candidato[2] is anterior for candidato in candidatos
+        ):
+            del_anterior = min(
+                (
+                    candidato
+                    for candidato in candidatos
+                    if candidato[2] is anterior
+                ),
+                key=distancia_efectiva,
+            )
+            if (
+                distancia_efectiva(del_anterior)
+                <= distancia_efectiva(mejor) + self.MARGEN_HOVER_HISTERESIS
+            ):
+                elegido = del_anterior
+        self._registro_caja_actual = elegido[2]
+        _, _, registro, x, y, pico, es_pico = elegido
         self._mostrar_caja_valor(registro, x, y, pico, es_pico)
 
     def _pico_que_contiene(self, x, picos=None):
-        """El rango al que pertenece ese punto, para mostrar sus valores."""
+        """El intervalo al que pertenece ese punto, para mostrar sus valores."""
         picos = self.picos_formula if picos is None else picos
         if not picos:
             return None
@@ -633,7 +685,7 @@ class GraficaSenal(pg.PlotWidget):
         return math.hypot(punto.x() - posicion.x(), punto.y() - posicion.y())
 
     def _mostrar_caja_valor(self, registro, x, y, pico, es_pico):
-        """Caja con el resumen del rango al que pertenece ese punto."""
+        """Caja con el resumen del intervalo al que pertenece ese punto."""
         info = registro["info"]
         caja = registro["caja"]
         unidad = (
@@ -733,16 +785,16 @@ class GraficaSenal(pg.PlotWidget):
 
         x_click = self._normalizar_x_click(float(view_box.mapSceneToView(event.scenePos()).x()))
 
-        # Doble click sobre un rango existente: abre la ventana de sub-rangos.
+        # Doble click sobre un intervalo existente: abre la ventana de sub-intervalos.
         if event.double():
-            numero = self._rango_en_x(x_click)
+            numero = self._intervalo_en_x(x_click)
             if numero is not None:
                 self._cancelar_propuesta()
-                self.rangoDobleClick.emit(self, numero)
+                self.intervaloDobleClick.emit(self, numero)
                 event.accept()
             return
 
-        if not self.modo_seleccion_rango:
+        if not self.modo_seleccion_intervalo:
             return
 
         if self.x_inicio is None:
@@ -760,7 +812,7 @@ class GraficaSenal(pg.PlotWidget):
         x_inicio, x_fin = self.x_inicio, x_click
         self._cancelar_propuesta()
         if x_inicio != x_fin:
-            self.rangoPropuesto.emit(self, x_inicio, x_fin)
+            self.intervaloPropuesto.emit(self, x_inicio, x_fin)
         event.accept()
 
     @staticmethod
@@ -816,53 +868,53 @@ class GraficaSenal(pg.PlotWidget):
             self.removeItem(self.region_preview)
             self.region_preview = None
 
-    def _rango_en_x(self, x_click):
-        """Devuelve el número del rango cuyo intervalo contiene x, o None."""
-        for rango in self.rangos_actuales:
-            if rango.desde <= x_click <= rango.hasta:
-                return rango.numero
+    def _intervalo_en_x(self, x_click):
+        """Devuelve el número del intervalo cuyo intervalo contiene x, o None."""
+        for intervalo in self.intervalos_actuales:
+            if intervalo.desde <= x_click <= intervalo.hasta:
+                return intervalo.numero
         return None
 
-    def mostrar_rangos(self, rangos):
-        for region in self.regiones_rangos.values():
+    def mostrar_intervalos(self, intervalos):
+        for region in self.regiones_intervalos.values():
             self.removeItem(region)
-        self.regiones_rangos = {}
-        self.rangos_actuales = list(rangos)
+        self.regiones_intervalos = {}
+        self.intervalos_actuales = list(intervalos)
 
-        # Nombre del color en el tooltip del rango: solo con el modo accesible
+        # Nombre del color en el tooltip del intervalo: solo con el modo accesible
         # activo y la opción «mostrar el nombre del color» marcada. Desactivado,
-        # los rangos no llevan tooltip (igual que hoy).
+        # los intervalos no llevan tooltip (igual que hoy).
         mostrar_nombre = (
             accesibilidad.activo() and accesibilidad.mostrar_nombre_color()
         )
 
-        for rango in rangos:
-            color = pg.mkColor(rango.color)
-            color_brush = pg.mkColor(rango.color)
+        for intervalo in intervalos:
+            color = pg.mkColor(intervalo.color)
+            color_brush = pg.mkColor(intervalo.color)
             color_brush.setAlpha(55)
             region = pg.LinearRegionItem(
-                values=[rango.desde, rango.hasta], movable=False, brush=color_brush
+                values=[intervalo.desde, intervalo.hasta], movable=False, brush=color_brush
             )
             region.setZValue(-10)
             for linea in region.lines:
                 linea.setPen(
                     pg.mkPen(
                         color,
-                        width=accesibilidad.grosor_rango(),
+                        width=accesibilidad.grosor_intervalo(),
                     )
                 )
             if mostrar_nombre:
                 region.setToolTip(
-                    f"{rango.nombre} · Color: {paleta.nombre_color(rango.color)}"
+                    f"{intervalo.nombre} · Color: {paleta.nombre_color(intervalo.color)}"
                 )
             self.addItem(region)
-            self.regiones_rangos[rango.numero] = region
+            self.regiones_intervalos[intervalo.numero] = region
 
 
 class AreaCentralGraficas(QFrame):
-    rangosCambiados = Signal(object)
-    rangoRechazado = Signal(str)
-    rangoAjustado = Signal(str)
+    intervalosCambiados = Signal(object)
+    intervaloRechazado = Signal(str)
+    intervaloAjustado = Signal(str)
     filtroEstadoCambiado = Signal(bool, str)
     senalesDisponiblesCambiaron = Signal(object)
     variablesFormulaCambiaron = Signal(object)
@@ -880,12 +932,12 @@ class AreaCentralGraficas(QFrame):
         self.df_grafica = None
         self.columna_x = None
         self.mapeo_actual = None
-        self.modo_seleccion_rango = False
+        self.modo_seleccion_intervalo = False
         self.graficas = []
         self.graficas_por_columna = {}
         self.unidades = {}
         self.frecuencia_grafica = None
-        self.gestores_rangos = {}
+        self.gestores_intervalos = {}
         self.subgestores = {}
         self.notas = {}
         self._ventanas_region = []
@@ -952,7 +1004,7 @@ class AreaCentralGraficas(QFrame):
         self.mapeo_actual = self._mapeo_desde_info(info)
         self.unidades = dict((info or {}).get("unidades", df.attrs.get("unidades", {})))
         self.frecuencia_grafica = (info or {}).get("frecuencia_grafica")
-        self.gestores_rangos = {}
+        self.gestores_intervalos = {}
         self.subgestores = {}
         self.notas = {}
         self.columnas_filtradas = set()
@@ -960,7 +1012,7 @@ class AreaCentralGraficas(QFrame):
         self.formulas_activas = {}
         self._calculos_formulas = {}
         self.formula_activa = None
-        self.rangosCambiados.emit([])
+        self.intervalosCambiados.emit([])
         self.resultadosFormulaCambiaron.emit(None)
         self.fuenteDatosCambiada.emit(False)
         self._crear_graficas()
@@ -991,10 +1043,10 @@ class AreaCentralGraficas(QFrame):
         if self.formulas_activas:
             self._recalcular_formulas_activas()
 
-    def set_modo_seleccion_rango(self, activo):
-        self.modo_seleccion_rango = activo
+    def set_modo_seleccion_intervalo(self, activo):
+        self.modo_seleccion_intervalo = activo
         for grafica in self.graficas:
-            grafica.set_modo_seleccion_rango(activo)
+            grafica.set_modo_seleccion_intervalo(activo)
 
     @staticmethod
     def _normalizar_identificador(valor):
@@ -1170,11 +1222,11 @@ class AreaCentralGraficas(QFrame):
                 y_original[mascara],
                 y_filtrada[mascara] if y_filtrada is not None else None,
             )
-            grafica.set_modo_seleccion_rango(self.modo_seleccion_rango)
-            grafica.rangoPropuesto.connect(self._registrar_rango)
-            grafica.rangoDobleClick.connect(self._abrir_ventana_subrango)
-            gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
-            grafica.mostrar_rangos(gestor.listar())
+            grafica.set_modo_seleccion_intervalo(self.modo_seleccion_intervalo)
+            grafica.intervaloPropuesto.connect(self._registrar_intervalo)
+            grafica.intervaloDobleClick.connect(self._abrir_ventana_subintervalo)
+            gestor = self.gestores_intervalos.setdefault(columna, GestorIntervalos())
+            grafica.mostrar_intervalos(gestor.listar())
 
             self.layout_graficas.addWidget(grafica)
             self.graficas.append(grafica)
@@ -1226,7 +1278,7 @@ class AreaCentralGraficas(QFrame):
                     "detalle": (
                         f"Usa la señal «{self.graficas_por_columna[columna].nombre_senal}» "
                         f"de la columna «{columna}». Al calcular toma sus valores "
-                        "en los frames de cada rango seleccionado."
+                        "en los frames de cada intervalo seleccionado."
                     ),
                 }
                 for rol in formulas.ROLES
@@ -1252,9 +1304,9 @@ class AreaCentralGraficas(QFrame):
                 y_original[mascara],
                 y_filtrada[mascara] if y_filtrada is not None else None,
             )
-            grafica.set_modo_seleccion_rango(self.modo_seleccion_rango)
-            gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
-            grafica.mostrar_rangos(gestor.listar())
+            grafica.set_modo_seleccion_intervalo(self.modo_seleccion_intervalo)
+            gestor = self.gestores_intervalos.setdefault(columna, GestorIntervalos())
+            grafica.mostrar_intervalos(gestor.listar())
 
         # set_datos() rehace las curvas, así que la fórmula se vuelve a poner
         # (y se recalcula sobre los datos filtrados, que es lo que se espera).
@@ -1290,42 +1342,42 @@ class AreaCentralGraficas(QFrame):
         self._repintar_accesibilidad()
 
     def actualizar_formulas_abiertas(self):
-        """Refresca los selectores de las ventanas de sub-rangos ya abiertas."""
+        """Refresca los selectores de las ventanas de sub-intervalos ya abiertas."""
         self._ventanas_region = [
             ventana for ventana in self._ventanas_region if ventana.isVisible()
         ]
         for ventana in self._ventanas_region:
             ventana.panel_calculo.recargar_formulas()
-            self._recalcular_formulas_subrangos(ventana)
+            self._recalcular_formulas_subintervalos(ventana)
         if self.formulas_activas:
             self._recalcular_formulas_activas()
 
     def _repintar_accesibilidad(self):
-        """Reasigna los colores y repinta gráficas y ventanas de sub-rangos.
+        """Reasigna los colores y repinta gráficas y ventanas de sub-intervalos.
 
-        Los colores dependen solo del número de rango, así que volver al modo
+        Los colores dependen solo del número de intervalo, así que volver al modo
         estándar devuelve exactamente los colores anteriores.
         """
-        for gestor in self.gestores_rangos.values():
+        for gestor in self.gestores_intervalos.values():
             gestor.recolorear()
         for subgestor in self.subgestores.values():
             subgestor.recolorear()
 
         for columna, grafica in self.graficas_por_columna.items():
-            gestor = self.gestores_rangos.get(columna)
+            gestor = self.gestores_intervalos.get(columna)
             if gestor is not None:
-                grafica.rangos_actuales = gestor.listar()
+                grafica.intervalos_actuales = gestor.listar()
             grafica.aplicar_paleta()
 
-        # Las ventanas de sub-rangos abiertas también se repintan.
+        # Las ventanas de sub-intervalos abiertas también se repintan.
         self._ventanas_region = [v for v in self._ventanas_region if v.isVisible()]
         for ventana in self._ventanas_region:
             subgestor = self.subgestores.get(getattr(ventana, "clave_subgestor", None))
             if subgestor is not None:
-                ventana.mostrar_subrangos(subgestor.listar())
+                ventana.mostrar_subintervalos(subgestor.listar())
             ventana.aplicar_paleta()
 
-        self._emitir_rangos()
+        self._emitir_intervalos()
 
     def set_no_preguntar_superposicion(self, activo):
         """Si está activo, no pide confirmación al crear un recorte superpuesto."""
@@ -1335,8 +1387,8 @@ class AreaCentralGraficas(QFrame):
         """Pregunta si se desea crear un recorte que se superpone a otro."""
         respuesta = QMessageBox.question(
             parent,
-            "Superposición de rangos",
-            f"El recorte {desde}–{hasta} se superpone con al menos un rango "
+            "Superposición de intervalos",
+            f"El recorte {desde}–{hasta} se superpone con al menos un intervalo "
             "existente.\n\n¿Deseás crearlo igualmente?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
@@ -1361,19 +1413,19 @@ class AreaCentralGraficas(QFrame):
             and not self.graficas_por_columna[columna].isHidden()
         ]
 
-    def _registrar_rango(self, grafica, desde, hasta):
+    def _registrar_intervalo(self, grafica, desde, hasta):
         if self.aplicar_corte_todas:
-            self._registrar_rango_en_todas(grafica, desde, hasta)
+            self._registrar_intervalo_en_todas(grafica, desde, hasta)
         else:
-            self._registrar_rango_individual(grafica, desde, hasta)
+            self._registrar_intervalo_individual(grafica, desde, hasta)
 
-    def _registrar_rango_individual(self, grafica, desde, hasta):
+    def _registrar_intervalo_individual(self, grafica, desde, hasta):
         columna = grafica.columna
-        gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+        gestor = self.gestores_intervalos.setdefault(columna, GestorIntervalos())
         nombre, ok = QInputDialog.getText(
             grafica,
-            "Nombre del rango",
-            f"Nombre para el rango {desde}–{hasta} (opcional):",
+            "Nombre del intervalo",
+            f"Nombre para el intervalo {desde}–{hasta} (opcional):",
         )
         if not ok:
             return
@@ -1384,7 +1436,7 @@ class AreaCentralGraficas(QFrame):
                 QMessageBox.warning(
                     grafica,
                     "Nombre repetido",
-                    f"Ya existe un rango con el nombre «{nombre}».",
+                    f"Ya existe un intervalo con el nombre «{nombre}».",
                 )
                 return
 
@@ -1400,33 +1452,33 @@ class AreaCentralGraficas(QFrame):
                 gestor.agregar(desde, hasta, nombre, permitir_superposicion=True)
             except ValueError as exc:
                 mensaje = f"{grafica.nombre_senal}: {exc}"
-                self.rangoRechazado.emit(mensaje)
+                self.intervaloRechazado.emit(mensaje)
                 QToolTip.showText(QCursor.pos(), mensaje, grafica)
                 return
-            grafica.mostrar_rangos(gestor.listar())
-            self._emitir_rangos()
+            grafica.mostrar_intervalos(gestor.listar())
+            self._emitir_intervalos()
             return
 
         # Modo por defecto: el recorte se corre automáticamente al tramo libre.
         try:
-            rango, fue_ajustado = gestor.agregar_ajustado(desde, hasta, nombre)
-        except (RangoSuperpuestoError, ValueError) as exc:
+            intervalo, fue_ajustado = gestor.agregar_ajustado(desde, hasta, nombre)
+        except (IntervaloSuperpuestoError, ValueError) as exc:
             mensaje = f"{grafica.nombre_senal}: {exc}"
-            self.rangoRechazado.emit(mensaje)
+            self.intervaloRechazado.emit(mensaje)
             QToolTip.showText(QCursor.pos(), mensaje, grafica)
             return
 
-        grafica.mostrar_rangos(gestor.listar())
-        self._emitir_rangos()
+        grafica.mostrar_intervalos(gestor.listar())
+        self._emitir_intervalos()
         if fue_ajustado:
             mensaje = (
-                f"El rango se ajustó automáticamente a "
-                f"{rango.desde}–{rango.hasta} para no superponerse."
+                f"El intervalo se ajustó automáticamente a "
+                f"{intervalo.desde}–{intervalo.hasta} para no superponerse."
             )
-            self.rangoAjustado.emit(mensaje)
+            self.intervaloAjustado.emit(mensaje)
             QToolTip.showText(QCursor.pos(), mensaje, grafica)
 
-    def _registrar_rango_en_todas(self, grafica_origen, desde, hasta):
+    def _registrar_intervalo_en_todas(self, grafica_origen, desde, hasta):
         """Aplica el mismo recorte a todas las señales visibles.
 
         Pide el nombre una sola vez y lo agrega al gestor de cada gráfica
@@ -1441,8 +1493,8 @@ class AreaCentralGraficas(QFrame):
 
         nombre, ok = QInputDialog.getText(
             grafica_origen,
-            "Nombre del rango",
-            f"Nombre para el rango {desde}–{hasta} en todas las señales "
+            "Nombre del intervalo",
+            f"Nombre para el intervalo {desde}–{hasta} en todas las señales "
             "visibles (opcional):",
         )
         if not ok:
@@ -1453,7 +1505,7 @@ class AreaCentralGraficas(QFrame):
         # señal visible se superpone, y luego se crea el recorte tal cual en todas.
         if self.superposicion_habilitada:
             alguna_solapa = any(
-                self.gestores_rangos.setdefault(columna, GestorRangos()).hay_superposicion(
+                self.gestores_intervalos.setdefault(columna, GestorIntervalos()).hay_superposicion(
                     desde, hasta
                 )
                 for columna, _ in objetivos
@@ -1465,7 +1517,7 @@ class AreaCentralGraficas(QFrame):
             agregados = 0
             omitidos = []
             for columna, grafica in objetivos:
-                gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+                gestor = self.gestores_intervalos.setdefault(columna, GestorIntervalos())
                 if nombre and nombre in [r.nombre for r in gestor.listar() if r.nombre]:
                     omitidos.append(grafica.nombre_senal)
                     continue
@@ -1474,11 +1526,11 @@ class AreaCentralGraficas(QFrame):
                 except ValueError:
                     omitidos.append(grafica.nombre_senal)
                     continue
-                grafica.mostrar_rangos(gestor.listar())
+                grafica.mostrar_intervalos(gestor.listar())
                 agregados += 1
 
             if agregados:
-                self._emitir_rangos()
+                self._emitir_intervalos()
 
             partes = []
             if agregados:
@@ -1487,7 +1539,7 @@ class AreaCentralGraficas(QFrame):
                 partes.append(f"No se pudo agregar en: {', '.join(omitidos)}.")
             if partes:
                 mensaje = " ".join(partes)
-                (self.rangoAjustado if agregados else self.rangoRechazado).emit(mensaje)
+                (self.intervaloAjustado if agregados else self.intervaloRechazado).emit(mensaje)
                 QToolTip.showText(QCursor.pos(), mensaje, grafica_origen)
             return
 
@@ -1496,24 +1548,24 @@ class AreaCentralGraficas(QFrame):
         ajustados = 0
         omitidos = []
         for columna, grafica in objetivos:
-            gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+            gestor = self.gestores_intervalos.setdefault(columna, GestorIntervalos())
             if nombre:
                 existentes = [r.nombre for r in gestor.listar() if r.nombre]
                 if nombre in existentes:
                     omitidos.append(grafica.nombre_senal)
                     continue
             try:
-                _rango, fue_ajustado = gestor.agregar_ajustado(desde, hasta, nombre)
-            except (RangoSuperpuestoError, ValueError):
+                _intervalo, fue_ajustado = gestor.agregar_ajustado(desde, hasta, nombre)
+            except (IntervaloSuperpuestoError, ValueError):
                 omitidos.append(grafica.nombre_senal)
                 continue
-            grafica.mostrar_rangos(gestor.listar())
+            grafica.mostrar_intervalos(gestor.listar())
             agregados += 1
             if fue_ajustado:
                 ajustados += 1
 
         if agregados:
-            self._emitir_rangos()
+            self._emitir_intervalos()
 
         partes = []
         if agregados:
@@ -1526,34 +1578,34 @@ class AreaCentralGraficas(QFrame):
         if partes:
             mensaje = " ".join(partes)
             if agregados:
-                self.rangoAjustado.emit(mensaje)
+                self.intervaloAjustado.emit(mensaje)
             else:
-                self.rangoRechazado.emit(mensaje)
+                self.intervaloRechazado.emit(mensaje)
             QToolTip.showText(QCursor.pos(), mensaje, grafica_origen)
 
     @staticmethod
-    def _id_rango(columna, numero):
+    def _id_intervalo(columna, numero):
         return f"{columna}::{int(numero)}"
 
     @staticmethod
-    def _id_subrango(columna, numero_padre, numero_sub):
+    def _id_subintervalo(columna, numero_padre, numero_sub):
         return f"{columna}::{int(numero_padre)}::sub::{int(numero_sub)}"
 
-    def _abrir_ventana_subrango(self, grafica, numero):
-        """Abre una ventana con el recorte del rango para crear sub-rangos."""
+    def _abrir_ventana_subintervalo(self, grafica, numero):
+        """Abre una ventana con el recorte del intervalo para crear sub-intervalos."""
         columna = grafica.columna
-        gestor = self.gestores_rangos.get(columna)
+        gestor = self.gestores_intervalos.get(columna)
         if gestor is None or self.df_grafica_original is None:
             return
-        rango = next((r for r in gestor.listar() if r.numero == numero), None)
-        if rango is None:
+        intervalo = next((r for r in gestor.listar() if r.numero == numero), None)
+        if intervalo is None:
             return
 
         x = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
         y_original = self.df_grafica_original[columna].to_numpy(dtype=float)
         mascara = (
-            (x >= rango.desde)
-            & (x <= rango.hasta)
+            (x >= intervalo.desde)
+            & (x <= intervalo.hasta)
             & np.isfinite(x)
             & np.isfinite(y_original)
         )
@@ -1566,7 +1618,7 @@ class AreaCentralGraficas(QFrame):
 
         from ui.ventanaRegion.ventanaRegion import VentanaRegion
 
-        titulo = f"{grafica.nombre_senal} · {rango.nombre} ({rango.desde}–{rango.hasta})"
+        titulo = f"{grafica.nombre_senal} · {intervalo.nombre} ({intervalo.desde}–{intervalo.hasta})"
         panel_derecho = getattr(self.window(), "panel_derecho", None)
         gestor_formulas = getattr(panel_derecho, "formulas", None)
         permitir_gestion = bool(
@@ -1584,23 +1636,23 @@ class AreaCentralGraficas(QFrame):
             columna=columna,
             permitir_gestion_formulas=permitir_gestion,
         )
-        subgestor = self.subgestores.setdefault((columna, numero), GestorRangos("Sub-rango"))
+        subgestor = self.subgestores.setdefault((columna, numero), GestorIntervalos("Sub-intervalo"))
         # Deja rastro del subgestor para poder repintarla si cambia la paleta.
         ventana.clave_subgestor = (columna, numero)
-        ventana.mostrar_subrangos(subgestor.listar())
-        ventana.subRangoPropuesto.connect(
-            lambda desde, hasta, c=columna, n=numero, v=ventana: self._registrar_subrango(
+        ventana.mostrar_subintervalos(subgestor.listar())
+        ventana.subIntervaloPropuesto.connect(
+            lambda desde, hasta, c=columna, n=numero, v=ventana: self._registrar_subintervalo(
                 c, n, desde, hasta, v
             )
         )
         # La sección de fórmulas de la ventana comparte el mismo panel que el
-        # principal: el cálculo de sub-rangos corre con el mismo motor
+        # principal: el cálculo de sub-intervalos corre con el mismo motor
         # ``_calcular_por_intervalos`` y los resultados vuelven a esa ventana.
         ventana.panel_calculo.calcularSolicitado.connect(
-            lambda v=ventana: self._calcular_subrangos(v)
+            lambda v=ventana: self._calcular_subintervalos(v)
         )
         ventana.panel_calculo.quitarFormulaSolicitado.connect(
-            lambda v=ventana: self._quitar_formula_subrangos(v)
+            lambda v=ventana: self._quitar_formula_subintervalos(v)
         )
         ventana.panel_calculo.fuenteCalculoCambiada.connect(self.set_fuente_calculo)
         ventana.panel_calculo.set_fuente(self.fuente_calculo)
@@ -1619,10 +1671,10 @@ class AreaCentralGraficas(QFrame):
         self._ventanas_region.append(ventana)
         ventana.show()
 
-    def _calcular_subrangos(self, ventana):
-        """Calcula la fórmula elegida sobre los sub-rangos del rango abierto.
+    def _calcular_subintervalos(self, ventana):
+        """Calcula la fórmula elegida sobre los sub-intervalos del intervalo abierto.
 
-        Usa el mismo ``_calcular_por_intervalos`` que los rangos del panel
+        Usa el mismo ``_calcular_por_intervalos`` que los intervalos del panel
         principal; la única diferencia es el destino: la curva va en la gráfica
         de esta ventana y los resultados en su panel de fórmulas.
         """
@@ -1641,24 +1693,24 @@ class AreaCentralGraficas(QFrame):
         desc = formulas.descripcion_formula(clave)
 
         columna, numero_padre = ventana.clave_subgestor
-        padre_id = self._id_rango(columna, numero_padre)
+        padre_id = self._id_intervalo(columna, numero_padre)
         disponibles = [
-            rango
-            for rango in self._rangos_para_panel()
-            if rango.get("padre") == padre_id
+            intervalo
+            for intervalo in self._intervalos_para_panel()
+            if intervalo.get("padre") == padre_id
         ]
         if not disponibles:
             ventana.panel_calculo.actualizar_estado(
                 False,
-                "Creá al menos un sub-rango para poder calcular "
+                "Creá al menos un sub-intervalo para poder calcular "
                 f"{formulas.nombre_con_articulo(desc)}.",
             )
             return
 
-        seleccionados = ventana.subrangos_seleccionados()
+        seleccionados = ventana.subintervalos_seleccionados()
         if not seleccionados:
             ventana.panel_calculo.actualizar_estado(
-                False, "Marcá al menos un sub-rango para poder calcular."
+                False, "Marcá al menos un sub-intervalo para poder calcular."
             )
             return
 
@@ -1666,19 +1718,19 @@ class AreaCentralGraficas(QFrame):
             ventana.formulas_activas,
             {
                 "clave": clave,
-                "rangos": seleccionados,
+                "intervalos": seleccionados,
             },
         )
         configuracion = aplicaciones_propuestas[clave]
-        por_id = {rango["id"]: rango for rango in disponibles}
+        por_id = {intervalo["id"]: intervalo for intervalo in disponibles}
         intervalos = [
             por_id[identificador]
-            for identificador in configuracion["rangos"]
+            for identificador in configuracion["intervalos"]
             if identificador in por_id
         ]
 
         try:
-            calculo = self._preparar_calculo_subrangos(
+            calculo = self._preparar_calculo_subintervalos(
                 ventana,
                 clave,
                 configuracion,
@@ -1690,7 +1742,7 @@ class AreaCentralGraficas(QFrame):
 
         if calculo is None:
             ventana.panel_calculo.actualizar_estado(
-                False, "Los sub-rangos no tienen datos válidos para calcular "
+                False, "Los sub-intervalos no tienen datos válidos para calcular "
                 f"{formulas.nombre_con_articulo(desc)}."
             )
             return
@@ -1702,7 +1754,7 @@ class AreaCentralGraficas(QFrame):
         )
         resultados = calculo["datos_panel"]["resultados"]
         cantidad = len(resultados)
-        destino = "un sub-rango" if cantidad == 1 else f"{cantidad} sub-rangos"
+        destino = "un sub-intervalo" if cantidad == 1 else f"{cantidad} sub-intervalos"
         conservadas = (
             " Las demás fórmulas aplicadas se conservaron."
             if len(ventana.formulas_activas) > 1
@@ -1714,7 +1766,7 @@ class AreaCentralGraficas(QFrame):
             f"{conservadas}",
         )
 
-    def _preparar_calculo_subrangos(
+    def _preparar_calculo_subintervalos(
         self,
         ventana,
         clave,
@@ -1754,16 +1806,16 @@ class AreaCentralGraficas(QFrame):
             },
         }
 
-    def _recalcular_formulas_subrangos(self, ventana):
-        """Actualiza las fórmulas de una ventana sin sumar sub-rangos nuevos."""
+    def _recalcular_formulas_subintervalos(self, ventana):
+        """Actualiza las fórmulas de una ventana sin sumar sub-intervalos nuevos."""
         if not ventana.formulas_activas:
             return
         columna, numero_padre = ventana.clave_subgestor
-        padre_id = self._id_rango(columna, numero_padre)
+        padre_id = self._id_intervalo(columna, numero_padre)
         disponibles = {
-            rango["id"]: rango
-            for rango in self._rangos_para_panel()
-            if rango.get("padre") == padre_id
+            intervalo["id"]: intervalo
+            for intervalo in self._intervalos_para_panel()
+            if intervalo.get("padre") == padre_id
         }
         aplicaciones = {}
         calculos = {}
@@ -1772,16 +1824,16 @@ class AreaCentralGraficas(QFrame):
                 continue
             seleccion = [
                 identificador
-                for identificador in configuracion.get("rangos") or ()
+                for identificador in configuracion.get("intervalos") or ()
                 if identificador in disponibles
             ]
             if not seleccion:
                 continue
             vigente = dict(configuracion)
-            vigente["rangos"] = seleccion
+            vigente["intervalos"] = seleccion
             intervalos = [disponibles[identificador] for identificador in seleccion]
             try:
-                calculo = self._preparar_calculo_subrangos(
+                calculo = self._preparar_calculo_subintervalos(
                     ventana,
                     clave,
                     vigente,
@@ -1795,13 +1847,13 @@ class AreaCentralGraficas(QFrame):
             calculos[clave] = calculo
         ventana.establecer_calculos_formulas(aplicaciones, calculos)
 
-    def _quitar_formula_subrangos(self, ventana):
-        """Saca todas las fórmulas aplicadas en la ventana de sub-rangos."""
+    def _quitar_formula_subintervalos(self, ventana):
+        """Saca todas las fórmulas aplicadas en la ventana de sub-intervalos."""
         ventana.quitar_formulas_aplicadas()
 
-    def _registrar_subrango(self, columna, numero_padre, desde, hasta, ventana):
-        """Agrega un sub-rango respetando la configuración de superposición."""
-        subgestor = self.subgestores.setdefault((columna, numero_padre), GestorRangos("Sub-rango"))
+    def _registrar_subintervalo(self, columna, numero_padre, desde, hasta, ventana):
+        """Agrega un sub-intervalo respetando la configuración de superposición."""
+        subgestor = self.subgestores.setdefault((columna, numero_padre), GestorIntervalos("Sub-intervalo"))
 
         if self.superposicion_habilitada:
             if subgestor.hay_superposicion(desde, hasta):
@@ -1812,61 +1864,61 @@ class AreaCentralGraficas(QFrame):
             try:
                 subgestor.agregar(desde, hasta, "", permitir_superposicion=True)
             except ValueError as exc:
-                self.rangoRechazado.emit(str(exc))
+                self.intervaloRechazado.emit(str(exc))
                 QToolTip.showText(QCursor.pos(), str(exc), ventana)
                 return
         else:
             try:
                 _sub, fue_ajustado = subgestor.agregar_ajustado(desde, hasta, "")
-            except (RangoSuperpuestoError, ValueError) as exc:
-                self.rangoRechazado.emit(str(exc))
+            except (IntervaloSuperpuestoError, ValueError) as exc:
+                self.intervaloRechazado.emit(str(exc))
                 QToolTip.showText(QCursor.pos(), str(exc), ventana)
                 return
             if fue_ajustado:
-                mensaje = "El sub-rango se ajustó automáticamente a un tramo libre."
-                self.rangoAjustado.emit(mensaje)
+                mensaje = "El sub-intervalo se ajustó automáticamente a un tramo libre."
+                self.intervaloAjustado.emit(mensaje)
                 QToolTip.showText(QCursor.pos(), mensaje, ventana)
 
-        ventana.mostrar_subrangos(subgestor.listar())
-        self._emitir_rangos()
+        ventana.mostrar_subintervalos(subgestor.listar())
+        self._emitir_intervalos()
 
-    def _rangos_para_panel(self):
+    def _intervalos_para_panel(self):
         resultado = []
         for columna, grafica in self.graficas_por_columna.items():
-            gestor = self.gestores_rangos.get(columna)
+            gestor = self.gestores_intervalos.get(columna)
             if gestor is None:
                 continue
             fuente = "filtrada" if columna in self.columnas_filtradas else "original"
-            for rango in gestor.listar():
-                padre_id = self._id_rango(columna, rango.numero)
-                datos = rango.como_dict()
+            for intervalo in gestor.listar():
+                padre_id = self._id_intervalo(columna, intervalo.numero)
+                datos = intervalo.como_dict()
                 datos.update(
                     {
                         "id": padre_id,
                         "columna": columna,
                         "senal": grafica.nombre_senal,
                         "fuente": fuente,
-                        "es_subrango": False,
+                        "es_subintervalo": False,
                         "padre": None,
                         "nota": self.notas.get(padre_id, ""),
                     }
                 )
                 resultado.append(datos)
 
-                # Sub-rangos de este rango, inmediatamente debajo.
-                subgestor = self.subgestores.get((columna, rango.numero))
+                # Sub-intervalos de este intervalo, inmediatamente debajo.
+                subgestor = self.subgestores.get((columna, intervalo.numero))
                 if subgestor is None:
                     continue
                 for sub in subgestor.listar():
                     sub_datos = sub.como_dict()
-                    sub_id = self._id_subrango(columna, rango.numero, sub.numero)
+                    sub_id = self._id_subintervalo(columna, intervalo.numero, sub.numero)
                     sub_datos.update(
                         {
                             "id": sub_id,
                             "columna": columna,
                             "senal": grafica.nombre_senal,
                             "fuente": fuente,
-                            "es_subrango": True,
+                            "es_subintervalo": True,
                             "padre": padre_id,
                             "nota": self.notas.get(sub_id, ""),
                         }
@@ -1875,58 +1927,61 @@ class AreaCentralGraficas(QFrame):
         return resultado
 
     def set_nota(self, identificador, texto):
-        """Guarda (o borra) la nota asociada a un rango o sub-rango."""
+        """Guarda (o borra) la nota asociada a un intervalo o sub-intervalo."""
         texto = (texto or "").strip()
         if texto:
             self.notas[identificador] = texto
         else:
             self.notas.pop(identificador, None)
-        self._emitir_rangos()
+        self._emitir_intervalos()
 
     def exportar_anotaciones(self):
-        """Devuelve las filas de rangos, sub-rangos y notas para guardar."""
+        """Devuelve las filas de intervalos, sub-intervalos y notas para guardar."""
         filas = []
-        for rango in self._rangos_para_panel():
+        for intervalo in self._intervalos_para_panel():
             filas.append(
                 {
-                    "tipo": "subrango" if rango["es_subrango"] else "rango",
-                    "senal": rango["senal"],
-                    "columna": rango["columna"],
-                    "numero": rango["numero"],
-                    "padre": rango["padre"] or "",
-                    "desde": rango["desde"],
-                    "hasta": rango["hasta"],
+                    # El vocabulario del CSV de anotaciones no cambia con el
+                    # renombre de interfaz: se siguen escribiendo los valores
+                    # históricos para que los proyectos viejos sigan leyéndose.
+                    "tipo": "subrango" if intervalo["es_subintervalo"] else "rango",
+                    "senal": intervalo["senal"],
+                    "columna": intervalo["columna"],
+                    "numero": intervalo["numero"],
+                    "padre": intervalo["padre"] or "",
+                    "desde": intervalo["desde"],
+                    "hasta": intervalo["hasta"],
                     # Los nombres automáticos se recalculan según la posición
                     # horizontal. Se guarda vacío para no convertirlos en un
                     # nombre personalizado al volver a abrir el proyecto.
                     "nombre": (
-                        rango["nombre"] if rango.get("nombre_personalizado") else ""
+                        intervalo["nombre"] if intervalo.get("nombre_personalizado") else ""
                     ),
-                    "nota": rango.get("nota", ""),
-                    "fuente": rango.get("fuente", ""),
+                    "nota": intervalo.get("nota", ""),
+                    "fuente": intervalo.get("fuente", ""),
                 }
             )
         return filas
 
-    def rangos_para_exportar(self):
-        """Devuelve una copia de los rangos con sus nombres visibles actuales."""
-        return [dict(rango) for rango in self._rangos_para_panel()]
+    def intervalos_para_exportar(self):
+        """Devuelve una copia de los intervalos con sus nombres visibles actuales."""
+        return [dict(intervalo) for intervalo in self._intervalos_para_panel()]
 
     def importar_anotaciones(self, filas):
-        """Restaura rangos, sub-rangos y notas de un proyecto guardado.
+        """Restaura intervalos, sub-intervalos y notas de un proyecto guardado.
 
         Reemplaza lo que hubiera cargado. Las filas cuya columna no está
         graficada en el archivo actual se descartan; devuelve
         ``(restaurados, descartados)`` para poder avisarle al usuario.
         """
-        self.gestores_rangos = {}
+        self.gestores_intervalos = {}
         self.subgestores = {}
         self.notas = {}
 
         restaurados = 0
         descartados = 0
 
-        # Primero los rangos padre: un sub-rango sin su padre no tiene sentido.
+        # Primero los intervalos padre: un sub-intervalo sin su padre no tiene sentido.
         for fila in sorted(filas or [], key=lambda f: f["tipo"] != "rango"):
             columna = fila["columna"]
             if columna not in self.graficas_por_columna:
@@ -1935,29 +1990,29 @@ class AreaCentralGraficas(QFrame):
 
             try:
                 if fila["tipo"] == "rango":
-                    gestor = self.gestores_rangos.setdefault(columna, GestorRangos())
+                    gestor = self.gestores_intervalos.setdefault(columna, GestorIntervalos())
                     gestor.restaurar(
                         fila["numero"], fila["desde"], fila["hasta"], fila["nombre"]
                     )
-                    identificador = self._id_rango(columna, fila["numero"])
+                    identificador = self._id_intervalo(columna, fila["numero"])
                 else:
                     numero_padre = self._numero_padre(fila["padre"])
                     if numero_padre is None:
                         descartados += 1
                         continue
-                    gestor_padre = self.gestores_rangos.get(columna)
+                    gestor_padre = self.gestores_intervalos.get(columna)
                     if gestor_padre is None or not any(
-                        rango.numero == numero_padre for rango in gestor_padre.listar()
+                        intervalo.numero == numero_padre for intervalo in gestor_padre.listar()
                     ):
                         descartados += 1
                         continue
                     subgestor = self.subgestores.setdefault(
-                        (columna, numero_padre), GestorRangos("Sub-rango")
+                        (columna, numero_padre), GestorIntervalos("Sub-intervalo")
                     )
                     subgestor.restaurar(
                         fila["numero"], fila["desde"], fila["hasta"], fila["nombre"]
                     )
-                    identificador = self._id_subrango(
+                    identificador = self._id_subintervalo(
                         columna, numero_padre, fila["numero"]
                     )
             except ValueError:
@@ -1968,17 +2023,17 @@ class AreaCentralGraficas(QFrame):
                 self.notas[identificador] = fila["nota"]
             restaurados += 1
 
-        for columna, gestor in self.gestores_rangos.items():
+        for columna, gestor in self.gestores_intervalos.items():
             grafica = self.graficas_por_columna.get(columna)
             if grafica is not None:
-                grafica.mostrar_rangos(gestor.listar())
+                grafica.mostrar_intervalos(gestor.listar())
 
-        self._emitir_rangos()
+        self._emitir_intervalos()
         return restaurados, descartados
 
     @staticmethod
     def _numero_padre(padre):
-        """Extrae el número de rango padre del identificador ``columna::numero``."""
+        """Extrae el número de intervalo padre del identificador ``columna::numero``."""
         if not padre or "::" not in str(padre):
             return None
         try:
@@ -1986,8 +2041,8 @@ class AreaCentralGraficas(QFrame):
         except ValueError:
             return None
 
-    def _emitir_rangos(self):
-        self.rangosCambiados.emit(self._rangos_para_panel())
+    def _emitir_intervalos(self):
+        self.intervalosCambiados.emit(self._intervalos_para_panel())
         if self.formulas_activas:
             self._recalcular_formulas_activas()
         self._ventanas_region = [
@@ -1995,10 +2050,10 @@ class AreaCentralGraficas(QFrame):
         ]
         for ventana in self._ventanas_region:
             subgestor = self.subgestores.get(ventana.clave_subgestor)
-            ventana.mostrar_subrangos(subgestor.listar() if subgestor else [])
-            self._recalcular_formulas_subrangos(ventana)
+            ventana.mostrar_subintervalos(subgestor.listar() if subgestor else [])
+            self._recalcular_formulas_subintervalos(ventana)
 
-    def eliminar_rangos(self, identificadores):
+    def eliminar_intervalos(self, identificadores):
         por_columna = {}
         subs_por_clave = {}
         for identificador in identificadores or []:
@@ -2009,21 +2064,21 @@ class AreaCentralGraficas(QFrame):
             elif isinstance(identificador, str) and "::" in identificador:
                 columna, numero = identificador.rsplit("::", 1)
                 por_columna.setdefault(columna, []).append(int(numero))
-            elif len(self.gestores_rangos) == 1:
-                columna = next(iter(self.gestores_rangos))
+            elif len(self.gestores_intervalos) == 1:
+                columna = next(iter(self.gestores_intervalos))
                 por_columna.setdefault(columna, []).append(int(identificador))
 
-        # Eliminar sub-rangos indicados.
+        # Eliminar sub-intervalos indicados.
         for (columna, num_padre), numeros in subs_por_clave.items():
             subgestor = self.subgestores.get((columna, num_padre))
             if subgestor is not None:
                 subgestor.eliminar(numeros)
             for num_sub in numeros:
-                self.notas.pop(self._id_subrango(columna, num_padre, num_sub), None)
+                self.notas.pop(self._id_subintervalo(columna, num_padre, num_sub), None)
 
-        # Eliminar rangos (y arrastrar sus sub-rangos y notas).
+        # Eliminar intervalos (y arrastrar sus sub-intervalos y notas).
         for columna, numeros in por_columna.items():
-            gestor = self.gestores_rangos.get(columna)
+            gestor = self.gestores_intervalos.get(columna)
             if gestor is None:
                 continue
             gestor.eliminar(numeros)
@@ -2031,24 +2086,24 @@ class AreaCentralGraficas(QFrame):
                 subgestor = self.subgestores.pop((columna, numero), None)
                 if subgestor is not None:
                     for sub in subgestor.listar():
-                        self.notas.pop(self._id_subrango(columna, numero, sub.numero), None)
-                self.notas.pop(self._id_rango(columna, numero), None)
+                        self.notas.pop(self._id_subintervalo(columna, numero, sub.numero), None)
+                self.notas.pop(self._id_intervalo(columna, numero), None)
             grafica = self.graficas_por_columna.get(columna)
             if grafica is not None:
-                grafica.mostrar_rangos(gestor.listar())
-        self._emitir_rangos()
+                grafica.mostrar_intervalos(gestor.listar())
+        self._emitir_intervalos()
 
-    def limpiar_rangos(self):
-        for columna, gestor in self.gestores_rangos.items():
+    def limpiar_intervalos(self):
+        for columna, gestor in self.gestores_intervalos.items():
             gestor.limpiar()
             grafica = self.graficas_por_columna.get(columna)
             if grafica is not None:
-                grafica.mostrar_rangos([])
+                grafica.mostrar_intervalos([])
         self.subgestores = {}
         self.notas = {}
-        self._emitir_rangos()
+        self._emitir_intervalos()
 
-    def obtener_datos_rango(self, columna, desde, hasta):
+    def obtener_datos_intervalo(self, columna, desde, hasta):
         """Devuelve los datos activos para cálculos (filtrados si están visibles)."""
         if self.df_grafica is None or columna not in self.df_grafica.columns:
             return pd.DataFrame()
@@ -2106,18 +2161,18 @@ class AreaCentralGraficas(QFrame):
         if self.formulas_activas:
             self._recalcular_formulas_activas()
 
-    def _rangos_seleccionados(self, identificadores, preservar_por_senal=False):
+    def _intervalos_seleccionados(self, identificadores, preservar_por_senal=False):
         """Convierte los IDs marcados en el panel en intervalos de frames.
 
-        Se aceptan rangos de cualquier señal visible: todos comparten el eje de
+        Se aceptan intervalos de cualquier señal visible: todos comparten el eje de
         frames, que es lo único que hace falta para recortar la fórmula. Los
-        sub-rangos quedan fuera: se calculan en la ventana que se abre con doble
-        clic sobre su rango.
+        sub-intervalos quedan fuera: se calculan en la ventana que se abre con doble
+        clic sobre su intervalo.
         """
         intervalos = []
         for identificador in identificadores or []:
-            datos = self._buscar_rango(identificador)
-            if datos is None or datos.get("es_subrango"):
+            datos = self._buscar_intervalo(identificador)
+            if datos is None or datos.get("es_subintervalo"):
                 continue
             grafica = self.graficas_por_columna.get(datos["columna"])
             if grafica is None or grafica.isHidden():
@@ -2125,7 +2180,7 @@ class AreaCentralGraficas(QFrame):
             intervalos.append(datos)
 
         # Las fórmulas generales no repiten un mismo intervalo. Las que usan
-        # «Señal del rango» sí lo conservan por columna porque los datos cambian.
+        # «Señal del intervalo» sí lo conservan por columna porque los datos cambian.
         vistos = set()
         unicos = []
         for datos in sorted(intervalos, key=lambda d: (d["desde"], d["hasta"])):
@@ -2137,11 +2192,11 @@ class AreaCentralGraficas(QFrame):
                 unicos.append(datos)
         return unicos
 
-    def _buscar_rango(self, identificador):
-        """Datos de un rango o sub-rango a partir de su identificador."""
-        for rango in self._rangos_para_panel():
-            if rango["id"] == identificador:
-                return rango
+    def _buscar_intervalo(self, identificador):
+        """Datos de un intervalo o sub-intervalo a partir de su identificador."""
+        for intervalo in self._intervalos_para_panel():
+            if intervalo["id"] == identificador:
+                return intervalo
         return None
 
     def _columna_vertical(self):
@@ -2183,7 +2238,7 @@ class AreaCentralGraficas(QFrame):
     def aplicar_formula(self, configuracion=None, avisar=True, actualizar_vista=True):
         """Calcula una fórmula sin borrar las demás fórmulas aplicadas.
 
-        Cada fórmula acumula sus rangos. Volver a aplicarla sobre rangos nuevos
+        Cada fórmula acumula sus intervalos. Volver a aplicarla sobre intervalos nuevos
         amplía la curva existente; aplicar otra conserva las anteriores.
         """
         if self.df_grafica_original is None:
@@ -2207,24 +2262,24 @@ class AreaCentralGraficas(QFrame):
             self.formulas_activas, configuracion
         )
         configuracion = aplicaciones_propuestas[clave]
-        seleccionados = configuracion.get("rangos") or []
+        seleccionados = configuracion.get("intervalos") or []
 
-        rangos = self._rangos_seleccionados(
+        intervalos = self._intervalos_seleccionados(
             seleccionados,
-            preservar_por_senal=desc.get("usa_senal_rango", False),
+            preservar_por_senal=desc.get("usa_senal_intervalo", False),
         )
-        if not rangos:
+        if not intervalos:
             if avisar:
                 self.formulaEstadoCambiado.emit(
                     False,
-                    "Marcá al menos un rango en una gráfica visible para calcular "
+                    "Marcá al menos un intervalo en una gráfica visible para calcular "
                     f"{formulas.nombre_con_articulo(desc)}.",
                 )
             return False
 
         try:
             _columna, resultados, _tramos, advertencias, segmentos = (
-                self._calcular_por_intervalos(clave, rangos)
+                self._calcular_por_intervalos(clave, intervalos)
             )
         except ErrorFormula as exc:
             if avisar:
@@ -2235,13 +2290,13 @@ class AreaCentralGraficas(QFrame):
             if avisar:
                 self.formulaEstadoCambiado.emit(
                     False,
-                    "Los rangos marcados no tienen datos válidos para calcular "
+                    "Los intervalos marcados no tienen datos válidos para calcular "
                     f"{formulas.nombre_con_articulo(desc)}.",
                 )
             return False
 
         columna_por_id = {
-            rango.get("id"): rango.get("columna") for rango in rangos
+            intervalo.get("id"): intervalo.get("columna") for intervalo in intervalos
         }
         por_grafica = {}
         for resultado, segmento in zip(resultados, segmentos):
@@ -2252,7 +2307,7 @@ class AreaCentralGraficas(QFrame):
             grupo["resultados"].append(resultado)
             grupo["segmentos"].append(segmento)
 
-        fuentes = [rango["columna"] for rango in rangos]
+        fuentes = [intervalo["columna"] for intervalo in intervalos]
         fuente, detalle = self._procedencia(fuentes)
         datos_panel = {
             "clave": clave,
@@ -2286,7 +2341,7 @@ class AreaCentralGraficas(QFrame):
 
         if avisar:
             cantidad = len(resultados)
-            destino = "un rango" if cantidad == 1 else f"{cantidad} rangos"
+            destino = "un intervalo" if cantidad == 1 else f"{cantidad} intervalos"
             conservadas = (
                 " Las demás fórmulas aplicadas se conservaron."
                 if len(self.formulas_activas) > 1
@@ -2315,11 +2370,11 @@ class AreaCentralGraficas(QFrame):
             grafica.set_curvas_formulas(curvas)
 
     def _recalcular_formulas_activas(self):
-        """Recalcula todas las aplicaciones tras cambiar datos o rangos."""
+        """Recalcula todas las aplicaciones tras cambiar datos o intervalos."""
         ids_validos = {
-            rango["id"]
-            for rango in self._rangos_para_panel()
-            if not rango.get("es_subrango")
+            intervalo["id"]
+            for intervalo in self._intervalos_para_panel()
+            if not intervalo.get("es_subintervalo")
         }
         depuradas = {}
         for clave, configuracion in self.formulas_activas.items():
@@ -2327,13 +2382,13 @@ class AreaCentralGraficas(QFrame):
                 continue
             seleccion = [
                 identificador
-                for identificador in configuracion.get("rangos") or ()
+                for identificador in configuracion.get("intervalos") or ()
                 if identificador in ids_validos
             ]
             if not seleccion:
                 continue
             vigente = dict(configuracion)
-            vigente["rangos"] = seleccion
+            vigente["intervalos"] = seleccion
             depuradas[clave] = vigente
 
         self.formulas_activas = depuradas
@@ -2403,7 +2458,7 @@ class AreaCentralGraficas(QFrame):
     def _calcular_por_intervalos(self, clave, intervalos):
         """Motor compartido: resuelve roles, valida y aplica la fórmula.
 
-        Lo usan tanto los rangos (ventana principal) como los sub-rangos
+        Lo usan tanto los intervalos (ventana principal) como los sub-intervalos
         (ventana de detalle). Dentro de ``logica.formulas`` viven:
         - ``resolver_roles``: elige los roles (obligatorios + opcionales) y
           produce las advertencias no bloqueantes.
@@ -2412,15 +2467,15 @@ class AreaCentralGraficas(QFrame):
 
         Devuelve ``(columna_salida, resultados, curva, advertencias,
         segmentos)``. ``segmentos`` son los ``(x, y)`` reales de cada intervalo
-        (alineados con ``resultados``), para que el panel de rangos dibuje cada
+        (alineados con ``resultados``), para que el panel de intervalos dibuje cada
         gráfica solo con sus propios tramos.
         """
         desc = formulas.descripcion_formula(clave)
 
-        # Restricción declarada por la propia fórmula (``rangos_en_rol``): los
-        # rangos deben pertenecer a una señal concreta (p. ej. Potencia -> Fz).
+        # Restricción declarada por la propia fórmula (``intervalos_en_rol``): los
+        # intervalos deben pertenecer a una señal concreta (p. ej. Potencia -> Fz).
         # No es una regla general: solo aplica a la fórmula que la declara.
-        restriccion = desc.get("rangos_en_rol")
+        restriccion = desc.get("intervalos_en_rol")
         if restriccion:
             columna_permitida = self._columna_de_rol(restriccion.get("rol"))
             mensaje = restriccion.get("mensaje")
@@ -2435,8 +2490,8 @@ class AreaCentralGraficas(QFrame):
         roles_a_usar, eleccion, advertencias = formulas.resolver_roles(
             clave, disponibles
         )
-        usa_senal_rango = bool(desc.get("usa_senal_rango"))
-        if not roles_a_usar and not usa_senal_rango:
+        usa_senal_intervalo = bool(desc.get("usa_senal_intervalo"))
+        if not roles_a_usar and not usa_senal_intervalo:
             raise ErrorFormula(
                 f"No hay señales disponibles para calcular "
                 f"{formulas.nombre_con_articulo(desc)}."
@@ -2462,7 +2517,7 @@ class AreaCentralGraficas(QFrame):
                 raise ErrorFormula(f"No se pudo leer la señal {rol}.")
             roles_fijos[rol] = datos
 
-        if usa_senal_rango:
+        if usa_senal_intervalo:
             resultados, segmentos = [], []
             columna_salida = None
             for intervalo in intervalos:
@@ -2470,10 +2525,10 @@ class AreaCentralGraficas(QFrame):
                 datos_owner = self._datos_columna(columna_owner)
                 if datos_owner is None:
                     raise ErrorFormula(
-                        f"No se pudo leer la señal «{columna_owner}» del rango."
+                        f"No se pudo leer la señal «{columna_owner}» del intervalo."
                     )
                 roles_intervalo = dict(roles_fijos)
-                roles_intervalo[formulas.VARIABLE_SENAL_RANGO] = datos_owner
+                roles_intervalo[formulas.VARIABLE_SENAL_INTERVALO] = datos_owner
                 parciales, tramos_parciales = formulas.computar_formula(
                     clave,
                     roles_intervalo,
@@ -2585,7 +2640,7 @@ class AreaCentralGraficas(QFrame):
         for columna in columnas:
             self.filtros_por_columna[columna] = descripcion
         self._actualizar_datos_graficas()
-        self._emitir_rangos()
+        self._emitir_intervalos()
         self.fuenteDatosCambiada.emit(self.hay_filtro_en_visibles())
         cantidad = len(columnas)
         destino = "una señal" if cantidad == 1 else f"{cantidad} señales"
@@ -2622,7 +2677,7 @@ class AreaCentralGraficas(QFrame):
             self.filtros_por_columna.pop(columna, None)
         self.columnas_filtradas.difference_update(columnas_a_restaurar)
         self._actualizar_datos_graficas()
-        self._emitir_rangos()
+        self._emitir_intervalos()
         self.fuenteDatosCambiada.emit(self.hay_filtro_en_visibles())
         cantidad = len(columnas_a_restaurar)
         destino = "la señal seleccionada" if cantidad == 1 else f"{cantidad} señales"

@@ -31,7 +31,7 @@ MODO_ROJO_VERDE = "rojo_verde"
 MODO_AZUL_AMARILLO = "azul_amarillo"
 MODO_COMPLETO = "completo"
 
-# Alias histórico: los consumidores antiguos (``set_modo_daltonico``, rangos.py
+# Alias histórico: los consumidores antiguos (``set_modo_daltonico``, intervalos.py
 # y tests) seguían hablando del antiguo modo booleano «daltónico». Ahora ese
 # modo es la paleta rojo-verde; se mantiene la constante para no romperlos.
 MODO_DALTONICO = MODO_ROJO_VERDE
@@ -39,7 +39,7 @@ MODO_DALTONICO = MODO_ROJO_VERDE
 
 PALETAS = {
     MODO_ESTANDAR: {
-        "rangos": (
+        "intervalos": (
             "#42A5F5",
             "#66BB6A",
             "#FFCA28",
@@ -60,7 +60,7 @@ PALETAS = {
     },
     MODO_ROJO_VERDE: {
         # Okabe & Ito, sin el negro (ilegible sobre el fondo #1E1E1E).
-        "rangos": (
+        "intervalos": (
             "#56B4E9",  # celeste
             "#E69F00",  # naranja
             "#009E73",  # verde azulado
@@ -81,7 +81,7 @@ PALETAS = {
         # Variante para tritanomalía/tritanopía. El criterio es el de la
         # investigación sobre esa deficiencia: los pares azul↔verde,
         # amarillo↔rojo, violeta↔rojo y amarillo↔rosado se confunden.
-        "rangos": (
+        "intervalos": (
             "#C0392B",  # rojo oscuro
             "#E67E22",  # naranja
             "#43A047",  # verde claro
@@ -98,7 +98,7 @@ PALETAS = {
     MODO_COMPLETO: {
         # Del gris más claro al más oscuro: en acromatopsia solo importa el
         # brillo, así que la secuencia es una rampa de luminancia decreciente.
-        "rangos": (
+        "intervalos": (
             "#F4F4F4",
             "#DCDCDC",
             "#C4C4C4",
@@ -114,7 +114,7 @@ PALETAS = {
 }
 
 # Nombre humano de cada color, para la opción «mostrar el nombre del color en
-# el rango» (se muestra en el tooltip). Un mismo hex vale en todas las paletas.
+# el intervalo» (se muestra en el tooltip). Un mismo hex vale en todas las paletas.
 NOMBRES_COLOR = {
     # Paleta estándar.
     "#42A5F5": "azul",
@@ -201,17 +201,17 @@ def set_modo_daltonico(activo: bool) -> bool:
     return set_modo_visual(MODO_ROJO_VERDE if activo else MODO_ESTANDAR)
 
 
-def colores_rangos() -> tuple:
-    return PALETAS[_modo_actual]["rangos"]
+def colores_intervalos() -> tuple:
+    return PALETAS[_modo_actual]["intervalos"]
 
 
-def color_rango(numero: int) -> str:
-    """Color que le corresponde al rango ``numero`` en la paleta activa.
+def color_intervalo(numero: int) -> str:
+    """Color que le corresponde al intervalo ``numero`` en la paleta activa.
 
     Es determinístico: el mismo número siempre da el mismo color dentro de un
-    modo, así al prender y apagar el modo los rangos vuelven a su color previo.
+    modo, así al prender y apagar el modo los intervalos vuelven a su color previo.
     """
-    colores = colores_rangos()
+    colores = colores_intervalos()
     return colores[(int(numero) - 1) % len(colores)]
 
 
