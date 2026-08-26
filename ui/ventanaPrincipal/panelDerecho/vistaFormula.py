@@ -306,7 +306,7 @@ class _ConstructorCajas:
                 self._texto("t", escala, cursiva=True),
                 self._texto(")", escala),
             )
-        if nombre == formulas_logica.VARIABLE_SENAL_RANGO:
+        if nombre == formulas_logica.VARIABLE_SENAL_INTERVALO:
             return self._fila(
                 self._texto("señal", escala),
                 self._texto("(", escala),

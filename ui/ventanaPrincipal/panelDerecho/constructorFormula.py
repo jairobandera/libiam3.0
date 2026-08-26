@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -49,6 +50,17 @@ PLANTILLAS = (
 class ConstructorFormula(QDialog):
     """Arma una expresión mediante piezas clicables y la valida en vivo."""
 
+    # Tamaño ideal; en pantallas chicas se recorta al espacio disponible.
+    TAMANO_IDEAL = (1040, 720)
+    # Piso de usabilidad: abajo de esto el diálogo deja de ser manejable.
+    # El editor y la paleta scrollean, así que tamaños menores siguen siendo
+    # funcionales; este piso solo evita ventanas absurdas.
+    TAMANO_MINIMO = (760, 420)
+    PISO_ABSOLUTO = (320, 240)
+    # Margen para el marco y la barra de título que dibuja el sistema sobre
+    # el área disponible (availableGeometry ya excluye la barra de tareas).
+    MARGEN_DECORACION = 40
+
     def __init__(
         self,
         parent=None,
@@ -64,12 +76,63 @@ class ConstructorFormula(QDialog):
         )
         self.setObjectName("constructorFormulaDialog")
         self.setModal(True)
-        self.resize(1040, 720)
-        self.setMinimumSize(900, 650)
+        ancho, alto = self._tamaño_inicial()
+        self.resize(ancho, alto)
+        minimo_ancho, minimo_alto = self._tamaño_minimo_pantalla()
+        self.setMinimumSize(minimo_ancho, minimo_alto)
         self._crear_ui()
         self._cargar_formula()
         self._validar()
         self.input_expresion.setFocus()
+
+    def _pantalla_disponible(self):
+        """Área utilizable de la pantalla donde va a aparecer el diálogo."""
+        pantalla = self.screen()
+        if pantalla is None:
+            pantalla = QApplication.primaryScreen()
+        if pantalla is None:
+            return None
+        return pantalla.availableGeometry()
+
+    @classmethod
+    def _tamaño_en_area(cls, disponible):
+        """Tamaño (ancho, alto) del diálogo para un área disponible dada.
+
+        Usa el ideal cuando entra; si no, lo mayor que siga cabiendo entero.
+        """
+        if disponible is None:
+            return cls.TAMANO_IDEAL
+        margen = cls.MARGEN_DECORACION
+        ancho_max = max(disponible.width() - margen, cls.PISO_ABSOLUTO[0])
+        alto_max = max(disponible.height() - margen, cls.PISO_ABSOLUTO[1])
+        return (
+            min(cls.TAMANO_IDEAL[0], ancho_max),
+            min(cls.TAMANO_IDEAL[1], alto_max),
+        )
+
+    def _tamaño_inicial(self):
+        return self._tamaño_en_area(self._pantalla_disponible())
+
+    def _tamaño_minimo_pantalla(self):
+        """Mínimo razonable, pero nunca más grande que la pantalla.
+
+        Si el mínimo de usabilidad no entra en el área disponible, se baja
+        hasta entrar: de nada sirve un mínimo que obligue a Windows a abrir
+        la ventana cortada por el borde o por la barra de tareas.
+        """
+        return self._mínimo_en_area(self._pantalla_disponible())
+
+    @classmethod
+    def _mínimo_en_area(cls, disponible):
+        if disponible is None:
+            return cls.TAMANO_MINIMO
+        margen = cls.MARGEN_DECORACION
+        ancho_max = max(disponible.width() - margen, cls.PISO_ABSOLUTO[0])
+        alto_max = max(disponible.height() - margen, cls.PISO_ABSOLUTO[1])
+        return (
+            min(cls.TAMANO_MINIMO[0], ancho_max),
+            min(cls.TAMANO_MINIMO[1], alto_max),
+        )
 
     def _crear_ui(self):
         principal = QVBoxLayout()
@@ -390,15 +453,15 @@ class ConstructorFormula(QDialog):
         rejilla.setSpacing(5)
         variables = [
             {
-                "token": formulas_logica.VARIABLE_SENAL_RANGO,
-                "nombre": "Señal del rango",
+                "token": formulas_logica.VARIABLE_SENAL_INTERVALO,
+                "nombre": "Señal del intervalo",
                 "detalle": (
-                    "Usa los valores de la gráfica propietaria de cada rango. "
+                    "Usa los valores de la gráfica propietaria de cada intervalo. "
                     "Sirve para Fuerza, EMG o cualquier otra señal."
                 ),
             }
         ]
-        vistos = {formulas_logica.VARIABLE_SENAL_RANGO}
+        vistos = {formulas_logica.VARIABLE_SENAL_INTERVALO}
         for variable in self.variables_disponibles:
             token = str(variable.get("token") or "")
             if token and token not in vistos:
@@ -600,7 +663,7 @@ class ConstructorFormula(QDialog):
             )
             return
         salida = (
-            "un resultado por rango"
+            "un resultado por intervalo"
             if calculo.get("resultado_escalar")
             else "una curva"
         )
@@ -767,7 +830,7 @@ class ConstructorFormula(QDialog):
                 for variable in sorted(self.analisis_actual["variables"])
             )
             tipo = (
-                "un resultado por rango"
+                "un resultado por intervalo"
                 if self.analisis_actual["resultado_escalar"]
                 else "una curva con un valor por frame"
             )

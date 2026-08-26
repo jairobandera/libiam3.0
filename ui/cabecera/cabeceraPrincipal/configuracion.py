@@ -51,17 +51,17 @@ class ConfiguracionDialog(QDialog):
         titulo.setStyleSheet("font-size: 18px; font-weight: 700;")
         layout.addWidget(titulo)
 
-        # --- Sección: rangos / recortes ---
+        # --- Sección: intervalos / recortes ---
         seccion = QFrame()
         seccion_layout = QVBoxLayout()
         seccion_layout.setContentsMargins(0, 0, 0, 0)
         seccion_layout.setSpacing(8)
 
-        lbl_seccion = QLabel("Rangos")
+        lbl_seccion = QLabel("Intervalos")
         lbl_seccion.setStyleSheet("font-weight: 600; color: #555555;")
         seccion_layout.addWidget(lbl_seccion)
 
-        self.chk_superposicion = QCheckBox("Habilitar superposición de rangos")
+        self.chk_superposicion = QCheckBox("Habilitar superposición de intervalos")
         self.chk_superposicion.setChecked(bool(superposicion))
         self.chk_superposicion.setToolTip(
             "Permite crear un recorte que se apoya sobre otros ya existentes. "
@@ -154,10 +154,10 @@ class ConfiguracionDialog(QDialog):
         lbl_opciones.setStyleSheet("color: #8A8A8A; font-size: 11px;")
         gpo_opciones_layout.addWidget(lbl_opciones)
 
-        self.chk_nombre = QCheckBox("Mostrar el nombre del color en el rango")
+        self.chk_nombre = QCheckBox("Mostrar el nombre del color en el intervalo")
         self.chk_nombre.setChecked(accesibilidad.mostrar_nombre_color())
         self.chk_nombre.setToolTip(
-            "Al pasar el cursor sobre un rango o subrango se muestra el "
+            "Al pasar el cursor sobre un intervalo o subintervalo se muestra el "
             "nombre del color en el tooltip."
         )
         gpo_opciones_layout.addWidget(self.chk_nombre)
@@ -173,7 +173,7 @@ class ConfiguracionDialog(QDialog):
         self.chk_grosor = QCheckBox("Aumentar grosor de las líneas")
         self.chk_grosor.setChecked(accesibilidad.aumentar_grosor_activo())
         self.chk_grosor.setToolTip(
-            "Engrosa las señales y los rangos para que se distingan mejor."
+            "Engrosa las señales y los intervalos para que se distingan mejor."
         )
         gpo_opciones_layout.addWidget(self.chk_grosor)
 

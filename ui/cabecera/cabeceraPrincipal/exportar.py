@@ -35,7 +35,7 @@ class ExportarDialog(QDialog):
         nombre_archivo="",
         cantidad_frames=0,
         cantidad_senales=0,
-        cantidad_rangos=0,
+        cantidad_intervalos=0,
         cantidad_resultados=0,
         nombre_formula="",
         hay_filtros=False,
@@ -51,7 +51,7 @@ class ExportarDialog(QDialog):
         self.nombre_archivo = str(nombre_archivo or "Archivo sin nombre")
         self.cantidad_frames = int(cantidad_frames or 0)
         self.cantidad_senales = int(cantidad_senales or 0)
-        self.cantidad_rangos = int(cantidad_rangos or 0)
+        self.cantidad_intervalos = int(cantidad_intervalos or 0)
         self.cantidad_resultados = int(cantidad_resultados or 0)
         self.nombre_formula = str(nombre_formula or "").strip()
         self.hay_filtros = bool(hay_filtros)
@@ -86,25 +86,25 @@ class ExportarDialog(QDialog):
                     f"{_cantidad_legible(self.cantidad_senales, 'señal', 'señales')}."
                 ),
             },
-            exportacion.MODO_RANGOS: {
-                "titulo": "Muestras por rango",
+            exportacion.MODO_INTERVALOS: {
+                "titulo": "Muestras por intervalo",
                 "formato": "CSV",
-                "detalle": "Muestras, límites y notas de cada rango seleccionado.",
-                "disponible": self.cantidad_rangos > 0,
-                "motivo": "Todavía no se creó ningún rango.",
+                "detalle": "Muestras, límites y notas de cada intervalo seleccionado.",
+                "disponible": self.cantidad_intervalos > 0,
+                "motivo": "Todavía no se creó ningún intervalo.",
                 "resumen": _cantidad_legible(
-                    self.cantidad_rangos,
-                    "rango o subrango",
-                    "rangos o subrangos",
+                    self.cantidad_intervalos,
+                    "intervalo o subintervalo",
+                    "intervalos o subintervalos",
                 )
                 + ".",
             },
             exportacion.MODO_RESULTADOS: {
                 "titulo": "Resultados de fórmulas",
                 "formato": "CSV",
-                "detalle": f"Resultados por rango correspondientes a {formula}.",
+                "detalle": f"Resultados por intervalo correspondientes a {formula}.",
                 "disponible": self.cantidad_resultados > 0,
-                "motivo": "Primero aplicá una fórmula a uno o más rangos.",
+                "motivo": "Primero aplicá una fórmula a uno o más intervalos.",
                 "resumen": _cantidad_legible(
                     self.cantidad_resultados, "resultado"
                 )
@@ -114,7 +114,7 @@ class ExportarDialog(QDialog):
                 "titulo": "Análisis completo",
                 "formato": "ZIP",
                 "detalle": (
-                    "Datos, rangos, resultados disponibles y un resumen del análisis."
+                    "Datos, intervalos, resultados disponibles y un resumen del análisis."
                 ),
                 "disponible": True,
                 "motivo": "",
@@ -201,7 +201,7 @@ class ExportarDialog(QDialog):
         nombre = self.nombre_archivo.replace("\\", "/").rsplit("/", 1)[-1]
         cantidades = (
             _cantidad_legible(self.cantidad_senales, "señal", "señales"),
-            _cantidad_legible(self.cantidad_rangos, "rango"),
+            _cantidad_legible(self.cantidad_intervalos, "intervalo"),
             _cantidad_legible(self.cantidad_resultados, "resultado"),
         )
         return f"Archivo: {nombre}\n{' · '.join(cantidades)}"

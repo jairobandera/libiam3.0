@@ -1,4 +1,4 @@
-"""Modelo independiente de la interfaz para los rangos de cálculo."""
+"""Modelo independiente de la interfaz para los intervalos de cálculo."""
 
 from __future__ import annotations
 
@@ -10,21 +10,21 @@ from logica import paleta
 # Los colores salen de la paleta activa (ver ``logica/paleta.py``), que cambia
 # si se activa el modo daltónico. Se sigue exportando el nombre histórico para
 # los usos que solo necesitan la lista estándar.
-COLORES_RANGOS = paleta.PALETAS[paleta.MODO_ESTANDAR]["rangos"]
+COLORES_INTERVALOS = paleta.PALETAS[paleta.MODO_ESTANDAR]["intervalos"]
 
 
-class RangoSuperpuestoError(ValueError):
-    def __init__(self, rango_existente):
-        self.rango_existente = rango_existente
-        numero_visible = rango_existente.orden or rango_existente.numero
+class IntervaloSuperpuestoError(ValueError):
+    def __init__(self, intervalo_existente):
+        self.intervalo_existente = intervalo_existente
+        numero_visible = intervalo_existente.orden or intervalo_existente.numero
         super().__init__(
-            f"El rango se superpone con el rango {numero_visible} "
-            f"({rango_existente.desde}–{rango_existente.hasta})."
+            f"El intervalo se superpone con el intervalo {numero_visible} "
+            f"({intervalo_existente.desde}–{intervalo_existente.hasta})."
         )
 
 
 @dataclass(frozen=True)
-class RangoCalculo:
+class IntervaloCalculo:
     numero: int
     desde: int
     hasta: int
@@ -39,60 +39,60 @@ class RangoCalculo:
         return asdict(self)
 
 
-class GestorRangos:
-    """Colección de rangos de una señal.
+class GestorIntervalos:
+    """Colección de intervalos de una señal.
 
-    ``prefijo_nombre`` es cómo se llaman los rangos sin nombre propio. Los
-    sub-gestores usan «Sub-rango» para que se distingan del rango que los
+    ``prefijo_nombre`` es cómo se llaman los intervalos sin nombre propio. Los
+    sub-gestores usan «Sub-intervalo» para que se distingan del intervalo que los
     contiene en el panel, en las notas y en el archivo de anotaciones.
     """
 
-    def __init__(self, prefijo_nombre: str = "Rango"):
-        self._rangos: list[RangoCalculo] = []
+    def __init__(self, prefijo_nombre: str = "Intervalo"):
+        self._intervalos: list[IntervaloCalculo] = []
         self._siguiente_numero = 1
         self._prefijo_nombre = prefijo_nombre
 
-    def listar(self) -> list[RangoCalculo]:
-        """Devuelve los rangos ordenados y numerados de izquierda a derecha.
+    def listar(self) -> list[IntervaloCalculo]:
+        """Devuelve los intervalos ordenados y numerados de izquierda a derecha.
 
         La identidad interna (``numero``) no cambia. Esto permite reordenar lo
-        que ve el usuario sin romper notas, sub-rangos ni botones que ya
+        que ve el usuario sin romper notas, sub-intervalos ni botones que ya
         apuntan al recorte. Los nombres automáticos y los colores sí siguen la
         posición visible; los nombres escritos por el usuario se conservan.
         """
         ordenados = sorted(
-            self._rangos,
-            key=lambda rango: (rango.desde, rango.hasta, rango.numero),
+            self._intervalos,
+            key=lambda intervalo: (intervalo.desde, intervalo.hasta, intervalo.numero),
         )
         resultado = []
-        for orden, rango in enumerate(ordenados, start=1):
+        for orden, intervalo in enumerate(ordenados, start=1):
             nombre = (
-                rango.nombre
-                if rango.nombre_personalizado
+                intervalo.nombre
+                if intervalo.nombre_personalizado
                 else f"{self._prefijo_nombre} {orden}"
             )
             resultado.append(
                 replace(
-                    rango,
+                    intervalo,
                     orden=orden,
-                    color=paleta.color_rango(orden),
+                    color=paleta.color_intervalo(orden),
                     nombre=nombre,
                 )
             )
         return resultado
 
-    def _rango_visible(self, numero: int) -> RangoCalculo | None:
+    def _intervalo_visible(self, numero: int) -> IntervaloCalculo | None:
         return next(
-            (rango for rango in self.listar() if rango.numero == int(numero)),
+            (intervalo for intervalo in self.listar() if intervalo.numero == int(numero)),
             None,
         )
 
     def hay_superposicion(self, desde: int, hasta: int) -> bool:
-        """Indica si el intervalo se superpone con algún rango existente."""
+        """Indica si el intervalo se superpone con algún intervalo existente."""
         desde, hasta = sorted((int(desde), int(hasta)))
         return any(
             desde <= existente.hasta and hasta >= existente.desde
-            for existente in self._rangos
+            for existente in self._intervalos
         )
 
     def agregar(
@@ -101,26 +101,26 @@ class GestorRangos:
         hasta: int,
         nombre: str = "",
         permitir_superposicion: bool = False,
-    ) -> RangoCalculo:
+    ) -> IntervaloCalculo:
         desde, hasta = sorted((int(desde), int(hasta)))
         if desde == hasta:
-            raise ValueError("El rango debe contener al menos dos frames.")
+            raise ValueError("El intervalo debe contener al menos dos frames.")
 
         if not permitir_superposicion:
-            for existente in self._rangos:
+            for existente in self._intervalos:
                 # Los extremos son inclusivos: compartir un frame también cuenta
                 # como superposición para evitar duplicarlo en los cálculos.
                 if desde <= existente.hasta and hasta >= existente.desde:
-                    raise RangoSuperpuestoError(
-                        self._rango_visible(existente.numero) or existente
+                    raise IntervaloSuperpuestoError(
+                        self._intervalo_visible(existente.numero) or existente
                     )
 
         numero = self._siguiente_numero
-        color = paleta.color_rango(numero)
+        color = paleta.color_intervalo(numero)
         nombre = nombre.strip()
         nombre_personalizado = bool(nombre)
         nombre = nombre or f"{self._prefijo_nombre} {numero}"
-        rango = RangoCalculo(
+        intervalo = IntervaloCalculo(
             numero=numero,
             desde=desde,
             hasta=hasta,
@@ -129,30 +129,30 @@ class GestorRangos:
             orden=numero,
             nombre_personalizado=nombre_personalizado,
         )
-        self._rangos.append(rango)
+        self._intervalos.append(intervalo)
         self._siguiente_numero += 1
-        return rango
+        return intervalo
 
     def agregar_ajustado(
         self, inicio: int, fin: int, nombre: str = ""
-    ) -> tuple[RangoCalculo, bool]:
+    ) -> tuple[IntervaloCalculo, bool]:
         """Agrega el tramo libre recorrido por el gesto del usuario.
 
         El primer punto actúa como ancla y el segundo indica la dirección. Si
-        el ancla cae dentro de un rango existente, se desplaza al primer frame
-        libre en esa dirección. Si el gesto encuentra otro rango, termina en
+        el ancla cae dentro de un intervalo existente, se desplaza al primer frame
+        libre en esa dirección. Si el gesto encuentra otro intervalo, termina en
         el frame inmediatamente anterior. Los extremos son inclusivos.
         """
         inicio_original = int(inicio)
         fin_original = int(fin)
         if inicio_original == fin_original:
-            raise ValueError("El rango debe contener al menos dos frames.")
+            raise ValueError("El intervalo debe contener al menos dos frames.")
 
         direccion = 1 if fin_original > inicio_original else -1
         inicio_ajustado = inicio_original
-        rangos_ordenados = sorted(self._rangos, key=lambda rango: rango.desde)
+        intervalos_ordenados = sorted(self._intervalos, key=lambda intervalo: intervalo.desde)
 
-        for existente in rangos_ordenados:
+        for existente in intervalos_ordenados:
             if existente.desde <= inicio_original <= existente.hasta:
                 inicio_ajustado = (
                     existente.hasta + 1
@@ -168,7 +168,7 @@ class GestorRangos:
                     "en la dirección seleccionada."
                 )
             fin_ajustado = fin_original
-            for existente in rangos_ordenados:
+            for existente in intervalos_ordenados:
                 if existente.hasta < inicio_ajustado:
                     continue
                 if existente.desde > fin_ajustado:
@@ -182,7 +182,7 @@ class GestorRangos:
                     "en la dirección seleccionada."
                 )
             fin_ajustado = fin_original
-            for existente in reversed(rangos_ordenados):
+            for existente in reversed(intervalos_ordenados):
                 if existente.desde > inicio_ajustado:
                     continue
                 if existente.hasta < fin_ajustado:
@@ -196,37 +196,37 @@ class GestorRangos:
                 "en la dirección seleccionada."
             )
 
-        rango = self.agregar(inicio_ajustado, fin_ajustado, nombre)
+        intervalo = self.agregar(inicio_ajustado, fin_ajustado, nombre)
         fue_ajustado = (
             inicio_ajustado != inicio_original or fin_ajustado != fin_original
         )
-        return rango, fue_ajustado
+        return intervalo, fue_ajustado
 
     def restaurar(
         self, numero: int, desde: int, hasta: int, nombre: str = ""
-    ) -> RangoCalculo:
-        """Reinserta un rango ya existente conservando su número original.
+    ) -> IntervaloCalculo:
+        """Reinserta un intervalo ya existente conservando su número original.
 
-        Se usa al abrir un proyecto guardado: los rangos vienen del archivo de
+        Se usa al abrir un proyecto guardado: los intervalos vienen del archivo de
         anotaciones, así que no se renumeran ni se revalida la superposición
         (ya se decidió cuando se crearon). El color se deriva del número, igual
         que en ``agregar``, para que el proyecto se vea igual que al guardarlo.
         """
         numero = int(numero)
         if numero < 1:
-            raise ValueError("El número de rango debe ser mayor o igual a 1.")
+            raise ValueError("El número de intervalo debe ser mayor o igual a 1.")
 
         desde, hasta = sorted((int(desde), int(hasta)))
         if desde == hasta:
-            raise ValueError("El rango debe contener al menos dos frames.")
+            raise ValueError("El intervalo debe contener al menos dos frames.")
 
-        color = paleta.color_rango(numero)
+        color = paleta.color_intervalo(numero)
         nombre = (nombre or "").strip()
         nombre_personalizado = bool(nombre) and nombre != (
             f"{self._prefijo_nombre} {numero}"
         )
         nombre = nombre or f"{self._prefijo_nombre} {numero}"
-        rango = RangoCalculo(
+        intervalo = IntervaloCalculo(
             numero=numero,
             desde=desde,
             hasta=hasta,
@@ -236,11 +236,11 @@ class GestorRangos:
             nombre_personalizado=nombre_personalizado,
         )
 
-        self._rangos = [
-            existente for existente in self._rangos if existente.numero != numero
+        self._intervalos = [
+            existente for existente in self._intervalos if existente.numero != numero
         ]
-        self._rangos.append(rango)
-        self._rangos.sort(
+        self._intervalos.append(intervalo)
+        self._intervalos.sort(
             key=lambda existente: (
                 existente.desde,
                 existente.hasta,
@@ -248,24 +248,24 @@ class GestorRangos:
             )
         )
         self._siguiente_numero = max(self._siguiente_numero, numero + 1)
-        return rango
+        return intervalo
 
     def eliminar(self, numeros) -> None:
         numeros = {int(numero) for numero in numeros}
-        self._rangos = [rango for rango in self._rangos if rango.numero not in numeros]
+        self._intervalos = [intervalo for intervalo in self._intervalos if intervalo.numero not in numeros]
 
     def recolorear(self) -> None:
-        """Reasigna los colores de todos los rangos según la paleta activa.
+        """Reasigna los colores de todos los intervalos según la paleta activa.
 
         Se llama al prender o apagar el modo daltónico. Como el color depende
-        solo del número del rango, apagar el modo devuelve exactamente los
+        solo del número del intervalo, apagar el modo devuelve exactamente los
         colores anteriores.
         """
-        self._rangos = [
-            replace(rango, color=paleta.color_rango(rango.numero))
-            for rango in self._rangos
+        self._intervalos = [
+            replace(intervalo, color=paleta.color_intervalo(intervalo.numero))
+            for intervalo in self._intervalos
         ]
 
     def limpiar(self) -> None:
-        self._rangos.clear()
+        self._intervalos.clear()
         self._siguiente_numero = 1

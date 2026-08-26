@@ -156,7 +156,7 @@
     border-left-color: #EF5350;
 }
 
-#btnToggleSubrangos {
+#btnToggleSubintervalos {
     background-color: transparent;
     color: #B0B0B0;
     border: none;
@@ -166,7 +166,7 @@
     max-width: 16px;
 }
 
-#btnToggleSubrangos:hover {
+#btnToggleSubintervalos:hover {
     color: #FFFFFF;
 }
 
@@ -178,7 +178,7 @@
     background-color: #2A3F55;
 }
 
-/* --- Recuadro de fórmulas dentro de «Rangos para cálculos» --- */
+/* --- Recuadro de fórmulas dentro de «Intervalos para cálculos» --- */
 #seccionFormulas {
     background-color: #2D2D30;
     border: 1px solid #3E3E42;
@@ -570,9 +570,9 @@ QDialog#constructorFormulaDialog {
     font-weight: 600;
 }
 
-/* Botón de nota del rango (el color lo trae el propio icono SVG:
+/* Botón de nota del intervalo (el color lo trae el propio icono SVG:
    gris con "+" = sin nota, azul relleno = con nota) */
-#btnNotaRango {
+#btnNotaIntervalo {
     background-color: transparent;
     border: none;
     border-radius: 3px;
@@ -581,20 +581,20 @@ QDialog#constructorFormulaDialog {
     max-width: 22px;
 }
 
-#btnNotaRango:hover {
+#btnNotaIntervalo:hover {
     background-color: #37373A;
 }
 
-#btnNotaRango:pressed {
+#btnNotaIntervalo:pressed {
     background-color: #2D2D30;
 }
 
-/* Botones para eliminar rangos y sub-rangos.
-   «✕» sola siempre borra el ítem de esa fila (rango o sub-rango); «↳✕»
-   solo aparece en un rango con sub-rangos y borra únicamente esos hijos. */
-#btnEliminarSubrango,
-#btnEliminarTodosSubrangos,
-#btnEliminarRango {
+/* Botones para eliminar intervalos y sub-intervalos.
+   «✕» sola siempre borra el ítem de esa fila (intervalo o sub-intervalo); «↳✕»
+   solo aparece en un intervalo con sub-intervalos y borra únicamente esos hijos. */
+#btnEliminarSubintervalo,
+#btnEliminarTodosSubintervalos,
+#btnEliminarIntervalo {
     background-color: transparent;
     color: #8A8A8A;
     border: none;
@@ -603,29 +603,29 @@ QDialog#constructorFormulaDialog {
     padding: 0 2px;
 }
 
-#btnEliminarSubrango,
-#btnEliminarRango {
+#btnEliminarSubintervalo,
+#btnEliminarIntervalo {
     min-width: 20px;
     max-width: 22px;
 }
 
-#btnEliminarTodosSubrangos {
+#btnEliminarTodosSubintervalos {
     min-width: 26px;
     max-width: 30px;
 }
 
-#btnEliminarSubrango:hover,
-#btnEliminarTodosSubrangos:hover {
+#btnEliminarSubintervalo:hover,
+#btnEliminarTodosSubintervalos:hover {
     color: #EF5350;
 }
 
-/* El borrado de rango completo es más destructivo (se lleva los
-   sub-rangos): marco visible además del color en hover. */
-#btnEliminarRango {
+/* El borrado de intervalo completo es más destructivo (se lleva los
+   sub-intervalos): marco visible además del color en hover. */
+#btnEliminarIntervalo {
     border-radius: 3px;
 }
 
-#btnEliminarRango:hover {
+#btnEliminarIntervalo:hover {
     color: #EF5350;
     background-color: rgba(239, 83, 80, 0.15);
 }

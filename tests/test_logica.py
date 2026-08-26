@@ -14,7 +14,7 @@ from logica.filtros_senales import (
     aplicar_butterworth_pasabajos,
 )
 from logica.lector_csv import calcular_frecuencia_efectiva, leer_csv_rapido
-from logica.rangos import GestorRangos, RangoSuperpuestoError
+from logica.intervalos import GestorIntervalos, IntervaloSuperpuestoError
 
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -114,55 +114,55 @@ class TestFiltro(unittest.TestCase):
         self.assertTrue(np.isfinite(filtrados[:100]).all())
 
 
-class TestRangos(unittest.TestCase):
+class TestIntervalos(unittest.TestCase):
     def test_agrega_colores_y_rechaza_superposicion(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         primero = gestor.agregar(30, 40)
         segundo = gestor.agregar(50, 60)
 
         self.assertEqual((primero.numero, primero.desde, primero.hasta), (1, 30, 40))
         self.assertNotEqual(primero.color, segundo.color)
-        with self.assertRaises(RangoSuperpuestoError):
+        with self.assertRaises(IntervaloSuperpuestoError):
             gestor.agregar(40, 45)
 
     def test_elimina_solo_los_indicados(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         gestor.agregar(10, 20)
         gestor.agregar(30, 40)
         gestor.eliminar([1])
-        self.assertEqual([rango.numero for rango in gestor.listar()], [2])
+        self.assertEqual([intervalo.numero for intervalo in gestor.listar()], [2])
 
     def test_ordena_y_renumera_visualmente_de_izquierda_a_derecha(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         primero_creado = gestor.agregar(100, 200)
         segundo_creado = gestor.agregar(50, 80)
 
         visibles = gestor.listar()
 
         self.assertEqual(
-            [(rango.desde, rango.hasta) for rango in visibles],
+            [(intervalo.desde, intervalo.hasta) for intervalo in visibles],
             [(50, 80), (100, 200)],
         )
-        self.assertEqual([rango.orden for rango in visibles], [1, 2])
-        self.assertEqual([rango.nombre for rango in visibles], ["Rango 1", "Rango 2"])
+        self.assertEqual([intervalo.orden for intervalo in visibles], [1, 2])
+        self.assertEqual([intervalo.nombre for intervalo in visibles], ["Intervalo 1", "Intervalo 2"])
         # Las identidades no cambian: siguen sirviendo para notas y borrado.
         self.assertEqual(
-            [rango.numero for rango in visibles],
+            [intervalo.numero for intervalo in visibles],
             [segundo_creado.numero, primero_creado.numero],
         )
 
     def test_conserva_nombres_personalizados_al_reordenar(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         gestor.agregar(100, 200, "Despegue")
         gestor.agregar(50, 80)
 
         self.assertEqual(
-            [rango.nombre for rango in gestor.listar()],
-            ["Rango 1", "Despegue"],
+            [intervalo.nombre for intervalo in gestor.listar()],
+            ["Intervalo 1", "Despegue"],
         )
 
     def test_ajusta_inicio_ocupado_al_primer_frame_libre(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         gestor.agregar(20, 30)
 
         nuevo, fue_ajustado = gestor.agregar_ajustado(24, 50)
@@ -170,8 +170,8 @@ class TestRangos(unittest.TestCase):
         self.assertTrue(fue_ajustado)
         self.assertEqual((nuevo.desde, nuevo.hasta), (31, 50))
 
-    def test_recorta_en_el_primer_rango_que_encuentra(self):
-        gestor = GestorRangos()
+    def test_recorta_en_el_primer_intervalo_que_encuentra(self):
+        gestor = GestorIntervalos()
         gestor.agregar(20, 30)
 
         nuevo, fue_ajustado = gestor.agregar_ajustado(10, 50)
@@ -180,13 +180,13 @@ class TestRangos(unittest.TestCase):
         self.assertEqual((nuevo.desde, nuevo.hasta), (10, 19))
 
     def test_restaura_conservando_numero_y_color(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         original = gestor.agregar(30, 40)
         gestor.agregar(50, 60)
 
-        restaurado = GestorRangos()
+        restaurado = GestorIntervalos()
         # Se reponen en desorden, como podrían venir del CSV de anotaciones.
-        restaurado.restaurar(2, 50, 60, "Rango 2")
+        restaurado.restaurar(2, 50, 60, "Intervalo 2")
         repuesto = restaurado.restaurar(1, 30, 40, "Apoyo")
 
         self.assertEqual([r.numero for r in restaurado.listar()], [1, 2])
@@ -194,25 +194,25 @@ class TestRangos(unittest.TestCase):
         self.assertEqual(repuesto.nombre, "Apoyo")
 
     def test_restaurar_no_valida_superposicion_y_sigue_numerando(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         gestor.restaurar(1, 30, 40)
         gestor.restaurar(3, 35, 45)  # superpuesto: ya se aceptó al crearlo
 
         self.assertEqual([r.numero for r in gestor.listar()], [1, 3])
         self.assertEqual(gestor.agregar(100, 110).numero, 4)
 
-    def test_los_subgestores_nombran_sub_rangos(self):
-        # Los sub-rangos usan otro prefijo para no confundirse con su padre.
-        sub = GestorRangos("Sub-rango")
-        self.assertEqual(sub.agregar(10, 20).nombre, "Sub-rango 1")
-        self.assertEqual(sub.restaurar(3, 30, 40).nombre, "Sub-rango 3")
+    def test_los_subgestores_nombran_sub_intervalos(self):
+        # Los sub-intervalos usan otro prefijo para no confundirse con su padre.
+        sub = GestorIntervalos("Sub-intervalo")
+        self.assertEqual(sub.agregar(10, 20).nombre, "Sub-intervalo 1")
+        self.assertEqual(sub.restaurar(3, 30, 40).nombre, "Sub-intervalo 3")
         # Un nombre propio siempre gana sobre el prefijo.
         self.assertEqual(sub.agregar(50, 60, "Impulso").nombre, "Impulso")
-        # El gestor de rangos padre no cambia.
-        self.assertEqual(GestorRangos().agregar(10, 20).nombre, "Rango 1")
+        # El gestor de intervalos padre no cambia.
+        self.assertEqual(GestorIntervalos().agregar(10, 20).nombre, "Intervalo 1")
 
-    def test_restaurar_rechaza_rango_degenerado(self):
-        gestor = GestorRangos()
+    def test_restaurar_rechaza_intervalo_degenerado(self):
+        gestor = GestorIntervalos()
         with self.assertRaises(ValueError):
             gestor.restaurar(1, 30, 30)
 
@@ -257,7 +257,7 @@ class TestPotencia(unittest.TestCase):
             formulas.potencia([700.0, 700.0], self.MASA, self.G, 0)
         self.assertIn("frecuencia", str(contexto.exception).lower())
 
-    def test_rango_de_una_sola_muestra_no_revienta(self):
+    def test_intervalo_de_una_sola_muestra_no_revienta(self):
         with self.assertRaises(formulas.ErrorFormula):
             formulas.potencia([700.0], self.MASA, self.G, 100.0)
 
@@ -343,16 +343,16 @@ class TestImpulso(unittest.TestCase):
         self.assertEqual(unidades["impulso neto"], "N·s")
         self.assertEqual(unidades["Δ velocidad"], "m/s")
 
-    def test_el_neto_del_rango_resta_los_extremos_del_recorte(self):
+    def test_el_neto_del_intervalo_resta_los_extremos_del_recorte(self):
         # La integración arranca en el primer frame del registro, no en el
-        # rango. Con un impulso previo al tramo, tomar el último valor de la
+        # intervalo. Con un impulso previo al tramo, tomar el último valor de la
         # curva daría el acumulado desde el inicio del archivo en vez del neto
-        # del rango: por eso se restan los extremos.
+        # del intervalo: por eso se restan los extremos.
         n = 301
         x = np.arange(n, dtype=float)
         fz = np.full(n, self.MASA * self.G)
-        fz[0:101] += 700.0        # primer envión, antes del rango
-        fz[200:n] += 700.0        # segundo envión, dentro del rango
+        fz[0:101] += 700.0        # primer envión, antes del intervalo
+        fz[200:n] += 700.0        # segundo envión, dentro del intervalo
 
         curva = formulas.impulso(fz, self.MASA, self.G, self.FRECUENCIA)
         acumulado_al_final = curva[-1]
@@ -380,9 +380,258 @@ class TestImpulso(unittest.TestCase):
             formulas.impulso([700.0, 700.0], self.MASA, self.G, 0)
         self.assertIn("frecuencia", str(contexto.exception).lower())
 
-    def test_rango_de_una_sola_muestra_no_revienta(self):
+    def test_intervalo_de_una_sola_muestra_no_revienta(self):
         with self.assertRaises(formulas.ErrorFormula):
             formulas.impulso([700.0], self.MASA, self.G, self.FRECUENCIA)
+
+
+class TestAceleracion(unittest.TestCase):
+    MASA = 70.0
+    G = 10.0  # redondo, para que las cuentas del test se sigan a mano
+
+    def test_esta_registrada(self):
+        self.assertTrue(formulas.hay_formula("aceleracion"))
+        descripcion = formulas.descripcion_formula("aceleracion")
+        self.assertEqual(descripcion["nombre"], formulas.NOMBRE_ACELERACION)
+        self.assertEqual(descripcion["unidad"], formulas.UNIDAD_ACELERACION)
+        self.assertEqual(descripcion["salida_rol"], "Fz")
+        self.assertEqual(descripcion["requiere_roles"], ("Fz",))
+        # La aceleración es punto a punto: no hay nada que integrar.
+        self.assertFalse(descripcion["integra_en_registro"])
+
+    def test_en_reposo_la_aceleracion_es_cero(self):
+        # Con Fz igual al peso la fuerza neta es cero: no hay aceleración.
+        fz = np.full(50, self.MASA * self.G)
+        np.testing.assert_allclose(
+            formulas.aceleracion(fz, self.MASA, self.G), 0.0, atol=1e-9
+        )
+
+    def test_fuerza_doble_equivale_a_un_g(self):
+        # Fz = 2·m·g deja una fuerza neta de m·g, que sobre la masa es g.
+        fz = np.full(20, self.MASA * self.G * 2)
+        np.testing.assert_allclose(
+            formulas.aceleracion(fz, self.MASA, self.G), self.G, atol=1e-9
+        )
+
+    def test_calcula_sobre_el_intervalo_marcado(self):
+        # A través del registro, un intervalo recorta la aceleración y su resumen
+        # describe solo ese tramo.
+        n = 100
+        x = np.arange(n, dtype=float)
+        fz = np.full(n, self.MASA * self.G * 2)
+        contexto = {"masa": self.MASA, "gravedad": self.G}
+        resultados, segmentos = formulas.computar_formula(
+            "aceleracion", {"Fz": fz}, x, contexto,
+            [{"id": "r1", "numero": 1, "desde": 10, "hasta": 20}],
+        )
+        x_seg, valores = segmentos[0]
+        np.testing.assert_array_equal(x_seg, x[10:21])
+        resumen = resultados[0]["resumen"]
+        self.assertAlmostEqual(resumen["pico"], self.G, places=9)
+        self.assertAlmostEqual(resumen["media"], self.G, places=9)
+
+    def test_cada_intervalo_responde_solo_a_su_tramo(self):
+        # El tramo entre dos intervalos no entra en ninguno de los resultados.
+        n = 60
+        x = np.arange(n, dtype=float)
+        fz = np.full(n, self.MASA * self.G * 2)
+        contexto = {"masa": self.MASA, "gravedad": self.G}
+        resultados, segmentos = formulas.computar_formula(
+            "aceleracion", {"Fz": fz}, x, contexto,
+            [
+                {"id": "r1", "numero": 1, "desde": 0, "hasta": 9},
+                {"id": "r2", "numero": 2, "desde": 20, "hasta": 29},
+            ],
+        )
+        self.assertEqual(len(resultados), 2)
+        np.testing.assert_array_equal(segmentos[0][0], x[0:10])
+        np.testing.assert_array_equal(segmentos[1][0], x[20:30])
+
+    def test_no_necesita_la_frecuencia(self):
+        # La aceleración no integra: no hace falta conocer la frecuencia.
+        motivo = formulas.validar_formula(
+            "aceleracion", {"masa": self.MASA, "gravedad": self.G},
+            roles_disponibles=("Fz",),
+        )
+        self.assertEqual(motivo, "")
+
+    def test_sin_masa_explica_que_falta(self):
+        motivo = formulas.validar_formula(
+            "aceleracion", {"gravedad": self.G}, roles_disponibles=("Fz",)
+        )
+        self.assertIn("masa", motivo.lower())
+        motivo = formulas.validar_formula(
+            "aceleracion", {"masa": 0, "gravedad": self.G},
+            roles_disponibles=("Fz",),
+        )
+        self.assertIn("masa", motivo.lower())
+
+    def test_sin_gravedad_explica_que_falta(self):
+        motivo = formulas.validar_formula(
+            "aceleracion", {"masa": self.MASA}, roles_disponibles=("Fz",)
+        )
+        self.assertIn("gravedad", motivo.lower())
+
+
+class TestFuerzaNeta(unittest.TestCase):
+    MASA = 70.0
+    G = 10.0  # redondo, para que las cuentas del test se sigan a mano
+
+    def test_esta_registrada(self):
+        self.assertTrue(formulas.hay_formula("fuerza_neta"))
+        descripcion = formulas.descripcion_formula("fuerza_neta")
+        self.assertEqual(descripcion["nombre"], formulas.NOMBRE_FUERZA_NETA)
+        self.assertEqual(descripcion["unidad"], formulas.UNIDAD_FUERZA_NETA)
+        self.assertEqual(descripcion["salida_rol"], "Fz")
+        self.assertEqual(descripcion["requiere_roles"], ("Fz",))
+        # Es punto a punto: no hay nada que integrar.
+        self.assertFalse(descripcion["integra_en_registro"])
+
+    def test_en_reposo_la_fuerza_neta_es_cero(self):
+        # Con Fz igual al peso la balanza ya sostiene al sujeto: la neta es cero.
+        fz = np.full(50, self.MASA * self.G)
+        np.testing.assert_allclose(
+            formulas.fuerza_neta(fz, self.MASA, self.G), 0.0, atol=1e-9
+        )
+
+    def test_fuerza_doble_deja_el_peso_como_neta(self):
+        # Fz = 2·m·g deja una fuerza neta de exactamente m·g.
+        fz = np.full(20, self.MASA * self.G * 2)
+        np.testing.assert_allclose(
+            formulas.fuerza_neta(fz, self.MASA, self.G),
+            self.MASA * self.G,
+            atol=1e-9,
+        )
+
+    def test_calcula_sobre_el_intervalo_marcado(self):
+        # Un intervalo recorta la curva y su resumen describe solo ese tramo.
+        n = 100
+        x = np.arange(n, dtype=float)
+        fz = np.full(n, self.MASA * self.G * 2)
+        contexto = {"masa": self.MASA, "gravedad": self.G}
+        resultados, segmentos = formulas.computar_formula(
+            "fuerza_neta", {"Fz": fz}, x, contexto,
+            [{"id": "r1", "numero": 1, "desde": 10, "hasta": 20}],
+        )
+        x_seg, valores = segmentos[0]
+        np.testing.assert_array_equal(x_seg, x[10:21])
+        resumen = resultados[0]["resumen"]
+        self.assertAlmostEqual(resumen["pico"], self.MASA * self.G, places=9)
+        self.assertAlmostEqual(resumen["media"], self.MASA * self.G, places=9)
+
+    def test_no_necesita_la_frecuencia(self):
+        # No integra: no hace falta conocer la frecuencia.
+        motivo = formulas.validar_formula(
+            "fuerza_neta", {"masa": self.MASA, "gravedad": self.G},
+            roles_disponibles=("Fz",),
+        )
+        self.assertEqual(motivo, "")
+
+    def test_sin_masa_explica_que_falta(self):
+        motivo = formulas.validar_formula(
+            "fuerza_neta", {"gravedad": self.G}, roles_disponibles=("Fz",)
+        )
+        self.assertIn("masa", motivo.lower())
+        motivo = formulas.validar_formula(
+            "fuerza_neta", {"masa": 0, "gravedad": self.G},
+            roles_disponibles=("Fz",),
+        )
+        self.assertIn("masa", motivo.lower())
+
+    def test_sin_gravedad_explica_que_falta(self):
+        motivo = formulas.validar_formula(
+            "fuerza_neta", {"masa": self.MASA}, roles_disponibles=("Fz",)
+        )
+        self.assertIn("gravedad", motivo.lower())
+
+
+class TestVelocidad(unittest.TestCase):
+    MASA = 70.0
+    G = 10.0  # redondo, para que las cuentas del test se sigan a mano
+    FRECUENCIA = 100.0
+
+    def _contexto(self):
+        return {
+            "masa": self.MASA,
+            "gravedad": self.G,
+            "frecuencia": self.FRECUENCIA,
+        }
+
+    def test_esta_registrada(self):
+        self.assertTrue(formulas.hay_formula("velocidad"))
+        descripcion = formulas.descripcion_formula("velocidad")
+        self.assertEqual(descripcion["nombre"], formulas.NOMBRE_VELOCIDAD)
+        self.assertEqual(descripcion["unidad"], formulas.UNIDAD_VELOCIDAD)
+        self.assertEqual(descripcion["salida_rol"], "Fz")
+        self.assertEqual(descripcion["requiere_roles"], ("Fz",))
+        # La integral corre sobre el registro completo y el intervalo recorta.
+        self.assertTrue(descripcion["integra_en_registro"])
+
+    def test_en_reposo_la_velocidad_es_cero(self):
+        # Con Fz igual al peso no hay aceleración: la velocidad no se acumula.
+        fz = np.full(50, self.MASA * self.G)
+        np.testing.assert_allclose(
+            formulas.velocidad(fz, self.MASA, self.G, self.FRECUENCIA),
+            0.0,
+            atol=1e-9,
+        )
+
+    def test_integra_una_aceleracion_constante(self):
+        # Fz = 2·m·g deja una aceleración neta de g = 10 m/s².
+        # Tras 1 s la velocidad tiene que ser 10 m/s.
+        fz = np.full(int(self.FRECUENCIA) + 1, self.MASA * self.G * 2)
+        v = formulas.velocidad(fz, self.MASA, self.G, self.FRECUENCIA)
+        self.assertAlmostEqual(v[-1], 10.0, places=6)
+
+    def test_calcula_sobre_el_intervalo_marcado(self):
+        # Un intervalo recorta la curva de velocidad acumulada desde el registro.
+        n = int(self.FRECUENCIA) + 1
+        x = np.arange(n, dtype=float)
+        fz = np.full(n, self.MASA * self.G * 2)
+        contexto = self._contexto()
+        resultados, segmentos = formulas.computar_formula(
+            "velocidad", {"Fz": fz}, x, contexto,
+            [{"id": "r1", "numero": 1, "desde": 50, "hasta": 100}],
+        )
+        x_seg, valores = segmentos[0]
+        np.testing.assert_array_equal(x_seg, x[50:101])
+        resumen = resultados[0]["resumen"]
+        self.assertAlmostEqual(resumen["pico"], 10.0, places=9)
+        self.assertAlmostEqual(resumen["media"], 7.5, places=9)
+
+    def test_no_reinicia_la_integracion_al_empezar_cada_intervalo(self):
+        # Fz = 2·m·g en todo el registro: la velocidad se acumula desde el
+        # primer frame. Al arrancar un intervalo en el frame 100 ya no es cero,
+        # sino 100/fs · g; si la integral se reiniciara por intervalo valdría 0.
+        n = 151
+        x = np.arange(n, dtype=float)
+        fz = np.full(n, self.MASA * self.G * 2)
+        contexto = self._contexto()
+        _resultados, segmentos = formulas.computar_formula(
+            "velocidad", {"Fz": fz}, x, contexto,
+            [{"id": "r1", "numero": 1, "desde": 100, "hasta": 150}],
+        )
+        _x_seg, valores = segmentos[0]
+        esperado_en_inicio = 100 / self.FRECUENCIA * self.G  # 10 m/s
+        self.assertAlmostEqual(valores[0], esperado_en_inicio, places=9)
+        self.assertGreater(valores[0], 0.0)
+
+    def test_requiere_frecuencia_masa_y_gravedad(self):
+        sin_frecuencia = formulas.validar_formula(
+            "velocidad", {"masa": self.MASA, "gravedad": self.G},
+            roles_disponibles=("Fz",),
+        )
+        self.assertIn("frecuencia", sin_frecuencia.lower())
+        sin_masa = formulas.validar_formula(
+            "velocidad", {"gravedad": self.G, "frecuencia": self.FRECUENCIA},
+            roles_disponibles=("Fz",),
+        )
+        self.assertIn("masa", sin_masa.lower())
+        sin_gravedad = formulas.validar_formula(
+            "velocidad", {"masa": self.MASA, "frecuencia": self.FRECUENCIA},
+            roles_disponibles=("Fz",),
+        )
+        self.assertIn("gravedad", sin_gravedad.lower())
 
 
 class TestRegistroFormulas(unittest.TestCase):
@@ -408,36 +657,36 @@ class TestRegistroFormulas(unittest.TestCase):
 
     def test_aplicar_impulso_no_reemplaza_la_potencia(self):
         aplicaciones = formulas.registrar_aplicacion_formula(
-            {}, {"clave": "potencia", "rangos": ["Fz::1", "Fz::3"]}
+            {}, {"clave": "potencia", "intervalos": ["Fz::1", "Fz::3"]}
         )
         aplicaciones = formulas.registrar_aplicacion_formula(
             aplicaciones,
-            {"clave": "impulso", "rangos": ["Fz::2", "Fz::4"]},
+            {"clave": "impulso", "intervalos": ["Fz::2", "Fz::4"]},
         )
 
         self.assertEqual(
-            aplicaciones["potencia"]["rangos"], ["Fz::1", "Fz::3"]
+            aplicaciones["potencia"]["intervalos"], ["Fz::1", "Fz::3"]
         )
         self.assertEqual(
-            aplicaciones["impulso"]["rangos"], ["Fz::2", "Fz::4"]
+            aplicaciones["impulso"]["intervalos"], ["Fz::2", "Fz::4"]
         )
 
-    def test_reaplicar_una_formula_agrega_rangos_sin_borrar_los_anteriores(self):
+    def test_reaplicar_una_formula_agrega_intervalos_sin_borrar_los_anteriores(self):
         aplicaciones = {
             "potencia": {
                 "clave": "potencia",
-                "rangos": ["Fz::1", "Fz::2"],
+                "intervalos": ["Fz::1", "Fz::2"],
             },
-            "impulso": {"clave": "impulso", "rangos": ["Fz::4"]},
+            "impulso": {"clave": "impulso", "intervalos": ["Fz::4"]},
         }
         aplicaciones = formulas.registrar_aplicacion_formula(
             aplicaciones,
-            {"clave": "potencia", "rangos": ["Fz::3", "Fz::3"]},
+            {"clave": "potencia", "intervalos": ["Fz::3", "Fz::3"]},
         )
 
-        self.assertEqual(aplicaciones["impulso"]["rangos"], ["Fz::4"])
+        self.assertEqual(aplicaciones["impulso"]["intervalos"], ["Fz::4"])
         self.assertEqual(
-            aplicaciones["potencia"]["rangos"],
+            aplicaciones["potencia"]["intervalos"],
             ["Fz::1", "Fz::2", "Fz::3"],
         )
         self.assertEqual(list(aplicaciones), ["impulso", "potencia"])
@@ -678,34 +927,34 @@ class TestPaleta(unittest.TestCase):
             paleta.PALETAS[paleta.MODO_ESTANDAR]["senal_filtrada"],
         )
 
-    def test_colores_de_rango_son_deterministicos_y_ciclan(self):
-        colores = paleta.colores_rangos()
-        self.assertEqual(paleta.color_rango(1), colores[0])
-        self.assertEqual(paleta.color_rango(len(colores) + 1), colores[0])
+    def test_colores_de_intervalo_son_deterministicos_y_ciclan(self):
+        colores = paleta.colores_intervalos()
+        self.assertEqual(paleta.color_intervalo(1), colores[0])
+        self.assertEqual(paleta.color_intervalo(len(colores) + 1), colores[0])
 
     def test_recolorear_ida_y_vuelta_devuelve_los_colores_originales(self):
-        gestor = GestorRangos()
+        gestor = GestorIntervalos()
         gestor.agregar(10, 20)
         gestor.agregar(30, 40)
-        originales = [rango.color for rango in gestor.listar()]
+        originales = [intervalo.color for intervalo in gestor.listar()]
 
         paleta.set_modo_daltonico(True)
         gestor.recolorear()
-        daltonicos = [rango.color for rango in gestor.listar()]
+        daltonicos = [intervalo.color for intervalo in gestor.listar()]
 
         paleta.set_modo_daltonico(False)
         gestor.recolorear()
 
         self.assertNotEqual(daltonicos, originales)
-        self.assertEqual([rango.color for rango in gestor.listar()], originales)
-        # Recolorear no toca los datos del rango.
+        self.assertEqual([intervalo.color for intervalo in gestor.listar()], originales)
+        # Recolorear no toca los datos del intervalo.
         self.assertEqual(
             [(r.numero, r.desde, r.hasta) for r in gestor.listar()],
             [(1, 10, 20), (2, 30, 40)],
         )
 
     def test_la_paleta_accesible_no_repite_colores(self):
-        colores = paleta.PALETAS[paleta.MODO_DALTONICO]["rangos"]
+        colores = paleta.PALETAS[paleta.MODO_DALTONICO]["intervalos"]
         self.assertEqual(len(colores), len(set(colores)))
 
     def test_nuevos_modos_y_modo_visual_desconocido(self):
@@ -721,7 +970,7 @@ class TestPaleta(unittest.TestCase):
     def test_modo_completo_es_una_rampa_de_grises_sin_repetir(self):
         paleta.set_modo_visual(paleta.MODO_COMPLETO)
         try:
-            grises = paleta.colores_rangos()
+            grises = paleta.colores_intervalos()
             self.assertEqual(len(grises), len(set(grises)))
             # Todos son grises (R == G == B).
             for hex_color in grises:
@@ -742,10 +991,10 @@ class TestPaleta(unittest.TestCase):
 
     def test_paleta_azul_amarillo_esta_definida_y_sin_repetir(self):
         colores = paleta.PALETAS[paleta.MODO_AZUL_AMARILLO]
-        rangos = colores["rangos"]
-        self.assertEqual(len(rangos), len(set(rangos)))
+        intervalos = colores["intervalos"]
+        self.assertEqual(len(intervalos), len(set(intervalos)))
         # Todos los colores usados tienen nombre humano para el tooltip.
-        usados = list(rangos) + [colores["senal_original"], colores["senal_filtrada"],
+        usados = list(intervalos) + [colores["senal_original"], colores["senal_filtrada"],
                                  colores["senal_formula"], colores["seleccion"]]
         for hex_color in usados:
             self.assertIn(hex_color.upper(), paleta.NOMBRES_COLOR)
@@ -772,7 +1021,7 @@ class TestAccesibilidad(unittest.TestCase):
         # Grosor base, línea sólida y paleta estándar sin importar las opciones.
         self.assertEqual(accesibilidad.grosor_senal("original"), 1.2)
         self.assertEqual(accesibilidad.grosor_senal("filtrada"), 2.2)
-        self.assertEqual(accesibilidad.grosor_rango(), 2.0)
+        self.assertEqual(accesibilidad.grosor_intervalo(), 2.0)
         for tipo in (accesibilidad.TIPO_LINEA_ORIGINAL,
                      accesibilidad.TIPO_LINEA_FILTRADA,
                      accesibilidad.TIPO_LINEA_FORMULA):
@@ -830,7 +1079,7 @@ class TestAccesibilidad(unittest.TestCase):
         accesibilidad.set_activo(True)
         accesibilidad.set_tipo_vision(accesibilidad.TIPO_COMPLETO)
         self.assertEqual(accesibilidad.grosor_senal("original"), round(1.2 * 1.7, 2))
-        self.assertEqual(accesibilidad.grosor_rango(), round(2.0 * 1.7, 2))
+        self.assertEqual(accesibilidad.grosor_intervalo(), round(2.0 * 1.7, 2))
         self.assertEqual(accesibilidad.estilo_linea("original"), accesibilidad.ESTILO_PUNTEADA)
         self.assertEqual(accesibilidad.estilo_linea("filtrada"), accesibilidad.ESTILO_SOLIDA)
         self.assertEqual(accesibilidad.estilo_linea("formula"), accesibilidad.ESTILO_DISCONTINUA)
@@ -854,15 +1103,16 @@ class TestProyecto(unittest.TestCase):
     def test_ida_y_vuelta_de_anotaciones(self):
         filas = [
             {
+                # El vocabulario del CSV persistido sigue siendo el histórico.
                 "tipo": "rango", "senal": "Fuerza X - Fx", "columna": "Fx",
                 "numero": 1, "padre": "", "desde": 1, "hasta": 297,
-                "nombre": "Rango 1", "nota": "El usuario está sentado",
+                "nombre": "Intervalo 1", "nota": "El usuario está sentado",
                 "fuente": "original",
             },
             {
                 "tipo": "subrango", "senal": "Fuerza X - Fx", "columna": "Fx",
                 "numero": 1, "padre": "Fx::1", "desde": 10, "hasta": 50,
-                "nombre": "Rango 1", "nota": "", "fuente": "",
+                "nombre": "Intervalo 1", "nota": "", "fuente": "",
             },
         ]
 
@@ -878,7 +1128,7 @@ class TestProyecto(unittest.TestCase):
             {
                 "tipo": "rango", "senal": "Fuerza X - Fx", "columna": "Fx",
                 "numero": 1, "padre": "", "desde": 1, "hasta": 297,
-                "nombre": "Rango 1", "nota": "", "fuente": "filtrada",
+                "nombre": "Intervalo 1", "nota": "", "fuente": "filtrada",
             },
         ]
 
@@ -893,7 +1143,7 @@ class TestProyecto(unittest.TestCase):
         # Formato anterior: los proyectos ya guardados no tienen «fuente».
         contenido = (
             "tipo,senal,columna,numero,padre,desde,hasta,nombre,nota\n"
-            "rango,Fuerza X - Fx,Fx,1,,1,297,Rango 1,El usuario esta sentado\n"
+            "rango,Fuerza X - Fx,Fx,1,,1,297,Intervalo 1,El usuario esta sentado\n"
         )
 
         with tempfile.TemporaryDirectory() as carpeta:
@@ -908,10 +1158,10 @@ class TestProyecto(unittest.TestCase):
     def test_descarta_filas_corruptas(self):
         contenido = (
             "tipo,senal,columna,numero,padre,desde,hasta,nombre,nota\n"
-            "rango,Fuerza X - Fx,Fx,1,,1,297,Rango 1,ok\n"
-            "rango,Fuerza X - Fx,Fx,dos,,1,297,Rango 2,numero invalido\n"
-            "basura,Fuerza X - Fx,Fx,3,,1,297,Rango 3,tipo invalido\n"
-            "rango,Fuerza X - Fx,,4,,1,297,Rango 4,sin columna\n"
+            "rango,Fuerza X - Fx,Fx,1,,1,297,Intervalo 1,ok\n"
+            "rango,Fuerza X - Fx,Fx,dos,,1,297,Intervalo 2,numero invalido\n"
+            "basura,Fuerza X - Fx,Fx,3,,1,297,Intervalo 3,tipo invalido\n"
+            "rango,Fuerza X - Fx,,4,,1,297,Intervalo 4,sin columna\n"
         )
 
         with tempfile.TemporaryDirectory() as carpeta:

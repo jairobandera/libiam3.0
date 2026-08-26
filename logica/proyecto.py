@@ -3,7 +3,7 @@
 Un proyecto son dos archivos hermanos dentro de esa carpeta:
 
 ``<nombre>.csv``              copia del CSV original.
-``<nombre>_anotaciones.csv``  rangos, sub-rangos y notas trabajados.
+``<nombre>_anotaciones.csv``  intervalos, sub-intervalos y notas trabajados.
 
 **No se guarda nada en la base de datos.** Lo único que asocia un CSV con el
 trabajo del usuario es el nombre del archivo: al abrir ``<nombre>.csv`` se
@@ -55,7 +55,7 @@ CAMPOS_ANOTACIONES = (
     "hasta",
     "nombre",
     "nota",
-    # Sobre qué serie se trabajó el rango: "original" o "filtrada". Se agregó
+    # Sobre qué serie se trabajó el intervalo: "original" o "filtrada". Se agregó
     # después, así que los archivos viejos no la traen y se leen igual.
     "fuente",
 )
@@ -235,6 +235,8 @@ def leer_anotaciones(ruta: str) -> list[dict]:
     with open(ruta, "r", newline="", encoding="utf-8-sig") as archivo:
         for cruda in csv.DictReader(archivo):
             tipo = (cruda.get("tipo") or "").strip().lower()
+            # El vocabulario persistido no cambia: los proyectos viejos siguen
+            # leyéndose tal cual, aunque la interfaz diga «intervalo».
             if tipo not in ("rango", "subrango"):
                 continue
             columna = (cruda.get("columna") or "").strip()

@@ -17,7 +17,7 @@ from ui.cabecera.cabeceraPrincipal.configuracion import ConfiguracionDialog
 
 class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior en si
 
-    superposicionRangosCambiada = Signal(bool)
+    superposicionIntervalosCambiada = Signal(bool)
     noPreguntarSuperposicionCambiada = Signal(bool)
     guardarSolicitado = Signal()
     cargarSolicitado = Signal()
@@ -31,7 +31,7 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         super().__init__()
         self.setObjectName("topHeader")
         # Configuración de sesión (no se persiste).
-        self.superposicion_rangos = False
+        self.superposicion_intervalos = False
         self.no_preguntar_superposicion = False
         self.init_ui()
 
@@ -110,12 +110,12 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
             elif texto == "Cargar":
                 btn.setToolTip(
                     "Abrir un proyecto guardado en la carpeta «archivos» "
-                    "con sus rangos y notas."
+                    "con sus intervalos y notas."
                 )
                 btn.clicked.connect(self.cargarSolicitado.emit)
             elif texto == "Exportar":
                 btn.setToolTip(
-                    "Exportar los datos, rangos y resultados del análisis."
+                    "Exportar los datos, intervalos y resultados del análisis."
                 )
                 btn.clicked.connect(self.exportarSolicitado.emit)
 
@@ -133,7 +133,7 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
     def _mostrar_configuracion(self):
         dialogo = ConfiguracionDialog(
             self.window(),
-            superposicion=self.superposicion_rangos,
+            superposicion=self.superposicion_intervalos,
             no_preguntar=self.no_preguntar_superposicion,
         )
         dialogo.superposicionCambiada.connect(self._on_superposicion_cambiada)
@@ -147,8 +147,8 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         dialogo.exec()
 
     def _on_superposicion_cambiada(self, activo):
-        self.superposicion_rangos = bool(activo)
-        self.superposicionRangosCambiada.emit(self.superposicion_rangos)
+        self.superposicion_intervalos = bool(activo)
+        self.superposicionIntervalosCambiada.emit(self.superposicion_intervalos)
 
     def _on_no_preguntar_cambiada(self, activo):
         self.no_preguntar_superposicion = bool(activo)

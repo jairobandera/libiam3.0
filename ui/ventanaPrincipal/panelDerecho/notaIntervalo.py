@@ -11,13 +11,13 @@ from PySide6.QtWidgets import (
 
 
 class NotaDialog(QDialog):
-    """Editor de una nota breve para un rango o sub-rango, con contador."""
+    """Editor de una nota breve para un intervalo o sub-intervalo, con contador."""
 
     MAX = 1000
 
     def __init__(self, parent=None, nombre="", nota=""):
         super().__init__(parent)
-        self.setWindowTitle("Nota del rango")
+        self.setWindowTitle("Nota del intervalo")
         self.setModal(True)
         self.setMinimumWidth(420)
         self._init_ui(nombre, nota)
@@ -34,7 +34,7 @@ class NotaDialog(QDialog):
 
         ayuda = QLabel(
             "Escribí una breve descripción o recordatorio de lo que pasa en "
-            "este rango."
+            "este intervalo."
         )
         ayuda.setWordWrap(True)
         ayuda.setStyleSheet("color: #B0B0B0;")

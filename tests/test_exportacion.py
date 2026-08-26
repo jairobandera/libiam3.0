@@ -71,8 +71,8 @@ class TestExportacion(unittest.TestCase):
             ],
         )
 
-    def test_rangos_exportan_sus_muestras_y_notas(self):
-        rangos = [
+    def test_intervalos_exportan_sus_muestras_y_notas(self):
+        intervalos = [
             {
                 "id": "Fz::1",
                 "numero": 1,
@@ -83,11 +83,11 @@ class TestExportacion(unittest.TestCase):
                 "nombre": "Salto",
                 "nota": "Intento válido",
                 "fuente": "filtrada",
-                "es_subrango": False,
+                "es_subintervalo": False,
             }
         ]
-        tabla = exportacion.preparar_muestras_rangos(
-            rangos, self.original, self.filtrado, "Frame", {"Fz"}
+        tabla = exportacion.preparar_muestras_intervalos(
+            intervalos, self.original, self.filtrado, "Frame", {"Fz"}
         )
 
         self.assertEqual(tabla["Frame"].tolist(), [1, 2])
@@ -108,7 +108,7 @@ class TestExportacion(unittest.TestCase):
                 "resultados": [
                     {
                         "id": "Fz::1",
-                        "nombre": "Rango 1",
+                        "nombre": "Intervalo 1",
                         "senal": "Fuerza Z",
                         "desde": 1,
                         "hasta": 2,
@@ -128,7 +128,7 @@ class TestExportacion(unittest.TestCase):
                     },
                     {
                         "id": "Fz::2",
-                        "nombre": "Rango 2",
+                        "nombre": "Intervalo 2",
                         "senal": "Fuerza Z",
                         "desde": 3,
                         "hasta": 4,
@@ -161,7 +161,7 @@ class TestExportacion(unittest.TestCase):
                 "resultados": [
                     {
                         "id": "Fz::1",
-                        "nombre": "Rango 1",
+                        "nombre": "Intervalo 1",
                         "senal": "Fuerza Z",
                         "desde": 1,
                         "hasta": 2,
@@ -195,7 +195,7 @@ class TestExportacion(unittest.TestCase):
                 "resultados": [
                     {
                         "id": "Fz::1",
-                        "nombre": "Rango 1",
+                        "nombre": "Intervalo 1",
                         "senal": "Fuerza Z",
                         "desde": 1,
                         "hasta": 2,
@@ -211,7 +211,7 @@ class TestExportacion(unittest.TestCase):
                 "resultados": [
                     {
                         "id": "Fz::2",
-                        "nombre": "Rango 2",
+                        "nombre": "Intervalo 2",
                         "senal": "Fuerza Z",
                         "desde": 3,
                         "hasta": 4,
@@ -248,14 +248,14 @@ class TestExportacion(unittest.TestCase):
             paquete = carpeta / "analisis.zip"
             exportacion.escribir_paquete(
                 paquete,
-                {"datos.csv": self.original, "rangos.csv": pd.DataFrame()},
+                {"datos.csv": self.original, "intervalos.csv": pd.DataFrame()},
                 "Información de prueba\n",
             )
             with zipfile.ZipFile(paquete) as archivo:
                 self.assertIsNone(archivo.testzip())
                 self.assertEqual(
                     set(archivo.namelist()),
-                    {"datos.csv", "rangos.csv", "informacion.txt"},
+                    {"datos.csv", "intervalos.csv", "informacion.txt"},
                 )
                 self.assertTrue(archivo.read("datos.csv").startswith(codecs.BOM_UTF8))
 
