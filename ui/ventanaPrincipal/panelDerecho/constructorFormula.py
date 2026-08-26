@@ -27,22 +27,20 @@ from ui.ventanaPrincipal.panelDerecho.vistaFormula import VistaFormulaMatematica
 
 PLANTILLAS = (
     {
-        "texto": "RMS de la señal",
-        "nombre": "RMS personalizada",
-        "expresion": "rms(senal)",
-        "unidad": "",
-    },
-    {
-        "texto": "Normalizar por peso",
-        "nombre": "Señal normalizada por peso",
-        "expresion": "senal / (masa * gravedad)",
-        "unidad": "BW",
-    },
-    {
-        "texto": "Potencia vertical",
-        "nombre": "Potencia vertical personalizada",
+        "texto": "Potencia",
+        "nombre": "Potencia personalizada",
         "expresion": "Fz * integral((Fz - masa * gravedad) / masa)",
         "unidad": "W",
+        "ayuda": "Cargar la fórmula de potencia para editarla. "
+                 "Usa la fuerza vertical (Fz).",
+    },
+    {
+        "texto": "Impulso",
+        "nombre": "Impulso personalizado",
+        "expresion": "integral(Fz - masa * gravedad)",
+        "unidad": "N·s",
+        "ayuda": "Cargar la fórmula de impulso para editarla. "
+                 "Usa la fuerza vertical (Fz).",
     },
 )
 
@@ -372,7 +370,7 @@ class ConstructorFormula(QDialog):
             boton.setObjectName("btnPlantillaFormula")
             boton.setCursor(Qt.PointingHandCursor)
             boton.setToolTip(
-                f"{plantilla['nombre']}\n{plantilla['expresion']}"
+                f"{plantilla['ayuda']}\n{plantilla['expresion']}"
             )
             boton.clicked.connect(
                 lambda _marcado=False, datos=plantilla: self._usar_plantilla(datos)

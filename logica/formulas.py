@@ -289,30 +289,6 @@ def normalizar_unidad_formula(unidad) -> str:
     return conocidas.get(texto.casefold(), texto)
 
 
-CALCULOS_AUXILIARES = (
-    {
-        "clave": "aux_fuerza_neta_vertical",
-        "nombre": "Fuerza neta vertical",
-        "expresion": "Fz - masa * gravedad",
-        "descripcion": "Resta el peso corporal a la fuerza vertical.",
-        "unidad": "N",
-    },
-    {
-        "clave": "aux_aceleracion_vertical",
-        "nombre": "Aceleración vertical",
-        "expresion": "(Fz - masa * gravedad) / masa",
-        "descripcion": "Obtiene la aceleración vertical a partir de la fuerza neta.",
-        "unidad": "m/s²",
-    },
-    {
-        "clave": "aux_velocidad_vertical",
-        "nombre": "Velocidad vertical",
-        "expresion": "integral((Fz - masa * gravedad) / masa)",
-        "descripcion": "Integra la aceleración vertical usando la frecuencia del archivo.",
-        "unidad": "m/s",
-    },
-)
-
 # (texto que se muestra, nombre que se inserta, explicación breve)
 FUNCIONES_CONSTRUCTOR = (
     ("Absoluto", "abs", "Valor absoluto de cada muestra"),
@@ -827,19 +803,8 @@ def descripcion_formula(clave):
 
 
 def calculos_reutilizables(excluir_clave=None):
-    """Cálculos que el constructor puede copiar dentro de otra expresión."""
+    """Fórmulas que el constructor puede copiar dentro de otra expresión."""
     disponibles = []
-    for calculo in CALCULOS_AUXILIARES:
-        analisis = analizar_expresion_personalizada(calculo["expresion"])
-        disponibles.append(
-            {
-                **calculo,
-                "expresion": analisis["texto"],
-                "tipo": "Cálculo auxiliar",
-                "resultado_escalar": analisis["resultado_escalar"],
-            }
-        )
-
     for clave, descripcion in FORMULAS.items():
         if clave == excluir_clave:
             continue

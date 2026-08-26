@@ -768,14 +768,17 @@ class TestConstructorFormulas(unittest.TestCase):
         self.assertEqual(formulas.normalizar_unidad_formula("m/s^2"), "m/s²")
         self.assertEqual(formulas.normalizar_unidad_formula("uV"), "µV")
 
-    def test_los_calculos_auxiliares_son_formulas_validas(self):
+    def test_reutilizar_ofrece_las_integradas_sin_duplicados_ni_vertical(self):
         disponibles = formulas.calculos_reutilizables()
-        auxiliares = [d for d in disponibles if d["tipo"] == "Cálculo auxiliar"]
 
-        self.assertEqual(len(auxiliares), 3)
-        self.assertIn("Velocidad vertical", {d["nombre"] for d in auxiliares})
-        for calculo in auxiliares:
+        self.assertEqual(len(disponibles), 5)
+        self.assertEqual(
+            {d["nombre"] for d in disponibles},
+            {"Fuerza neta", "Aceleración", "Velocidad", "Potencia", "Impulso"},
+        )
+        for calculo in disponibles:
             with self.subTest(calculo=calculo["nombre"]):
+                self.assertEqual(calculo["tipo"], "Fórmula incorporada")
                 analisis = formulas.analizar_expresion_personalizada(
                     calculo["expresion"]
                 )
@@ -785,7 +788,7 @@ class TestConstructorFormulas(unittest.TestCase):
         velocidad = next(
             calculo
             for calculo in formulas.calculos_reutilizables()
-            if calculo["clave"] == "aux_velocidad_vertical"
+            if calculo["clave"] == "velocidad"
         )
         expresion = f"Fz * ({velocidad['expresion']})"
         fz = np.array([700.0, 840.0, 980.0, 1120.0])
@@ -797,6 +800,22 @@ class TestConstructorFormulas(unittest.TestCase):
         esperada = formulas.potencia(fz, 70.0, 10.0, 100.0)
 
         np.testing.assert_allclose(construida, esperada)
+
+    def test_conserva_una_formula_propia_aunque_copie_una_integrada(self):
+        clave = "copia_fuerza_neta_test"
+        self.addCleanup(formulas.quitar_formula_personalizada, clave)
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave,
+                "nombre": "Mi fuerza neta",
+                "expresion": "Fz - masa * gravedad",
+                "unidad": "N",
+            }
+        )
+        disponibles = {d["clave"]: d for d in formulas.calculos_reutilizables()}
+
+        self.assertEqual(disponibles[clave]["nombre"], "Mi fuerza neta")
+        self.assertEqual(disponibles["fuerza_neta"]["nombre"], "Fuerza neta")
 
     def test_puede_copiar_una_formula_personalizada_dentro_de_otra(self):
         clave = "formula_reutilizable_test"
