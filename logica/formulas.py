@@ -218,6 +218,7 @@ NOMBRES_ROLES = {
 VARIABLE_SENAL_INTERVALO = "senal"
 VARIABLES_CONTEXTO = {
     "masa": "Cargá la masa del sujeto en el panel izquierdo.",
+    "estatura": "Cargá la estatura del sujeto en el panel izquierdo.",
     "gravedad": "La gravedad debe ser mayor que cero.",
     "frecuencia": "No se pudo determinar la frecuencia de muestreo. "
                   "Ingresala manualmente en «Filtro de frecuencias».",
@@ -253,6 +254,7 @@ def nombre_variable_constructor(variable) -> str:
         return f"{variable} ({NOMBRES_ROLES[variable].lower()})"
     return {
         "masa": "masa",
+        "estatura": "estatura",
         "gravedad": "gravedad",
         "frecuencia": "frecuencia",
         "tiempo": "tiempo",
@@ -568,12 +570,7 @@ FORMULAS = {
         "salida_rol": "Fz",
         "integra_en_registro": False,
         "requiere_roles": ("Fz",),
-        "intervalos_en_rol": {
-            "rol": "Fz",
-            "mensaje": "La aceleración se calcula sobre la componente vertical "
-                       "de la fuerza (Fz), que es la que acelera al sujeto "
-                       "contra la gravedad.",
-        },
+        "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
             "masa": "Cargá la masa del sujeto en el panel izquierdo para "
                     "poder calcular la aceleración.",
@@ -590,12 +587,7 @@ FORMULAS = {
         "salida_rol": "Fz",
         "integra_en_registro": True,
         "requiere_roles": ("Fz",),
-        "intervalos_en_rol": {
-            "rol": "Fz",
-            "mensaje": "La velocidad se calcula sobre la componente vertical "
-                       "de la fuerza (Fz), que es la que acelera al sujeto "
-                       "contra la gravedad.",
-        },
+        "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
             "masa": "Cargá la masa del sujeto en el panel izquierdo para "
                     "poder calcular la velocidad.",
@@ -616,12 +608,7 @@ FORMULAS = {
         "salida_rol": "Fz",
         "integra_en_registro": True,
         "requiere_roles": ("Fz",),
-        "intervalos_en_rol": {
-            "rol": "Fz",
-            "mensaje": "La potencia implementada en el sistema corresponde a la "
-                       "potencia mecánica vertical y únicamente puede calcularse "
-                       "sobre la fuerza vertical (Fz).",
-        },
+        "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
             "masa": "Cargá la masa del sujeto en el panel izquierdo para "
                     "poder calcular la potencia.",
@@ -640,12 +627,7 @@ FORMULAS = {
         "salida_rol": "Fz",
         "integra_en_registro": True,
         "requiere_roles": ("Fz",),
-        "intervalos_en_rol": {
-            "rol": "Fz",
-            "mensaje": "El impulso se calcula sobre la componente vertical de "
-                       "la fuerza (Fz), que es la que acelera al sujeto contra "
-                       "la gravedad.",
-        },
+        "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
             "masa": "Cargá la masa del sujeto en el panel izquierdo para "
                     "poder calcular el impulso.",
@@ -665,12 +647,7 @@ FORMULAS = {
         "salida_rol": "Fz",
         "integra_en_registro": False,
         "requiere_roles": ("Fz",),
-        "intervalos_en_rol": {
-            "rol": "Fz",
-            "mensaje": "La fuerza neta se calcula sobre la componente vertical "
-                       "de la fuerza (Fz), que es la que acelera al sujeto "
-                       "contra la gravedad.",
-        },
+        "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
             "masa": "Cargá la masa del sujeto en el panel izquierdo para "
                     "poder calcular la fuerza neta.",
@@ -755,13 +732,7 @@ def crear_descriptor_personalizado(datos) -> dict:
     }
     if not usa_senal and len(roles_requeridos) == 1:
         rol = roles_requeridos[0]
-        descriptor["intervalos_en_rol"] = {
-            "rol": rol,
-            "mensaje": (
-                f"«{nombre}» usa {rol} como señal principal. Seleccioná intervalos "
-                f"de la gráfica correspondiente a {rol}."
-            ),
-        }
+        descriptor["intervalos_en_rol"] = {"rol": rol}
     return descriptor
 
 
@@ -884,6 +855,163 @@ def registrar_aplicacion_formula(aplicaciones, configuracion):
     resultado.pop(clave, None)
     resultado[clave] = configuracion
     return resultado
+
+
+def filtrar_aplicaciones_por_intervalos(aplicaciones, intervalos_validos):
+    """Conserva solo los IDs válidos sin alterar el orden de las fórmulas."""
+    validos = set(intervalos_validos or ())
+    resultado = {}
+    for clave, configuracion in (aplicaciones or {}).items():
+        intervalos = [
+            identificador
+            for identificador in configuracion.get("intervalos") or ()
+            if identificador in validos
+        ]
+        if not intervalos:
+            continue
+        vigente = dict(configuracion)
+        vigente["intervalos"] = intervalos
+        resultado[clave] = vigente
+    return resultado
+
+
+def solo_ids_intervalos_padre(identificadores, ids_subintervalos):
+    """Excluye subintervalos de una selección destinada al panel principal."""
+    subintervalos = set(ids_subintervalos or ())
+    return [
+        identificador
+        for identificador in identificadores or ()
+        if identificador not in subintervalos
+    ]
+
+
+def solo_ids_intervalos_padre_de_columna(
+    intervalos,
+    identificadores,
+    columna,
+):
+    """Limita el cálculo a los padres de la señal elegida en el panel."""
+    return solo_ids_por_nivel_de_columna(
+        intervalos,
+        identificadores,
+        columna,
+        "intervalos",
+    )
+
+
+def solo_ids_subintervalos_de_columna(
+    intervalos,
+    identificadores,
+    columna,
+):
+    """Limita el cálculo a los subintervalos de la señal elegida."""
+    return solo_ids_por_nivel_de_columna(
+        intervalos,
+        identificadores,
+        columna,
+        "subintervalos",
+    )
+
+
+def solo_ids_por_nivel_de_columna(
+    intervalos,
+    identificadores,
+    columna,
+    nivel,
+):
+    """Devuelve IDs de una señal y un único nivel, conservando su orden.
+
+    ``nivel`` acepta ``"intervalos"`` o ``"subintervalos"``. Esta función
+    mantiene separadas ambas selecciones antes de que lleguen al motor.
+    """
+    buscar_subintervalos = nivel == "subintervalos"
+    permitidos = {
+        intervalo.get("id", intervalo.get("numero"))
+        for intervalo in intervalos or ()
+        if intervalo.get("columna", "__global__") == columna
+        and bool(intervalo.get("es_subintervalo")) == buscar_subintervalos
+    }
+    return [
+        identificador
+        for identificador in identificadores or ()
+        if identificador in permitidos
+    ]
+
+
+def modo_selecciona_numero(modo, numero):
+    """Indica si Todos/Pares/Impares/Ninguno debe marcar un número."""
+    if modo == "todos":
+        return True
+    if modo == "pares":
+        return int(numero) % 2 == 0
+    if modo == "impares":
+        return int(numero) % 2 == 1
+    return False
+
+
+def usar_intervalos_como_recortes(intervalos, columna, senal):
+    """Orienta los límites elegidos hacia la señal que calcula la fórmula.
+
+    El identificador, el nombre y los frames continúan siendo los del intervalo
+    marcado. Solo cambia la señal asociada al resultado. Así un recorte
+    replicado en Fx puede delimitar un cálculo cuya entrada real es Fz.
+    """
+    resultado = []
+    for intervalo in intervalos or ():
+        recorte = dict(intervalo)
+        recorte["columna"] = columna
+        recorte["senal"] = senal
+        resultado.append(recorte)
+    return resultado
+
+
+def destinos_visuales_formula(
+    intervalo,
+    columna_salida,
+    intervalos_disponibles=(),
+    usa_senal_intervalo=False,
+):
+    """Indica en qué gráficas debe mostrarse el tramo calculado.
+
+    La señal que interviene en la cuenta y las gráficas donde se presenta el
+    resultado son conceptos distintos. Una fórmula de Fz continúa usando Fz,
+    pero si el intervalo nació como una réplica su curva también se muestra en
+    todas las copias visibles de ese mismo intervalo.
+
+    Las fórmulas que usan ``senal`` son la excepción: su entrada depende de la
+    gráfica propietaria, por lo que no se copia su resultado a otra señal.
+    """
+    intervalo = intervalo or {}
+    columna_intervalo = intervalo.get("columna")
+    if usa_senal_intervalo:
+        return [columna_intervalo] if columna_intervalo else []
+
+    destinos = []
+
+    def agregar(columna):
+        if columna and columna not in destinos:
+            destinos.append(columna)
+
+    agregar(columna_salida or columna_intervalo)
+
+    try:
+        indice_color = int(intervalo.get("indice_color") or 0)
+    except (TypeError, ValueError):
+        indice_color = 0
+    if indice_color <= 0:
+        return destinos
+
+    for candidato in intervalos_disponibles or ():
+        if candidato.get("es_subintervalo"):
+            continue
+        try:
+            indice_candidato = int(candidato.get("indice_color") or 0)
+        except (TypeError, ValueError):
+            continue
+        if indice_candidato == indice_color:
+            agregar(candidato.get("columna"))
+
+    return destinos
 
 
 def validar_formula(clave, contexto, roles_disponibles=()):

@@ -113,14 +113,6 @@ def aplicar_butterworth(
         Wn = frecuencias_corte / nyq
         btype = "high"
 
-    print(
-        "[DIAGNOSTICO_FILTRO] "
-        f"frecuencia_muestreo={frecuencia_muestreo:g} Hz | "
-        f"nyq={nyq:g} Hz | "
-        f"cortes={frecuencias_corte} Hz | "
-        f"Wn={Wn} | btype={btype} | orden={orden}"
-    )
-
     b, a = butter(orden, Wn, btype=btype)
     try:
         filtrados = filtfilt(b, a, datos_continuos)

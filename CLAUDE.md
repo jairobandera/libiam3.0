@@ -57,6 +57,13 @@ Two-layer split: **`logica/`** is pure, UI-free, testable business logic; **`ui/
 4. **`PanelDerecho`** (right) — `QStackedWidget` with four panels: `ConfigColumnas` (mapping), `Filtros`, `Formulas` (ranges), `DetectarCabeceras`. `BarraBotones` toggles visibility.
 5. **`Cabecera`** (top) — Inicio / Guardar / Exportar / Configurar / Acerca de. Owns the session config dialog and the save action.
 
+Project save uses three sibling files in `archivos/`: the original CSV,
+`<name>_anotaciones.csv`, and the optional `<name>_estado.json`. The JSON stores
+subject variables, sampling frequency, per-column filter configurations, graph
+order/visibility, and formula data source. Missing JSON means an older project
+and must remain valid. Main/subinterval window geometry is kept separately with
+Qt `QSettings`, because it is a user preference rather than project data.
+
 Widgets are wired **entirely by Qt signals connected in `VentanaPrincipal.init_ui()`** — that method is the single source of truth for cross-panel communication. Add new interactions there rather than reaching into sibling widgets.
 
 ### CSV reading (`logica/lector_csv.py`)
@@ -99,17 +106,29 @@ J(t) = ∫ (Fz(t) − m·g) dt     impulso()      — accumulated, in N·s
 
 `_validar_parametros()` gates on mass, gravity and sampling rate, each with a message naming what's missing. `TestPotencia` and `TestImpulso` each cover a constant-force case checkable by hand: 2·m·g for 1 s gives exactly 10 m/s, 14 000 W and 700 N·s. `TestImpulso.test_el_neto_del_rango_resta_los_extremos_del_recorte` is the regression guard for the slicing rule — it puts an impulse *before* the range so taking the last value would be visibly wrong.
 
-**Formulas are computed on parent ranges only, never on sub-ranges.** Sub-ranges get their own calculation later, inside the `VentanaRegion` that opens on double-click — that's where they're actually visible. `Formulas._rangos_padre_seleccionados()` filters them out for both the request and the Aplicar button's enabled state, and `_rangos_seleccionados()` in `AreaCentralGraficas` drops `es_subrango` again so the rule holds even if another caller appears.
+**Parent ranges and sub-ranges use separate application registries.** `AreaCentralGraficas.formulas_activas` and `_calculos_formulas` belong to parent intervals; `formulas_subintervalos_activas` and `_calculos_formulas_subintervalos` belong to subintervals. The main `Formulas` panel exposes `nivel_calculo` (`intervalos` / `subintervalos`) and renders checkboxes for only that level. `Todos/Pares/Impares/Ninguno`, Apply, Remove, visible curves and result cards follow that level, so IDs never cross paths. In subinterval mode, rows from every parent of the current signal are grouped in one list; parity uses each subinterval's `orden` inside its own parent (A2, B2, C2...).
 
-**Formulas are computed on ranges, not on the whole signal.** `Formulas._solicitar_formula()` sends the IDs currently checked plus the `clave` of the formula picked in `PanelCalculo`, so the Todos/Pares/Impares/Ninguno buttons drive what gets calculated. `_marcar_modo_seleccion()` stores the active mode and sets an `activo` property that `#btnResetMapeo[activo="true"]` styles with a blue border. With nothing selected the Aplicar button is disabled and says why in its tooltip.
+`Formulas._intervalos_padre_seleccionados()` and `_subintervalos_seleccionados()` both scope IDs to `cmb_senal.currentData()`. Parent Apply emits `formulaSolicitada`; subinterval Apply emits `formulaSubintervalosSolicitada`. `VentanaPrincipal` routes them to `aplicar_formula()` and `aplicar_formula_subintervalos()` respectively. `AreaCentralGraficas.nivel_calculo_visible` selects which calculation cache `_redibujar_formulas_aplicadas()` and `_emitir_resultado_formula_actual()` expose. Every `VentanaRegion` still derives its curves, results, selected formula and checked IDs from the same central subinterval registry when reopened, and both levels share `_calcular_por_intervalos()` as their mathematical engine.
+
+**Formulas are computed on ranges, not on the whole signal.** `Formulas._solicitar_formula()` sends the IDs checked in the active level plus the `clave` picked in `PanelCalculo`. `_marcar_modo_seleccion()` keeps a separate bulk-selection mode for parents and subintervals and sets an `activo` property styled by the QSS. With nothing selected in the active level, Apply is disabled and explains why in its tooltip.
+
+Checkbox states from other signals remain remembered when navigating the
+combo, but neither parent nor subinterval states may leak into the current
+Apply request.
 
 **`PanelCalculo` (`ui/ventanaPrincipal/panelDerecho/panelCalculo.py`) is the shared UI block** — source combo, formula combo, Aplicar/Quitar, status, results, warnings. Both the right panel (inside `Formulas`) and `VentanaRegion` embed the same widget, so neither duplicates the layout. It knows nothing about ranges or maths: it emits `calcularSolicitado` and renders whatever results it's handed.
 
 `AreaCentralGraficas.aplicar_formula()` (the `clave` key selects which; `formula_predeterminada()` when absent):
 
 - Resolves the formula's `requiere_roles` against `_roles_disponibles()`; it refuses with an explanatory message when a needed signal isn't mapped or is hidden.
+- Treats the selected interval as temporal bounds, independently from the
+  formula input role. A replicated Fx interval can therefore delimit an Fz
+  formula; `usar_intervalos_como_recortes()` redirects the result metadata and
+  curve to Fz without changing the selected ID or frame limits.
 - `_calcular_por_intervalos()` is the shared engine for both parent ranges and the sub-range window, so the two paths can't drift.
-- Draws on the graph of the formula's `salida_rol`; every other graph gets `limpiar_curva_formula()`.
+- Draws a fixed-role formula on its `salida_rol` and on every visible graph
+  containing a replica of the selected interval. Those extra drawings reuse
+  the same numeric curve; they do not replace Fz with the owner signal.
 - Re-applies itself after `_crear_graficas()` / `_actualizar_datos_graficas()`, since `set_datos()` rebuilds the curves. Mass and gravity arrive from `PanelIzquierdo.variablesCambiaron`.
 - Each result row carries `detalles` (empty for potencia). `PanelCalculo._bloque_valores()` renders those instead of pico/media when present, because the peak of an *accumulated* curve says little on its own.
 
@@ -144,7 +163,26 @@ Overlap settings live in `Cabecera` (session-only) and are pushed to `AreaCentra
 
 **All plot colors come from `logica/paleta.py`** — never hardcode a hex in `ui/` for a curve, a range or the selection preview. It holds two palettes (`estandar` and `daltonico`, the latter using the Okabe-Ito series) and a module-level active mode, toggled from `Configurar` → "Paleta accesible para daltonismo" (session-only, like the overlap settings).
 
-The key invariant: **a range's visible color is a pure function of its left-to-right `orden`** (`paleta.color_rango(orden)`), while its internal `numero` stays stable. Saved annotations don't store colors for the same reason.
+Normally a range's visible color follows its left-to-right `orden`, while its
+internal `numero` stays stable. Replicated ranges are the exception: they store
+the same positive `indice_color` in every signal so all copies use one palette
+slot even when their local orders differ. The optional index is saved in the
+annotations CSV; old projects without it remain valid.
+
+### Exporting results and scopes
+
+Formula curves are not appended frame by frame to `datos.csv`. The dedicated
+results table contains one row per formula and interval with `Promedio`,
+`Máximo`, and `Frame del máximo`, plus any formula-specific details. Main and
+sub-range application registries are both reconstructed by
+`resultados_formulas_para_exportar()`, so closing a detail window does not omit
+its calculations. `ExportarDialog` returns either all data (`None`) or explicit
+interval IDs; the same scope filters raw-data rows, interval tables, and formula
+results. Its catalog always comes directly from
+`AreaCentralGraficas.intervalos_para_exportar()`: it includes every parent and
+sub-range from every signal and never reads `Formulas.estados_seleccion` or the
+current signal combo. The list remains scrollable in the `Todo` scope; changing
+one of its checks switches to the dialog's own explicit-range scope.
 
 `AreaCentralGraficas.set_modo_daltonico()` is the entry point: it recolors every gestor and subgestor, then repaints via `GraficaSenal.aplicar_paleta()` — which re-pens the existing `curva_original`/`curva_filtrada` items instead of re-plotting, so the user's zoom survives. Open `VentanaRegion` windows are repainted too (each one carries a `clave_subgestor` for that). `Filtros.aplicar_paleta()` refreshes its color legend separately, wired in `VentanaPrincipal.init_ui()`.
 

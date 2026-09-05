@@ -36,6 +36,13 @@
     background-color: #2D2D30;
 }
 
+#formulasPanel,
+QScrollArea#scrollFormulasSubintervalos,
+QScrollArea#scrollFormulasSubintervalos > QWidget > QWidget {
+    background-color: #2D2D30;
+    border: none;
+}
+
 /* Titulos */
 #tituloPanel {
     font-family: Arial;
@@ -95,6 +102,29 @@
     background-color: #252526;
     border: 1px solid #3E3E42;
     border-radius: 6px;
+}
+
+#listaSubintervalosCalculo {
+    background-color: #1E1E1E;
+    color: #E8E8E8;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    outline: none;
+    font-family: Segoe UI;
+    font-size: 12px;
+}
+
+#listaSubintervalosCalculo::item {
+    padding: 6px 5px;
+}
+
+#listaSubintervalosCalculo::item:hover {
+    background-color: #333337;
+}
+
+#listaSubintervalosCalculo::item:selected {
+    background-color: #2A3F55;
+    color: #FFFFFF;
 }
 
 #seccionFiltro {
@@ -176,6 +206,42 @@
     border: 1px solid #42A5F5;
     color: #FFFFFF;
     background-color: #2A3F55;
+}
+
+/* Selector independiente del nivel que se calcula en el panel principal. */
+#btnNivelCalculo {
+    background-color: transparent;
+    color: #B0B0B0;
+    border: 1px solid #3E3E42;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-family: Segoe UI;
+    font-size: 11px;
+}
+
+#btnNivelCalculo:hover {
+    color: #FFFFFF;
+    border-color: #1976D2;
+}
+
+#btnNivelCalculo[activo="true"] {
+    color: #FFFFFF;
+    border-color: #42A5F5;
+    background-color: #2A3F55;
+}
+
+#grupoSubintervalos {
+    background-color: #29292C;
+    border-top: 1px solid #3E3E42;
+}
+
+#lblCantidadSubintervalos,
+#lblGrupoSubintervalos {
+    font-size: 10px;
+}
+
+#lblCantidadSubintervalos {
+    color: #8A8A8A;
 }
 
 /* --- Recuadro de fórmulas dentro de «Intervalos para cálculos» --- */

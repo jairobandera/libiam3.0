@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QFileDialog
 from logica.config_db import cargar_aliases, buscar_alias, listar_secciones_archivo
 from logica.lector_csv import (
     calcular_frecuencia_efectiva,
+    es_columna_fuera_alcance_actual,
     leer_csv_crudo,
     leer_csv_rapido,
 )
@@ -23,23 +24,27 @@ class CargadorCSV:
     def seleccionar_y_cargar(self):
         """Abre dialogo de seleccion y carga el CSV.
 
-        Retorna una tupla (nombre_archivo, dataframe) o (None, None) si se cancela.
+        Retorna nombre, DataFrame y ruta; los tres son ``None`` si se cancela.
         """
-        ruta_archivo, _ = QFileDialog.getOpenFileName(
-            self.parent,
-            "Seleccionar archivo CSV",
-            "",
-            "Archivos CSV (*.csv);;Todos los archivos (*)"
-        )
+        ruta_archivo = self.seleccionar_archivo()
 
         if not ruta_archivo:
-            return None, None
+            return None, None, None
 
         nombre_archivo = os.path.basename(ruta_archivo)
         df, _ = leer_csv_rapido(ruta_archivo)
         self.ruta_archivo_actual = ruta_archivo
 
         return nombre_archivo, df, ruta_archivo
+
+    def seleccionar_archivo(self):
+        ruta_archivo, _ = QFileDialog.getOpenFileName(
+            self.parent,
+            "Seleccionar archivo CSV",
+            "",
+            "Archivos CSV (*.csv);;Todos los archivos (*)"
+        )
+        return ruta_archivo or None
 
     def parsear_csv_con_secciones(self, ruta_archivo, secciones):
         """Parsea un CSV con múltiples secciones de cabeceras.
@@ -164,8 +169,13 @@ class CargadorCSV:
         tipos_presentes = []
         mapeo = {}
         no_reconocidas = []
+        grupos_columnas = df.attrs.get("grupos_columnas", {})
 
         for col in columnas_originales:
+            if es_columna_fuera_alcance_actual(
+                col, grupos_columnas.get(col, "")
+            ):
+                continue
             col_lower = col.lower().strip()
             encontrado = False
 
@@ -269,6 +279,7 @@ class CargadorCSV:
         subframes = self.detectar_subframes(df)
         frecuencia_muestreo = df.attrs.get("frecuencia_muestreo")
         unidades = dict(df.attrs.get("unidades", {}))
+        columnas_ignoradas = list(df.attrs.get("columnas_ignoradas", []))
 
         tipos_str = ", ".join(deteccion["tipos_presentes"]) if deteccion["tipos_presentes"] else "Sin reconocer"
 
@@ -292,6 +303,8 @@ class CargadorCSV:
             "subframes": subframes,
             "cabeceras_encontradas": cabeceras,
             "unidades": unidades,
+            "columnas_ignoradas": columnas_ignoradas,
+            "cantidad_columnas_ignoradas": len(columnas_ignoradas),
             "frecuencia_muestreo": frecuencia_muestreo,
             "frecuencia_grafica": frecuencia_grafica,
         }

@@ -1,25 +1,29 @@
 """Proyectos guardados en la carpeta «archivos».
 
-Un proyecto son dos archivos hermanos dentro de esa carpeta:
+Un proyecto son hasta tres archivos hermanos dentro de esa carpeta:
 
 ``<nombre>.csv``              copia del CSV original.
 ``<nombre>_anotaciones.csv``  intervalos, sub-intervalos y notas trabajados.
+``<nombre>_estado.json``      variables, filtros y disposición de gráficas.
 
-**No se guarda nada en la base de datos.** Lo único que asocia un CSV con el
-trabajo del usuario es el nombre del archivo: al abrir ``<nombre>.csv`` se
-busca ``<nombre>_anotaciones.csv`` al lado. Por eso el nombre se sanea al
-guardar y la carpeta no se puede cambiar desde la interfaz.
+El archivo de estado es opcional para que los proyectos creados por versiones
+anteriores, que solo tienen CSV y anotaciones, continúen abriendo normalmente.
+Los archivos se asocian por nombre y la carpeta no se puede cambiar desde la
+interfaz.
 """
 
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
 from datetime import datetime, timedelta
 
 
 SUFIJO_ANOTACIONES = "_anotaciones"
+SUFIJO_ESTADO = "_estado"
+VERSION_ESTADO = 1
 
 # Criterios de limpieza de la carpeta. El orden es el que ve el usuario en el
 # desplegable; ``archivo`` no filtra nada, deja que elija a mano.
@@ -58,6 +62,9 @@ CAMPOS_ANOTACIONES = (
     # Sobre qué serie se trabajó el intervalo: "original" o "filtrada". Se agregó
     # después, así que los archivos viejos no la traen y se leen igual.
     "fuente",
+    # Los intervalos replicados comparten el índice de la paleta. Es opcional
+    # para mantener compatibles los proyectos guardados por versiones previas.
+    "indice_color",
 )
 
 
@@ -90,11 +97,15 @@ def ruta_anotaciones(nombre: str) -> str:
     return os.path.join(carpeta_archivos(), f"{nombre}{SUFIJO_ANOTACIONES}.csv")
 
 
+def ruta_estado(nombre: str) -> str:
+    return os.path.join(carpeta_archivos(), f"{nombre}{SUFIJO_ESTADO}.json")
+
+
 def listar_proyectos() -> list[dict]:
     """Lista los proyectos guardados, del más reciente al más antiguo.
 
     Solo mira la carpeta «archivos» y solo devuelve los ``.csv`` que no son
-    archivos de anotaciones. Cada elemento indica si tiene anotaciones al lado.
+    archivos de anotaciones. Cada elemento indica qué archivos asociados tiene.
     """
     carpeta = carpeta_archivos()
     if not os.path.isdir(carpeta):
@@ -113,6 +124,7 @@ def listar_proyectos() -> list[dict]:
             continue
 
         ruta_anot = ruta_anotaciones(nombre)
+        ruta_est = ruta_estado(nombre)
         try:
             modificado = os.path.getmtime(ruta)
             tamano = os.path.getsize(ruta)
@@ -126,6 +138,8 @@ def listar_proyectos() -> list[dict]:
                 "ruta": ruta,
                 "ruta_anotaciones": ruta_anot,
                 "tiene_anotaciones": os.path.isfile(ruta_anot),
+                "ruta_estado": ruta_est,
+                "tiene_estado": os.path.isfile(ruta_est),
                 "modificado": modificado,
                 "tamano": tamano,
             }
@@ -161,7 +175,7 @@ def filtrar_por_periodo(proyectos, periodo: str, ahora: datetime | None = None) 
 
 
 def eliminar_proyectos(nombres) -> tuple[list[str], list[str]]:
-    """Borra los proyectos indicados (el CSV y su archivo de anotaciones).
+    """Borra los proyectos indicados y todos sus archivos asociados.
 
     Devuelve ``(eliminados, errores)``: los nombres que se borraron y los
     mensajes de los que fallaron. Nunca sale de la carpeta «archivos».
@@ -175,7 +189,7 @@ def eliminar_proyectos(nombres) -> tuple[list[str], list[str]]:
     errores = []
 
     for nombre in nombres:
-        rutas = [ruta_csv(nombre), ruta_anotaciones(nombre)]
+        rutas = [ruta_csv(nombre), ruta_anotaciones(nombre), ruta_estado(nombre)]
         fallo = None
         borro_algo = False
 
@@ -222,6 +236,44 @@ def escribir_anotaciones(ruta: str, filas) -> None:
             escritor.writerow({campo: fila.get(campo, "") for campo in CAMPOS_ANOTACIONES})
 
 
+def escribir_estado(ruta: str, estado) -> None:
+    """Guarda el estado complementario en JSON mediante reemplazo atómico."""
+    if not isinstance(estado, dict):
+        raise ValueError("El estado del proyecto debe ser un objeto.")
+
+    contenido = dict(estado)
+    contenido["version"] = VERSION_ESTADO
+    ruta = os.fspath(ruta)
+    temporal = f"{ruta}.tmp"
+    try:
+        with open(temporal, "w", encoding="utf-8", newline="\n") as archivo:
+            json.dump(contenido, archivo, ensure_ascii=False, indent=2)
+            archivo.write("\n")
+        os.replace(temporal, ruta)
+    finally:
+        if os.path.isfile(temporal):
+            try:
+                os.remove(temporal)
+            except OSError:
+                pass
+
+
+def leer_estado(ruta: str) -> dict:
+    """Lee el estado opcional; la ausencia representa un proyecto antiguo."""
+    if not ruta or not os.path.isfile(ruta):
+        return {}
+
+    try:
+        with open(ruta, "r", encoding="utf-8") as archivo:
+            estado = json.load(archivo)
+    except json.JSONDecodeError as exc:
+        raise ValueError("El archivo de estado del proyecto no es válido.") from exc
+
+    if not isinstance(estado, dict):
+        raise ValueError("El archivo de estado del proyecto no contiene un objeto.")
+    return estado
+
+
 def leer_anotaciones(ruta: str) -> list[dict]:
     """Lee un CSV de anotaciones y normaliza sus campos.
 
@@ -251,8 +303,7 @@ def leer_anotaciones(ruta: str) -> list[dict]:
             if numero < 1:
                 continue
 
-            filas.append(
-                {
+            fila = {
                     "tipo": tipo,
                     "senal": (cruda.get("senal") or "").strip(),
                     "columna": columna,
@@ -264,5 +315,11 @@ def leer_anotaciones(ruta: str) -> list[dict]:
                     "nota": (cruda.get("nota") or "").strip(),
                     "fuente": (cruda.get("fuente") or "").strip(),
                 }
-            )
+            try:
+                indice_color = int(float(cruda.get("indice_color") or 0))
+            except (TypeError, ValueError):
+                indice_color = 0
+            if indice_color > 0:
+                fila["indice_color"] = indice_color
+            filas.append(fila)
     return filas

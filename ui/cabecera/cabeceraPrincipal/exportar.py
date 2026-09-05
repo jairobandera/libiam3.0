@@ -3,14 +3,17 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QBrush, QColor, QDesktopServices
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
@@ -36,6 +39,7 @@ class ExportarDialog(QDialog):
         cantidad_frames=0,
         cantidad_senales=0,
         cantidad_intervalos=0,
+        intervalos=None,
         cantidad_resultados=0,
         nombre_formula="",
         hay_filtros=False,
@@ -44,41 +48,41 @@ class ExportarDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Exportar análisis")
         self.setModal(True)
-        self.resize(590, 520)
-        self.setMinimumSize(540, 480)
+        self.resize(680, 760)
+        self.setMinimumSize(600, 620)
         self.setObjectName("dialogoExportar")
 
         self.nombre_archivo = str(nombre_archivo or "Archivo sin nombre")
         self.cantidad_frames = int(cantidad_frames or 0)
         self.cantidad_senales = int(cantidad_senales or 0)
-        self.cantidad_intervalos = int(cantidad_intervalos or 0)
+        self.intervalos = [dict(intervalo) for intervalo in intervalos or ()]
+        self.cantidad_intervalos = (
+            len(self.intervalos)
+            if intervalos is not None
+            else int(cantidad_intervalos or 0)
+        )
         self.cantidad_resultados = int(cantidad_resultados or 0)
         self.nombre_formula = str(nombre_formula or "").strip()
         self.hay_filtros = bool(hay_filtros)
         self.hay_curvas_formula = bool(hay_curvas_formula)
 
         self.grupo = QButtonGroup(self)
+        self.grupo_alcance = QButtonGroup(self)
         self._radios = {}
         self._definiciones = self._crear_definiciones()
         self._init_ui()
 
     def _crear_definiciones(self):
-        extras = []
-        if self.hay_filtros:
-            extras.append("valores filtrados")
-        if self.hay_curvas_formula:
-            extras.append("curvas calculadas")
-        detalle_extra = f" Incluye {' y '.join(extras)}." if extras else ""
-
-        formula = self.nombre_formula or "la fórmula aplicada"
+        detalle_datos = (
+            "Valores originales y filtrados."
+            if self.hay_filtros
+            else "Valores originales."
+        )
         return {
             exportacion.MODO_DATOS: {
                 "titulo": "Datos de las señales",
                 "formato": "CSV",
-                "detalle": (
-                    "Una fila por punto del eje horizontal, con los valores "
-                    f"originales.{detalle_extra}"
-                ),
+                "detalle": detalle_datos,
                 "disponible": self.cantidad_senales > 0,
                 "motivo": "No hay señales disponibles.",
                 "resumen": (
@@ -89,7 +93,7 @@ class ExportarDialog(QDialog):
             exportacion.MODO_INTERVALOS: {
                 "titulo": "Muestras por intervalo",
                 "formato": "CSV",
-                "detalle": "Muestras, límites y notas de cada intervalo seleccionado.",
+                "detalle": "Muestras, límites y notas.",
                 "disponible": self.cantidad_intervalos > 0,
                 "motivo": "Todavía no se creó ningún intervalo.",
                 "resumen": _cantidad_legible(
@@ -100,9 +104,9 @@ class ExportarDialog(QDialog):
                 + ".",
             },
             exportacion.MODO_RESULTADOS: {
-                "titulo": "Resultados de fórmulas",
+                "titulo": "Resumen de fórmulas",
                 "formato": "CSV",
-                "detalle": f"Resultados por intervalo correspondientes a {formula}.",
+                "detalle": "Promedio, máximo y frame del máximo.",
                 "disponible": self.cantidad_resultados > 0,
                 "motivo": "Primero aplicá una fórmula a uno o más intervalos.",
                 "resumen": _cantidad_legible(
@@ -113,12 +117,10 @@ class ExportarDialog(QDialog):
             exportacion.MODO_COMPLETO: {
                 "titulo": "Análisis completo",
                 "formato": "ZIP",
-                "detalle": (
-                    "Datos, intervalos, resultados disponibles y un resumen del análisis."
-                ),
+                "detalle": "Datos, intervalos y resultados.",
                 "disponible": True,
                 "motivo": "",
-                "resumen": "Un paquete con todos los elementos disponibles.",
+                "resumen": "Todos los elementos disponibles.",
             },
         }
 
@@ -130,10 +132,6 @@ class ExportarDialog(QDialog):
         titulo = QLabel("Exportar análisis")
         titulo.setObjectName("tituloDialogoExportar")
         principal.addWidget(titulo)
-
-        subtitulo = QLabel("Seleccioná qué contenido querés guardar.")
-        subtitulo.setObjectName("subtituloDialogoExportar")
-        principal.addWidget(subtitulo)
 
         archivo = QLabel(self._texto_archivo())
         archivo.setObjectName("archivoSimpleExportacion")
@@ -177,14 +175,10 @@ class ExportarDialog(QDialog):
             detalle.setContentsMargins(27, 0, 0, 4)
             principal.addWidget(detalle)
 
-        principal.addStretch()
+        principal.addWidget(self._crear_separador())
+        self._agregar_selector_alcance(principal)
 
-        nota = QLabel(
-            "Los archivos CSV se guardan en un formato compatible con Excel."
-        )
-        nota.setObjectName("notaSimpleExportacion")
-        nota.setWordWrap(True)
-        principal.addWidget(nota)
+        principal.addStretch()
 
         principal.addWidget(self._crear_separador())
         principal.addLayout(self._crear_botones())
@@ -196,6 +190,134 @@ class ExportarDialog(QDialog):
             else exportacion.MODO_COMPLETO
         )
         self._radios[predeterminada].setChecked(True)
+        self._actualizar_alcance()
+
+    def _agregar_selector_alcance(self, principal):
+        titulo = QLabel("Alcance")
+        titulo.setObjectName("seccionDialogoExportar")
+        principal.addWidget(titulo)
+
+        self.radio_todo = QRadioButton("Todo el archivo")
+        self.radio_todo.setObjectName("opcionAlcanceExportacion")
+        self.radio_recortes = QRadioButton("Intervalos seleccionados")
+        self.radio_recortes.setObjectName("opcionAlcanceExportacion")
+        self.radio_recortes.setEnabled(bool(self.intervalos))
+        self.grupo_alcance.addButton(self.radio_todo)
+        self.grupo_alcance.addButton(self.radio_recortes)
+        self.radio_todo.setChecked(True)
+        principal.addWidget(self.radio_todo)
+        principal.addWidget(self.radio_recortes)
+
+        acciones = QHBoxLayout()
+        self.btn_todos_recortes = QPushButton("Todos")
+        self.btn_todos_recortes.setObjectName("btnAlcanceExportacion")
+        self.btn_ningun_recorte = QPushButton("Ninguno")
+        self.btn_ningun_recorte.setObjectName("btnAlcanceExportacion")
+        self.btn_todos_recortes.clicked.connect(
+            lambda: self._marcar_recortes(True)
+        )
+        self.btn_ningun_recorte.clicked.connect(
+            lambda: self._marcar_recortes(False)
+        )
+        acciones.addWidget(self.btn_todos_recortes)
+        acciones.addWidget(self.btn_ningun_recorte)
+        acciones.addStretch()
+        principal.addLayout(acciones)
+
+        total = len(self.intervalos)
+        self.lbl_catalogo_recortes = QLabel(
+            _cantidad_legible(
+                total,
+                "intervalo o subintervalo",
+                "intervalos o subintervalos",
+            )
+        )
+        self.lbl_catalogo_recortes.setObjectName("catalogoCompletoExportacion")
+        self.lbl_catalogo_recortes.setWordWrap(True)
+        principal.addWidget(self.lbl_catalogo_recortes)
+
+        self.lista_recortes = QListWidget()
+        self.lista_recortes.setObjectName("listaRecortesExportacion")
+        self.lista_recortes.setSelectionMode(QAbstractItemView.NoSelection)
+        # Antes el layout podía comprimir la lista hasta dejar visible una sola
+        # fila, lo que parecía un filtrado por la señal activa. Se reserva un
+        # área suficiente y el resto continúa accesible con su barra de scroll.
+        self.lista_recortes.setMinimumHeight(170)
+        self.lista_recortes.setMaximumHeight(240)
+        for intervalo in self.intervalos:
+            identificador = intervalo.get("id")
+            if identificador is None:
+                continue
+            es_sub = bool(intervalo.get("es_subintervalo"))
+            nombre = intervalo.get("nombre") or (
+                f"Sub-intervalo {intervalo.get('numero', '')}"
+                if es_sub
+                else f"Intervalo {intervalo.get('numero', '')}"
+            )
+            senal = intervalo.get("senal") or intervalo.get("columna") or "Señal"
+            prefijo = "↳ " if es_sub else ""
+            item = QListWidgetItem(
+                f"{prefijo}{senal} · {nombre} "
+                f"({intervalo.get('desde', '')}–{intervalo.get('hasta', '')})"
+            )
+            item.setData(Qt.UserRole, identificador)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            item.setForeground(
+                QBrush(QColor(intervalo.get("color") or "#E8E8E8"))
+            )
+            self.lista_recortes.addItem(item)
+        self.lista_recortes.itemChanged.connect(self._recorte_cambiado)
+        principal.addWidget(self.lista_recortes)
+
+        self.lbl_alcance = QLabel("")
+        self.lbl_alcance.setObjectName("detalleAlcanceExportacion")
+        self.lbl_alcance.setWordWrap(True)
+        principal.addWidget(self.lbl_alcance)
+
+        self.radio_todo.toggled.connect(self._actualizar_alcance)
+        self.radio_recortes.toggled.connect(self._actualizar_alcance)
+
+    def _marcar_recortes(self, activo):
+        estado = Qt.Checked if activo else Qt.Unchecked
+        self.lista_recortes.blockSignals(True)
+        for indice in range(self.lista_recortes.count()):
+            self.lista_recortes.item(indice).setCheckState(estado)
+        self.lista_recortes.blockSignals(False)
+        self._actualizar_alcance()
+
+    def _recorte_cambiado(self, *_args):
+        """Al tocar la lista, activa su alcance sin depender de otro panel."""
+        if self.intervalos and not self.radio_recortes.isChecked():
+            self.radio_recortes.setChecked(True)
+        self._actualizar_alcance()
+
+    def _actualizar_alcance(self, *_args):
+        usa_recortes = bool(
+            hasattr(self, "radio_recortes") and self.radio_recortes.isChecked()
+        )
+        if not hasattr(self, "lista_recortes"):
+            return
+        seleccionados = sum(
+            self.lista_recortes.item(indice).checkState() == Qt.Checked
+            for indice in range(self.lista_recortes.count())
+        )
+        # Siempre se puede recorrer la lista completa. Si se marca o desmarca
+        # una fila, `_recorte_cambiado` activa automáticamente el alcance por
+        # intervalos.
+        self.lista_recortes.setEnabled(bool(self.intervalos))
+        self.btn_todos_recortes.setEnabled(usa_recortes)
+        self.btn_ningun_recorte.setEnabled(usa_recortes)
+        if usa_recortes:
+            self.lbl_alcance.setText(
+                f"{seleccionados} seleccionado(s)."
+                if seleccionados
+                else "Elegí al menos un recorte."
+            )
+        else:
+            self.lbl_alcance.setText("Todo el contenido disponible.")
+        if hasattr(self, "btn_continuar"):
+            self.btn_continuar.setEnabled(not usa_recortes or seleccionados > 0)
 
     def _texto_archivo(self):
         nombre = self.nombre_archivo.replace("\\", "/").rsplit("/", 1)[-1]
@@ -222,14 +344,14 @@ class ExportarDialog(QDialog):
         btn_cancelar.setCursor(Qt.PointingHandCursor)
         btn_cancelar.clicked.connect(self.reject)
 
-        btn_continuar = QPushButton("Elegir ubicación")
-        btn_continuar.setObjectName("btnDialogoPrimario")
-        btn_continuar.setCursor(Qt.PointingHandCursor)
-        btn_continuar.setDefault(True)
-        btn_continuar.clicked.connect(self.accept)
+        self.btn_continuar = QPushButton("Elegir ubicación")
+        self.btn_continuar.setObjectName("btnDialogoPrimario")
+        self.btn_continuar.setCursor(Qt.PointingHandCursor)
+        self.btn_continuar.setDefault(True)
+        self.btn_continuar.clicked.connect(self.accept)
 
         botones.addWidget(btn_cancelar)
-        botones.addWidget(btn_continuar)
+        botones.addWidget(self.btn_continuar)
         return botones
 
     def modo_seleccionado(self):
@@ -244,6 +366,16 @@ class ExportarDialog(QDialog):
     def resumen_modo_seleccionado(self):
         return self._definiciones[self.modo_seleccionado()]["resumen"]
 
+    def ids_intervalos_seleccionados(self):
+        """None representa todo; una lista representa los recortes elegidos."""
+        if not self.radio_recortes.isChecked():
+            return None
+        return [
+            self.lista_recortes.item(indice).data(Qt.UserRole)
+            for indice in range(self.lista_recortes.count())
+            if self.lista_recortes.item(indice).checkState() == Qt.Checked
+        ]
+
 
 class ExportacionCompletadaDialog(QDialog):
     """Confirma el archivo creado y ofrece abrirlo o mostrar su carpeta."""
@@ -253,7 +385,7 @@ class ExportacionCompletadaDialog(QDialog):
         self.ruta = Path(ruta).absolute()
         self.setWindowTitle("Exportación completada")
         self.setModal(True)
-        self.resize(590, 385)
+        self.resize(590, 330)
         self.setMinimumWidth(540)
         self.setObjectName("dialogoExportacionCompletada")
 
@@ -284,18 +416,9 @@ class ExportacionCompletadaDialog(QDialog):
         icono.setFixedSize(46, 46)
         encabezado.addWidget(icono, 0, Qt.AlignTop)
 
-        textos = QVBoxLayout()
-        textos.setSpacing(4)
         titulo = QLabel("Exportación completada")
         titulo.setObjectName("tituloExportacionCompletada")
-        textos.addWidget(titulo)
-        subtitulo = QLabel(
-            "El archivo se creó correctamente y está listo para usar."
-        )
-        subtitulo.setObjectName("subtituloExportacionCompletada")
-        subtitulo.setWordWrap(True)
-        textos.addWidget(subtitulo)
-        encabezado.addLayout(textos, 1)
+        encabezado.addWidget(titulo, 1)
         return encabezado
 
     def _crear_ficha_archivo(self, titulo_modo, resumen):
@@ -320,20 +443,21 @@ class ExportacionCompletadaDialog(QDialog):
         nombre.setWordWrap(True)
         layout.addWidget(nombre)
 
-        detalle = resumen.strip() if resumen else "Archivo generado por ABS 3.0."
+        detalle = resumen.strip() if resumen else ""
         tamano = self._tamano_legible()
         if tamano:
-            detalle = f"{detalle}  Tamaño: {tamano}"
-        lbl_detalle = QLabel(detalle)
-        lbl_detalle.setObjectName("detalleArchivoExportado")
-        lbl_detalle.setWordWrap(True)
-        layout.addWidget(lbl_detalle)
+            detalle = f"{detalle} · " if detalle else ""
+            detalle += f"Tamaño: {tamano}"
+        if detalle:
+            lbl_detalle = QLabel(detalle)
+            lbl_detalle.setObjectName("detalleArchivoExportado")
+            lbl_detalle.setWordWrap(True)
+            layout.addWidget(lbl_detalle)
 
         ruta = QLineEdit(str(self.ruta))
         ruta.setObjectName("rutaArchivoExportado")
         ruta.setReadOnly(True)
         ruta.setCursorPosition(0)
-        ruta.setToolTip("Podés seleccionar y copiar esta ubicación.")
         layout.addWidget(ruta)
 
         ficha.setLayout(layout)
@@ -382,6 +506,6 @@ class ExportacionCompletadaDialog(QDialog):
             self.lbl_estado_apertura.hide()
             return
         self.lbl_estado_apertura.setText(
-            f"No se pudo abrir {tipo}. La ubicación puede copiarse desde el campo anterior."
+            f"No se pudo abrir {tipo}."
         )
         self.lbl_estado_apertura.show()

@@ -1,0 +1,10 @@
+﻿tipo,senal,columna,numero,padre,desde,hasta,nombre,nota,fuente,indice_color
+rango,Fuerza Z - Fz,Fz,1,,1578,1776,,,filtrada,0
+rango,Fuerza Z - Fz,Fz,2,,2106,2291,,,filtrada,0
+subrango,Fuerza Z - Fz,Fz,1,Fz::2,2106,2221,,,filtrada,0
+subrango,Fuerza Z - Fz,Fz,2,Fz::2,2222,2284,,,filtrada,0
+rango,Fuerza Z - Fz,Fz,3,,2633,2818,,,filtrada,0
+subrango,Fuerza Z - Fz,Fz,1,Fz::3,2633,2736,,,filtrada,0
+subrango,Fuerza Z - Fz,Fz,2,Fz::3,2737,2809,,,filtrada,0
+rango,Fuerza Z - Fz,Fz,4,,3100,3274,,,filtrada,0
+rango,Fuerza Z - Fz,Fz,5,,3543,3741,,,filtrada,0

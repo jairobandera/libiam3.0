@@ -315,6 +315,8 @@ class _ConstructorCajas:
             )
         if nombre == "masa":
             return self._texto("m", escala, cursiva=True)
+        if nombre == "estatura":
+            return self._texto("h", escala, cursiva=True)
         if nombre == "gravedad":
             return self._texto("g", escala, cursiva=True)
         if nombre == "tiempo":
@@ -514,9 +516,6 @@ class VistaFormulaMatematica(QWidget):
         self.setSizePolicy(politica)
         self.setMinimumHeight(96)
         self.setAccessibleName("Vista matemática de la fórmula")
-        self.setToolTip(
-            "Esta vista cambia solo la presentación; el cálculo usa la expresión de arriba."
-        )
 
     def set_expresion(self, expresion):
         self._texto_original = str(expresion or "").strip()

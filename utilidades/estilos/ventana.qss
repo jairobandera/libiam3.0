@@ -4,3 +4,45 @@ QWidget {
     font-size: 13px;
     font-family: Segoe UI;
 }
+
+QDialog#dialogoCargaCSV {
+    background-color: #333337;
+}
+
+#tituloCargaCSV {
+    color: #FFFFFF;
+    font-size: 19px;
+    font-weight: 700;
+}
+
+#archivoCargaCSV {
+    background-color: #2D2D30;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    color: #E6E6E6;
+    padding: 9px 11px;
+}
+
+#estadoCargaCSV {
+    color: #D8D8D8;
+    font-size: 12px;
+}
+
+#detalleCargaCSV {
+    color: #9D9DA3;
+    font-size: 11px;
+}
+
+QProgressBar#progresoCargaCSV {
+    min-height: 18px;
+    background-color: #252526;
+    border: 1px solid #3E3E42;
+    border-radius: 6px;
+    color: #FFFFFF;
+    text-align: center;
+}
+
+QProgressBar#progresoCargaCSV::chunk {
+    background-color: #1976D2;
+    border-radius: 5px;
+}

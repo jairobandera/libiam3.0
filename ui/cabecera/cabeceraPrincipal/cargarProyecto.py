@@ -2,7 +2,7 @@
 
 Deliberadamente **no** es un explorador de archivos: no se puede navegar a otra
 ruta ni escribir una. Solo lista los CSV que guardó el botón «Guardar», que son
-los únicos que pueden traer intervalos y notas asociados.
+los únicos que pueden traer intervalos, variables, filtros y notas asociados.
 """
 
 from datetime import datetime
@@ -42,14 +42,6 @@ class CargarProyectoDialog(QDialog):
         titulo.setStyleSheet("font-size: 18px; font-weight: 700;")
         layout.addWidget(titulo)
 
-        subtitulo = QLabel(
-            "Proyectos guardados en la carpeta «archivos». "
-            "Al abrirlos se restauran sus intervalos, sub-intervalos y notas."
-        )
-        subtitulo.setObjectName("dialogoCargarAyuda")
-        subtitulo.setWordWrap(True)
-        layout.addWidget(subtitulo)
-
         self.lista = QListWidget()
         self.lista.setObjectName("listaProyectos")
         self.lista.setMinimumHeight(220)
@@ -87,10 +79,7 @@ class CargarProyectoDialog(QDialog):
         self.lista.clear()
 
         if not self.proyectos:
-            item = QListWidgetItem(
-                "Todavía no hay proyectos guardados.\n"
-                "Usá «Guardar» para crear el primero."
-            )
+            item = QListWidgetItem("No hay proyectos guardados.")
             item.setFlags(Qt.NoItemFlags)
             self.lista.addItem(item)
             self.btn_abrir.setEnabled(False)
@@ -119,11 +108,17 @@ class CargarProyectoDialog(QDialog):
         if datos["tiene_anotaciones"]:
             cantidad = len(proyecto.leer_anotaciones(datos["ruta_anotaciones"]))
             if cantidad:
-                partes.append(f"{cantidad} intervalo(s)/sub-intervalo(s) con sus notas")
+                partes.append(f"{cantidad} intervalo(s)/subintervalo(s)")
             else:
                 partes.append("Sin intervalos guardados")
         else:
-            partes.append("Sin archivo de anotaciones")
+            partes.append("Sin anotaciones")
+
+        partes.append(
+            "Con configuración guardada"
+            if datos.get("tiene_estado")
+            else "Formato anterior"
+        )
 
         self.lbl_detalle.setText(" · ".join(partes))
 

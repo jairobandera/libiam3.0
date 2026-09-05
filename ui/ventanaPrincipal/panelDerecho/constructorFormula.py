@@ -31,16 +31,14 @@ PLANTILLAS = (
         "nombre": "Potencia personalizada",
         "expresion": "Fz * integral((Fz - masa * gravedad) / masa)",
         "unidad": "W",
-        "ayuda": "Cargar la fórmula de potencia para editarla. "
-                 "Usa la fuerza vertical (Fz).",
+        "ayuda": "Usa Fz.",
     },
     {
         "texto": "Impulso",
         "nombre": "Impulso personalizado",
         "expresion": "integral(Fz - masa * gravedad)",
         "unidad": "N·s",
-        "ayuda": "Cargar la fórmula de impulso para editarla. "
-                 "Usa la fuerza vertical (Fz).",
+        "ayuda": "Usa Fz.",
     },
 )
 
@@ -211,11 +209,6 @@ class ConstructorFormula(QDialog):
         titulo.setObjectName("tituloConstructorFormula")
         textos.addWidget(titulo)
 
-        introduccion = QLabel(
-            "Armá la expresión y comprobá el resultado antes de guardarla."
-        )
-        introduccion.setObjectName("subtituloConstructorFormula")
-        textos.addWidget(introduccion)
         layout.addLayout(textos, 1)
         encabezado.setLayout(layout)
         return encabezado
@@ -334,21 +327,11 @@ class ConstructorFormula(QDialog):
         formulario.addWidget(lbl_descripcion, 2, 0, 1, 2)
         formulario.addWidget(self.input_descripcion, 3, 0, 1, 2)
 
-        ayuda_unidad = QLabel(
-            "¿No aparece tu unidad? Escribila: N*s se guarda como N·s."
-        )
-        ayuda_unidad.setWordWrap(True)
-        ayuda_unidad.setObjectName("ayudaConstructorFormula")
-        formulario.addWidget(ayuda_unidad, 4, 1)
-
         self.chk_reutilizable = QCheckBox(
             "Disponible para usar dentro de otras fórmulas"
         )
         self.chk_reutilizable.setObjectName("chkFormulaReutilizable")
-        self.chk_reutilizable.setToolTip(
-            "Al marcarla, aparecerá en Reutilizar con el mismo nombre."
-        )
-        formulario.addWidget(self.chk_reutilizable, 5, 0, 1, 2)
+        formulario.addWidget(self.chk_reutilizable, 4, 0, 1, 2)
         layout.addLayout(formulario)
         return marco
 
@@ -356,7 +339,6 @@ class ConstructorFormula(QDialog):
         marco, layout = self._tarjeta(
             "Construí la expresión",
             1,
-            "Escribí directamente o agregá piezas desde la paleta de la derecha.",
         )
 
         inicio = QHBoxLayout()
@@ -406,10 +388,7 @@ class ConstructorFormula(QDialog):
         return marco
 
     def _crear_paleta(self):
-        marco, layout = self._tarjeta(
-            "Añadí piezas",
-            descripcion="Se insertan en la posición actual del cursor.",
-        )
+        marco, layout = self._tarjeta("Añadí piezas")
         marco.setMinimumWidth(350)
         self.tabs_constructor = QTabWidget()
         self.tabs_constructor.setObjectName("tabsConstructorFormula")
@@ -453,10 +432,7 @@ class ConstructorFormula(QDialog):
             {
                 "token": formulas_logica.VARIABLE_SENAL_INTERVALO,
                 "nombre": "Señal del intervalo",
-                "detalle": (
-                    "Usa los valores de la gráfica propietaria de cada intervalo. "
-                    "Sirve para Fuerza, EMG o cualquier otra señal."
-                ),
+                "detalle": "Señal asociada al intervalo.",
             }
         ]
         vistos = {formulas_logica.VARIABLE_SENAL_INTERVALO}
@@ -494,6 +470,7 @@ class ConstructorFormula(QDialog):
         contexto.setSpacing(5)
         for indice, (texto, token, ayuda) in enumerate((
             ("Masa", "masa", "Masa cargada en el panel izquierdo"),
+            ("Estatura", "estatura", "Estatura cargada en metros"),
             ("Gravedad", "gravedad", "Gravedad configurada"),
             ("Frecuencia", "frecuencia", "Frecuencia efectiva en Hz"),
             ("Tiempo", "tiempo", "Segundos desde el inicio del registro"),
@@ -518,13 +495,6 @@ class ConstructorFormula(QDialog):
         layout = QVBoxLayout()
         layout.setContentsMargins(11, 11, 11, 11)
         layout.setSpacing(9)
-
-        ayuda = QLabel(
-            "Insertá una fórmula ya armada dentro de la que estás creando."
-        )
-        ayuda.setWordWrap(True)
-        ayuda.setObjectName("subtituloConstructorFormula")
-        layout.addWidget(ayuda)
 
         self.cmb_calculo_reutilizable = QComboBox()
         self.cmb_calculo_reutilizable.setObjectName("comboConstructorFormula")
@@ -554,10 +524,7 @@ class ConstructorFormula(QDialog):
         )
         layout.addWidget(self.btn_insertar_calculo)
 
-        nota = QLabel(
-            "Se inserta una copia independiente. Editar o borrar la fórmula "
-            "original no cambia esta expresión."
-        )
+        nota = QLabel("Se insertará una copia independiente.")
         nota.setWordWrap(True)
         nota.setObjectName("ayudaConstructorFormula")
         layout.addWidget(nota)
@@ -642,13 +609,6 @@ class ConstructorFormula(QDialog):
             rejilla_funciones.addWidget(boton, indice // 3, indice % 3)
         layout.addLayout(rejilla_funciones)
 
-        nota = QLabel(
-            "Consejo: seleccioná una parte de la expresión antes de pulsar "
-            "una función para envolverla automáticamente."
-        )
-        nota.setWordWrap(True)
-        nota.setObjectName("ayudaConstructorFormula")
-        layout.addWidget(nota)
         layout.addStretch()
         contenido.setLayout(layout)
         return contenido
@@ -667,9 +627,7 @@ class ConstructorFormula(QDialog):
         )
         unidad = calculo.get("unidad") or "sin unidad definida"
         self.lbl_calculo_reutilizable.setText(
-            f"{calculo['expresion']}\n\n"
-            f"Produce {salida} · {unidad}\n"
-            f"{calculo.get('descripcion') or ''}".strip()
+            f"{calculo['expresion']}\n\n{salida.capitalize()} · {unidad}"
         )
 
     def _insertar_calculo_reutilizable(self):
@@ -805,8 +763,8 @@ class ConstructorFormula(QDialog):
             self.analisis_actual = None
             self._mostrar_validacion(
                 "neutral",
-                "Empezá con una señal, una plantilla o escribiendo la expresión.",
-                "La expresión y el nombre son obligatorios.",
+                "Ingresá una expresión.",
+                "Nombre y expresión obligatorios.",
             )
             if hasattr(self, "btn_guardar"):
                 self.btn_guardar.setEnabled(False)
@@ -820,7 +778,7 @@ class ConstructorFormula(QDialog):
             self._mostrar_validacion(
                 "error",
                 f"✕ {exc}",
-                "Corregí la expresión para poder guardarla.",
+                "Corregí la expresión.",
             )
         else:
             variables = ", ".join(
@@ -833,9 +791,9 @@ class ConstructorFormula(QDialog):
                 else "una curva con un valor por frame"
             )
             mensaje_pie = (
-                "Todo listo para guardar."
+                "Lista para guardar."
                 if nombre_valido
-                else "La expresión está lista; falta ponerle un nombre."
+                else "Falta el nombre."
             )
             self._mostrar_validacion(
                 "ok",

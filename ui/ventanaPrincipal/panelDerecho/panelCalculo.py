@@ -36,6 +36,8 @@ class PanelCalculo(QFrame):
     crearFormulaSolicitado = Signal()
     editarFormulaSolicitado = Signal(str)
     eliminarFormulaSolicitado = Signal(str)
+    importarFormulasSolicitado = Signal()
+    exportarFormulasSolicitado = Signal()
 
     def __init__(self, permitir_gestion=False):
         super().__init__()
@@ -53,14 +55,6 @@ class PanelCalculo(QFrame):
         titulo = QLabel("Fórmulas")
         titulo.setObjectName("tituloSeccionMapeo")
         layout.addWidget(titulo)
-
-        descripcion = QLabel(
-            "En este apartado se calculan las diferentes fórmulas disponibles "
-            "para el análisis biomecánico."
-        )
-        descripcion.setWordWrap(True)
-        descripcion.setObjectName("lblDeteccion")
-        layout.addWidget(descripcion)
 
         # --- Fuente de datos ---
         self._agregar_separador(layout)
@@ -83,9 +77,7 @@ class PanelCalculo(QFrame):
         self.btn_quitar_formula.setObjectName("btnResetMapeo")
         self.btn_quitar_formula.setCursor(Qt.PointingHandCursor)
         self.btn_quitar_formula.setEnabled(False)
-        self.btn_quitar_formula.setToolTip(
-            "Quita todas las fórmulas aplicadas de las gráficas."
-        )
+        self.btn_quitar_formula.setToolTip("Quitar fórmulas aplicadas.")
         self.btn_quitar_formula.clicked.connect(self.quitarFormulaSolicitado.emit)
         fila.addWidget(self.btn_aplicar_formula)
         fila.addWidget(self.btn_quitar_formula)
@@ -205,6 +197,26 @@ class PanelCalculo(QFrame):
             fila.addWidget(self.btn_eliminar_formula)
             bloque_layout.addLayout(fila)
 
+            fila_intercambio = QHBoxLayout()
+            fila_intercambio.setSpacing(5)
+            self.btn_importar_formulas = QPushButton("Importar fórmulas")
+            self.btn_importar_formulas.setObjectName("btnResetMapeo")
+            self.btn_importar_formulas.setCursor(Qt.PointingHandCursor)
+            self.btn_importar_formulas.clicked.connect(
+                self.importarFormulasSolicitado.emit
+            )
+
+            self.btn_exportar_formulas = QPushButton("Exportar fórmulas")
+            self.btn_exportar_formulas.setObjectName("btnResetMapeo")
+            self.btn_exportar_formulas.setCursor(Qt.PointingHandCursor)
+            self.btn_exportar_formulas.clicked.connect(
+                self.exportarFormulasSolicitado.emit
+            )
+
+            fila_intercambio.addWidget(self.btn_importar_formulas, 1)
+            fila_intercambio.addWidget(self.btn_exportar_formulas, 1)
+            bloque_layout.addLayout(fila_intercambio)
+
         bloque.setLayout(bloque_layout)
         self.recargar_formulas()
         return bloque
@@ -228,11 +240,7 @@ class PanelCalculo(QFrame):
         clave = self.formula_seleccionada()
         descripcion = formulas_logica.FORMULAS.get(clave, {})
         expresion = descripcion.get("expresion") or ""
-        ayuda = descripcion.get("descripcion") or ""
-        texto = expresion
-        if ayuda:
-            texto = f"{texto}\n{ayuda}" if texto else ayuda
-        self.lbl_expresion_formula.setText(texto)
+        self.lbl_expresion_formula.setText(expresion)
         personalizada = bool(descripcion.get("personalizada"))
         if self.permitir_gestion:
             self.btn_editar_formula.setEnabled(personalizada)
@@ -259,6 +267,12 @@ class PanelCalculo(QFrame):
         """Clave de la fórmula elegida (p. ej. ``"potencia"``)."""
         return self.cmb_formula.currentData()
 
+    def set_formula(self, clave):
+        """Selecciona una fórmula si todavía está disponible en el registro."""
+        indice = self.cmb_formula.findData(clave)
+        if indice >= 0 and indice != self.cmb_formula.currentIndex():
+            self.cmb_formula.setCurrentIndex(indice)
+
     def fuente_seleccionada(self):
         """Fuente elegida: ``"filtrada"`` o ``"original"``."""
         return self.cmb_fuente.currentData()
@@ -273,15 +287,9 @@ class PanelCalculo(QFrame):
         """Solo tiene sentido elegir la fuente si alguna señal visible tiene filtro."""
         self.cmb_fuente.setEnabled(bool(hay_filtro))
         if hay_filtro:
-            self.cmb_fuente.setToolTip(
-                "Sobre qué serie se calcula. Ojo: el filtro achata los picos, "
-                "así que el pico sobre la señal original suele ser mayor."
-            )
+            self.cmb_fuente.setToolTip("Datos usados en el cálculo.")
         else:
-            self.cmb_fuente.setToolTip(
-                "No hay ninguna señal visible con filtro: se calcula sobre la "
-                "señal original."
-            )
+            self.cmb_fuente.setToolTip("Sin filtros aplicados.")
 
     def set_aplicar_habilitado(self, habilitado, tooltip=""):
         """Habilita/deshabilita el botón Aplicar con su motivo como tooltip."""

@@ -7,18 +7,23 @@ from unittest import mock
 
 import numpy as np
 
-from logica import accesibilidad, formulas, paleta, proyecto
+from logica import accesibilidad, formulas, intercambio_formulas, paleta, proyecto
 from logica.filtros_senales import (
     ErrorConfiguracionFiltro,
     aplicar_butterworth,
     aplicar_butterworth_pasabajos,
 )
-from logica.lector_csv import calcular_frecuencia_efectiva, leer_csv_rapido
+from logica.lector_csv import (
+    calcular_frecuencia_efectiva,
+    es_columna_fuera_alcance_actual,
+    leer_csv_rapido,
+)
 from logica.intervalos import GestorIntervalos, IntervaloSuperpuestoError
 
 
 RAIZ = Path(__file__).resolve().parents[1]
 CSV_FUERZA = RAIZ / "utilidades" / "resources" / "Carlos Bigolotti Americano CM Fuerza solo.csv"
+CSV_CON_DELSYS = RAIZ / "utilidades" / "resources" / "EmilianoAmericanoCM.csv"
 
 
 class TestLectorCSV(unittest.TestCase):
@@ -42,6 +47,67 @@ class TestLectorCSV(unittest.TestCase):
             1000.0,
         )
         self.assertIsNone(calcular_frecuencia_efectiva(0, subframes))
+
+    def test_ignora_canales_delsys_del_csv_completo(self):
+        df, metadatos = leer_csv_rapido(CSV_CON_DELSYS)
+
+        self.assertEqual(df.shape, (101000, 11))
+        self.assertEqual(
+            df.columns.tolist(),
+            [
+                "Frame",
+                "Sub Frame",
+                "Fx",
+                "Fy",
+                "Fz",
+                "Mx",
+                "My",
+                "Mz",
+                "Cx",
+                "Cy",
+                "Cz",
+            ],
+        )
+        self.assertEqual(metadatos["cantidad_columnas_ignoradas"], 233)
+        self.assertEqual(df["Frame"].iloc[-1], 12625)
+        self.assertAlmostEqual(df["Cx"].iloc[0], 62.74)
+        self.assertAlmostEqual(df["Cy"].iloc[0], 178.764)
+        self.assertEqual(metadatos["grupos_columnas"]["Cx"], "AMTI-AP - CoP")
+        self.assertFalse(any("EMG" in columna.upper() for columna in df.columns))
+        self.assertTrue(all(np.issubdtype(tipo, np.number) for tipo in df.dtypes))
+
+    def test_conserva_columnas_combinadas_si_no_existe_amti(self):
+        contenido = "\n".join(
+            [
+                "Devices,,,,,,,,,,",
+                "1000,,,,,,,,,,",
+                ",,Combined Force,,,Combined Moment,,,Combined CoP,,",
+                "Frame,Sub Frame,Fx,Fy,Fz,Mx,My,Mz,Cx,Cy,Cz",
+                ",,N,N,N,N.mm,N.mm,N.mm,mm,mm,mm",
+                "1,0,10,20,30,40,50,60,70,80,90",
+                "1,1,11,21,31,41,51,61,71,81,91",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directorio:
+            ruta = Path(directorio) / "solo_combinadas.csv"
+            ruta.write_text(contenido, encoding="utf-8")
+
+            df, metadatos = leer_csv_rapido(ruta)
+
+        self.assertEqual(df.shape, (2, 11))
+        self.assertEqual(metadatos["cantidad_columnas_ignoradas"], 0)
+        self.assertEqual(metadatos["grupos_columnas"]["Cx"], "Combined CoP")
+        self.assertEqual(df["Cx"].tolist(), [70, 71])
+
+    def test_reconoce_emg_aunque_no_haya_fila_de_grupos(self):
+        self.assertTrue(es_columna_fuera_alcance_actual("EMG12"))
+        self.assertTrue(es_columna_fuera_alcance_actual("IM EMG4"))
+        self.assertTrue(
+            es_columna_fuera_alcance_actual(
+                "ACCX1", "Imported Delsys Accelerometers - Sensor 1"
+            )
+        )
+        self.assertFalse(es_columna_fuera_alcance_actual("Fz", "AMTI-AP - Force"))
 
 
 class TestFiltro(unittest.TestCase):
@@ -124,6 +190,22 @@ class TestIntervalos(unittest.TestCase):
         self.assertNotEqual(primero.color, segundo.color)
         with self.assertRaises(IntervaloSuperpuestoError):
             gestor.agregar(40, 45)
+
+    def test_intervalos_replicados_comparten_color_aunque_cambie_el_orden(self):
+        origen = GestorIntervalos()
+        destino = GestorIntervalos()
+        destino.agregar(1, 5)
+        destino.agregar(10, 15)
+
+        replicado_origen = origen.agregar(30, 40, indice_color=6)
+        replicado_destino = destino.agregar(30, 40, indice_color=6)
+
+        self.assertEqual(replicado_origen.indice_color, 6)
+        self.assertEqual(replicado_destino.indice_color, 6)
+        self.assertEqual(
+            origen.listar()[0].color,
+            destino.listar()[-1].color,
+        )
 
     def test_elimina_solo_los_indicados(self):
         gestor = GestorIntervalos()
@@ -691,6 +773,211 @@ class TestRegistroFormulas(unittest.TestCase):
         )
         self.assertEqual(list(aplicaciones), ["impulso", "potencia"])
 
+    def test_puede_filtrar_las_aplicaciones_para_un_intervalo_padre(self):
+        aplicaciones = {
+            "potencia": {
+                "clave": "potencia",
+                "intervalos": [
+                    "Fz::1",
+                    "Fz::1::sub::1",
+                    "Fz::1::sub::2",
+                    "Fz::2::sub::1",
+                ],
+            },
+            "impulso": {
+                "clave": "impulso",
+                "intervalos": ["Fz::2"],
+            },
+        }
+
+        filtradas = formulas.filtrar_aplicaciones_por_intervalos(
+            aplicaciones,
+            {"Fz::1::sub::1", "Fz::1::sub::2"},
+        )
+
+        self.assertEqual(list(filtradas), ["potencia"])
+        self.assertEqual(
+            filtradas["potencia"]["intervalos"],
+            ["Fz::1::sub::1", "Fz::1::sub::2"],
+        )
+
+    def test_quitar_subintervalos_conserva_intervalos_y_otros_padres(self):
+        aplicaciones = {
+            "potencia": {
+                "clave": "potencia",
+                "intervalos": [
+                    "Fz::1",
+                    "Fz::1::sub::1",
+                    "Fz::2::sub::1",
+                ],
+            }
+        }
+
+        restantes = formulas.filtrar_aplicaciones_por_intervalos(
+            aplicaciones,
+            {"Fz::1", "Fz::2::sub::1"},
+        )
+
+        self.assertEqual(
+            restantes["potencia"]["intervalos"],
+            ["Fz::1", "Fz::2::sub::1"],
+        )
+
+    def test_la_seleccion_principal_excluye_subintervalos(self):
+        seleccionados = formulas.solo_ids_intervalos_padre(
+            ["Fz::1", "Fz::1::sub::1", "Fz::2"],
+            {"Fz::1::sub::1"},
+        )
+
+        self.assertEqual(seleccionados, ["Fz::1", "Fz::2"])
+
+    def test_aplicar_usa_solo_las_casillas_de_la_senal_elegida(self):
+        intervalos = [
+            {"id": "Fz::1", "columna": "Fz", "es_subintervalo": False},
+            {"id": "Fz::2", "columna": "Fz", "es_subintervalo": False},
+            {"id": "Fx::1", "columna": "Fx", "es_subintervalo": False},
+            {"id": "Fy::1", "columna": "Fy", "es_subintervalo": False},
+            {
+                "id": "Fz::1::sub::1",
+                "columna": "Fz",
+                "es_subintervalo": True,
+            },
+        ]
+
+        seleccionados = formulas.solo_ids_intervalos_padre_de_columna(
+            intervalos,
+            ["Fz::1", "Fx::1", "Fy::1", "Fz::1::sub::1"],
+            "Fz",
+        )
+
+        self.assertEqual(seleccionados, ["Fz::1"])
+
+    def test_seleccion_de_subintervalos_excluye_padres_y_otras_senales(self):
+        intervalos = [
+            {"id": "Fz::1", "columna": "Fz", "es_subintervalo": False},
+            {
+                "id": "Fz::1::sub::1",
+                "columna": "Fz",
+                "es_subintervalo": True,
+            },
+            {
+                "id": "Fz::2::sub::2",
+                "columna": "Fz",
+                "es_subintervalo": True,
+            },
+            {
+                "id": "Fx::1::sub::1",
+                "columna": "Fx",
+                "es_subintervalo": True,
+            },
+        ]
+
+        seleccionados = formulas.solo_ids_subintervalos_de_columna(
+            intervalos,
+            [
+                "Fz::1",
+                "Fz::1::sub::1",
+                "Fx::1::sub::1",
+                "Fz::2::sub::2",
+            ],
+            "Fz",
+        )
+
+        self.assertEqual(
+            seleccionados,
+            ["Fz::1::sub::1", "Fz::2::sub::2"],
+        )
+
+    def test_pares_e_impares_usan_el_numero_dentro_de_cada_padre(self):
+        self.assertTrue(formulas.modo_selecciona_numero("pares", 2))
+        self.assertFalse(formulas.modo_selecciona_numero("pares", 1))
+        self.assertTrue(formulas.modo_selecciona_numero("impares", 3))
+        self.assertFalse(formulas.modo_selecciona_numero("ninguno", 3))
+
+    def test_un_intervalo_de_fx_puede_delimitar_un_calculo_de_fz(self):
+        originales = [
+            {
+                "id": "Fx::1",
+                "columna": "Fx",
+                "senal": "Fuerza X",
+                "desde": 10,
+                "hasta": 20,
+                "nombre": "Apoyo",
+            }
+        ]
+
+        recortes = formulas.usar_intervalos_como_recortes(
+            originales,
+            "Fz",
+            "Fuerza Z",
+        )
+
+        self.assertEqual(recortes[0]["id"], "Fx::1")
+        self.assertEqual((recortes[0]["desde"], recortes[0]["hasta"]), (10, 20))
+        self.assertEqual(recortes[0]["columna"], "Fz")
+        self.assertEqual(recortes[0]["senal"], "Fuerza Z")
+        self.assertEqual(originales[0]["columna"], "Fx")
+
+        recortes[0]["desde"] = 0
+        recortes[0]["hasta"] = 2
+        resultados, _segmentos = formulas.computar_formula(
+            "fuerza_neta",
+            {"Fz": np.array([700.0, 800.0, 900.0])},
+            np.array([0.0, 1.0, 2.0]),
+            {"masa": 70.0, "gravedad": 10.0, "frecuencia": 100.0},
+            recortes,
+        )
+        self.assertEqual(resultados[0]["id"], "Fx::1")
+        self.assertEqual(resultados[0]["senal"], "Fuerza Z")
+        self.assertEqual(resultados[0]["resumen"]["pico"], 200.0)
+
+    def test_una_curva_fija_se_muestra_en_todas_las_replicas(self):
+        seleccionado = {
+            "id": "Fz::1",
+            "columna": "Fz",
+            "indice_color": 6,
+        }
+        disponibles = [
+            seleccionado,
+            {"id": "Fx::2", "columna": "Fx", "indice_color": 6},
+            {"id": "Fy::4", "columna": "Fy", "indice_color": 6},
+            {"id": "Mz::1", "columna": "Mz", "indice_color": 7},
+            {
+                "id": "Fz::1::sub::1",
+                "columna": "Fz",
+                "indice_color": 6,
+                "es_subintervalo": True,
+            },
+        ]
+
+        destinos = formulas.destinos_visuales_formula(
+            seleccionado,
+            "Fz",
+            disponibles,
+        )
+
+        self.assertEqual(destinos, ["Fz", "Fx", "Fy"])
+
+    def test_senal_del_intervalo_no_copia_su_curva_a_otra_senal(self):
+        seleccionado = {
+            "id": "Fx::1",
+            "columna": "Fx",
+            "indice_color": 3,
+        }
+        disponibles = [
+            seleccionado,
+            {"id": "Fy::1", "columna": "Fy", "indice_color": 3},
+        ]
+
+        destinos = formulas.destinos_visuales_formula(
+            seleccionado,
+            "Fx",
+            disponibles,
+            usa_senal_intervalo=True,
+        )
+
+        self.assertEqual(destinos, ["Fx"])
+
     def test_cada_formula_conserva_su_curva_visual_al_agregar_otra(self):
         potencia_y = np.array([10.0, 40.0, 20.0])
         impulso_y = np.array([900.0, 1200.0, 950.0])
@@ -801,6 +1088,36 @@ class TestConstructorFormulas(unittest.TestCase):
 
         np.testing.assert_allclose(construida, esperada)
 
+    def test_la_estatura_es_una_variable_de_contexto_en_metros(self):
+        analisis = formulas.analizar_expresion_personalizada(
+            "Fz / estatura"
+        )
+        self.assertIn("estatura", analisis["variables"])
+
+        resultado = formulas.evaluar_expresion_personalizada(
+            analisis["texto"],
+            {"Fz": np.array([100.0, 200.0]), "estatura": 2.0},
+        )
+        np.testing.assert_allclose(resultado, [50.0, 100.0])
+
+    def test_una_formula_con_estatura_avisa_si_el_dato_falta(self):
+        clave = "formula_estatura_test"
+        self.addCleanup(formulas.quitar_formula_personalizada, clave)
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave,
+                "nombre": "Fuerza por estatura",
+                "expresion": "Fz / estatura",
+                "unidad": "N/m",
+            }
+        )
+
+        motivo = formulas.validar_formula(
+            clave, {}, roles_disponibles=("Fz",)
+        )
+
+        self.assertIn("estatura", motivo.lower())
+
     def test_conserva_una_formula_propia_aunque_copie_una_integrada(self):
         clave = "copia_fuerza_neta_test"
         self.addCleanup(formulas.quitar_formula_personalizada, clave)
@@ -893,6 +1210,52 @@ class TestConstructorFormulas(unittest.TestCase):
             self.assertNotIn(clave, claves)
         finally:
             formulas.quitar_formula_personalizada(clave)
+
+
+class TestIntercambioFormulas(unittest.TestCase):
+    FORMULA = {
+        "nombre": "Índice por estatura",
+        "expresion": "promedio(Fz / estatura)",
+        "unidad": "N/m",
+        "descripcion": "Promedio normalizado por la estatura.",
+        "reutilizable": True,
+    }
+
+    def test_exporta_e_importa_un_txt_sin_perder_datos(self):
+        texto = intercambio_formulas.serializar_formulas([self.FORMULA])
+        recuperadas = intercambio_formulas.deserializar_formulas(texto)
+
+        self.assertIn(intercambio_formulas.FORMATO, texto)
+        self.assertEqual(recuperadas, [self.FORMULA])
+
+    def test_rechaza_codigo_que_el_constructor_no_admite(self):
+        texto = intercambio_formulas.serializar_formulas([self.FORMULA])
+        documento = texto.replace(
+            "promedio(Fz / estatura)", "__import__('os').system('dir')"
+        )
+
+        with self.assertRaises(intercambio_formulas.ErrorIntercambioFormulas):
+            intercambio_formulas.deserializar_formulas(documento)
+
+    def test_omite_duplicados_y_renombra_una_colision_distinta(self):
+        importadas = [
+            self.FORMULA,
+            {
+                **self.FORMULA,
+                "expresion": "maximo(Fz / estatura)",
+            },
+        ]
+
+        resultado = intercambio_formulas.resolver_conflictos(
+            importadas, [self.FORMULA]
+        )
+
+        self.assertEqual(resultado["omitidas"], 1)
+        self.assertEqual(resultado["renombradas"], 1)
+        self.assertEqual(
+            resultado["formulas"][0]["nombre"],
+            "Índice por estatura (importada)",
+        )
 
 
 class TestResumenFormula(unittest.TestCase):
@@ -1126,7 +1489,7 @@ class TestProyecto(unittest.TestCase):
                 "tipo": "rango", "senal": "Fuerza X - Fx", "columna": "Fx",
                 "numero": 1, "padre": "", "desde": 1, "hasta": 297,
                 "nombre": "Intervalo 1", "nota": "El usuario está sentado",
-                "fuente": "original",
+                "fuente": "original", "indice_color": 6,
             },
             {
                 "tipo": "subrango", "senal": "Fuerza X - Fx", "columna": "Fx",
@@ -1195,6 +1558,49 @@ class TestProyecto(unittest.TestCase):
             self.assertEqual(
                 proyecto.leer_anotaciones(Path(carpeta) / "no_existe.csv"), []
             )
+
+    def test_ida_y_vuelta_del_estado_complementario(self):
+        estado = {
+            "variables": {"masa": 72.5, "estatura": 1.81, "gravedad": 9.8},
+            "frecuencia_original": 2000.0,
+            "graficas": {
+                "mapeo": {
+                    "Fuerza": {
+                        "eje_z": {"columna": "Fz", "activo": True, "orden": 0}
+                    }
+                }
+            },
+            "filtros": {
+                "Fz": {
+                    "frecuencia_muestreo": 250.0,
+                    "tipo": "lowpass",
+                    "frecuencias_corte": 20.0,
+                    "orden": 4,
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / "prueba_estado.json"
+            proyecto.escribir_estado(ruta, estado)
+            leido = proyecto.leer_estado(ruta)
+
+        self.assertEqual(leido["version"], proyecto.VERSION_ESTADO)
+        self.assertEqual(leido["variables"], estado["variables"])
+        self.assertEqual(leido["filtros"], estado["filtros"])
+
+    def test_proyecto_antiguo_sin_estado_devuelve_vacio(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            self.assertEqual(
+                proyecto.leer_estado(Path(carpeta) / "no_existe.json"), {}
+            )
+
+    def test_rechaza_un_estado_json_corrupto(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = Path(carpeta) / "corrupto_estado.json"
+            ruta.write_text("{sin cerrar", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                proyecto.leer_estado(ruta)
 
 
 class TestLimpiezaProyectos(unittest.TestCase):
@@ -1266,6 +1672,9 @@ class TestLimpiezaProyectos(unittest.TestCase):
                     Path(proyecto.ruta_anotaciones(nombre)).write_text(
                         "x", encoding="utf-8"
                     )
+                    proyecto.escribir_estado(
+                        proyecto.ruta_estado(nombre), {"variables": {}}
+                    )
 
                 eliminados, errores = proyecto.eliminar_proyectos(["marcha"])
 
@@ -1275,8 +1684,10 @@ class TestLimpiezaProyectos(unittest.TestCase):
                 self.assertFalse(
                     os.path.exists(proyecto.ruta_anotaciones("marcha"))
                 )
+                self.assertFalse(os.path.exists(proyecto.ruta_estado("marcha")))
                 # El otro proyecto queda intacto.
                 self.assertTrue(os.path.exists(proyecto.ruta_csv("salto")))
+                self.assertTrue(os.path.exists(proyecto.ruta_estado("salto")))
 
     def test_elimina_aunque_no_haya_archivo_de_anotaciones(self):
         with tempfile.TemporaryDirectory() as carpeta:

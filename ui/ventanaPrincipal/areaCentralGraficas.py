@@ -1,3 +1,4 @@
+import copy
 import math
 import re
 
@@ -549,6 +550,12 @@ class GraficaSenal(pg.PlotWidget):
         if not activo:
             self._cancelar_propuesta()
 
+    def cancelar_propuesta_intervalo(self):
+        """Cancela el primer punto y dice si había una selección en curso."""
+        habia_inicio = self.x_inicio is not None
+        self._cancelar_propuesta()
+        return habia_inicio
+
     # Radio en píxeles alrededor del pico / de la curva para que aparezca la caja.
     RADIO_HOVER_PICO = 16
     RADIO_HOVER_CURVA = 12
@@ -958,13 +965,24 @@ class AreaCentralGraficas(QFrame):
         # nueva aplicación no reemplaza las curvas de otras fórmulas.
         self.formulas_activas = {}
         self._calculos_formulas = {}
+        # Aplicaciones de subintervalos hechas desde el panel principal o desde
+        # una ventana de detalle. No se mezclan con los intervalos padre.
+        self.formulas_subintervalos_activas = {}
+        self._calculos_formulas_subintervalos = {}
+        # La pantalla principal muestra una sola capa de cálculo por vez.
+        self.nivel_calculo_visible = "intervalos"
+        self._ultimo_error_formula = ""
         # Alias de compatibilidad: apunta a la aplicación más reciente.
         self.formula_activa = None
         self.masa_sujeto = None
+        self.estatura_sujeto = None
         self.gravedad = 9.8
         # Descripción legible del filtro puesto en cada columna, para poder
         # decir sobre qué datos se calculó cada resultado.
         self.filtros_por_columna = {}
+        # Configuración numérica exacta por columna. Además de explicar el
+        # filtro, permite reconstruirlo al volver a abrir un proyecto.
+        self.configuraciones_filtro_por_columna = {}
         # Sobre qué serie calculan las fórmulas: "filtrada" usa la filtrada
         # cuando existe; "original" fuerza la señal cruda aunque haya filtro.
         self.fuente_calculo = FUENTE_FILTRADA
@@ -980,7 +998,7 @@ class AreaCentralGraficas(QFrame):
         layout_placeholder = QVBoxLayout()
         layout_placeholder.setContentsMargins(0, 0, 0, 0)
         layout_placeholder.addStretch()
-        self.lbl_estado = QLabel("Carga un archivo .CSV para visualizar las señales")
+        self.lbl_estado = QLabel("Cargá un archivo CSV.")
         self.lbl_estado.setObjectName("estadoGraficas")
         self.lbl_estado.setAlignment(Qt.AlignCenter)
         self.lbl_estado.setStyleSheet("color: #B0B0B0; font-size: 15px;")
@@ -1005,6 +1023,11 @@ class AreaCentralGraficas(QFrame):
         self.setLayout(layout)
 
     def cargar_dataframe(self, nombre_archivo, df, info):
+        # La permanencia pertenece al CSV activo. Al cambiar de archivo no deben
+        # quedar ventanas de detalle mostrando resultados de la sesión anterior.
+        for ventana in self._ventanas_region:
+            ventana.close()
+        self._ventanas_region = []
         self.nombre_archivo = nombre_archivo
         self.df_original = df
         preparado, self.columna_x = self._preparar_dataframe(df)
@@ -1018,8 +1041,12 @@ class AreaCentralGraficas(QFrame):
         self.notas = {}
         self.columnas_filtradas = set()
         self.filtros_por_columna = {}
+        self.configuraciones_filtro_por_columna = {}
         self.formulas_activas = {}
         self._calculos_formulas = {}
+        self.formulas_subintervalos_activas = {}
+        self._calculos_formulas_subintervalos = {}
+        self._ultimo_error_formula = ""
         self.formula_activa = None
         self.intervalosCambiados.emit([])
         self.resultadosFormulaCambiaron.emit(None)
@@ -1036,8 +1063,14 @@ class AreaCentralGraficas(QFrame):
         if graficas_recreadas:
             self._crear_graficas()
         self._actualizar_visibilidad()
-        if self.formulas_activas and not graficas_recreadas:
+        if self._hay_formulas_aplicadas() and not graficas_recreadas:
             self._recalcular_formulas_activas()
+
+    def _hay_formulas_aplicadas(self):
+        """Indica si hay cálculos padre o de detalle vigentes en la sesión."""
+        return bool(
+            self.formulas_activas or self.formulas_subintervalos_activas
+        )
 
     def set_frecuencia_grafica(self, frecuencia):
         """Actualiza la frecuencia efectiva elegida en el panel de filtros."""
@@ -1049,13 +1082,21 @@ class AreaCentralGraficas(QFrame):
         if nueva_frecuencia == self.frecuencia_grafica:
             return
         self.frecuencia_grafica = nueva_frecuencia
-        if self.formulas_activas:
+        if self._hay_formulas_aplicadas():
             self._recalcular_formulas_activas()
 
     def set_modo_seleccion_intervalo(self, activo):
         self.modo_seleccion_intervalo = activo
         for grafica in self.graficas:
             grafica.set_modo_seleccion_intervalo(activo)
+
+    def cancelar_propuesta_intervalo(self):
+        """Cancela cualquier primer punto pendiente en las gráficas visibles."""
+        habia_inicio = False
+        for grafica in self.graficas:
+            if grafica.cancelar_propuesta_intervalo():
+                habia_inicio = True
+        return habia_inicio
 
     @staticmethod
     def _normalizar_identificador(valor):
@@ -1245,7 +1286,7 @@ class AreaCentralGraficas(QFrame):
 
         # Las gráficas se rehicieron desde cero: si había una fórmula puesta,
         # se vuelve a aplicar sobre las nuevas curvas.
-        if self.formulas_activas:
+        if self._hay_formulas_aplicadas():
             self._recalcular_formulas_activas()
 
     def _actualizar_visibilidad(self):
@@ -1319,7 +1360,7 @@ class AreaCentralGraficas(QFrame):
 
         # set_datos() rehace las curvas, así que la fórmula se vuelve a poner
         # (y se recalcula sobre los datos filtrados, que es lo que se espera).
-        if self.formulas_activas:
+        if self._hay_formulas_aplicadas():
             self._recalcular_formulas_activas()
 
     def set_aplicar_corte_todas(self, activo):
@@ -1357,9 +1398,7 @@ class AreaCentralGraficas(QFrame):
         ]
         for ventana in self._ventanas_region:
             ventana.panel_calculo.recargar_formulas()
-            self._recalcular_formulas_subintervalos(ventana)
-        if self.formulas_activas:
-            self._recalcular_formulas_activas()
+        self._recalcular_formulas_activas()
 
     def _repintar_accesibilidad(self):
         """Reasigna los colores y repinta gráficas y ventanas de sub-intervalos.
@@ -1509,6 +1548,7 @@ class AreaCentralGraficas(QFrame):
         if not ok:
             return
         nombre = nombre.strip()
+        indice_color = self._nuevo_indice_color_compartido()
 
         # Modo con superposición habilitada: se pregunta una sola vez si alguna
         # señal visible se superpone, y luego se crea el recorte tal cual en todas.
@@ -1531,7 +1571,13 @@ class AreaCentralGraficas(QFrame):
                     omitidos.append(grafica.nombre_senal)
                     continue
                 try:
-                    gestor.agregar(desde, hasta, nombre, permitir_superposicion=True)
+                    gestor.agregar(
+                        desde,
+                        hasta,
+                        nombre,
+                        permitir_superposicion=True,
+                        indice_color=indice_color,
+                    )
                 except ValueError:
                     omitidos.append(grafica.nombre_senal)
                     continue
@@ -1564,7 +1610,12 @@ class AreaCentralGraficas(QFrame):
                     omitidos.append(grafica.nombre_senal)
                     continue
             try:
-                _intervalo, fue_ajustado = gestor.agregar_ajustado(desde, hasta, nombre)
+                _intervalo, fue_ajustado = gestor.agregar_ajustado(
+                    desde,
+                    hasta,
+                    nombre,
+                    indice_color=indice_color,
+                )
             except (IntervaloSuperpuestoError, ValueError):
                 omitidos.append(grafica.nombre_senal)
                 continue
@@ -1591,6 +1642,15 @@ class AreaCentralGraficas(QFrame):
             else:
                 self.intervaloRechazado.emit(mensaje)
             QToolTip.showText(QCursor.pos(), mensaje, grafica_origen)
+
+    def _nuevo_indice_color_compartido(self):
+        """Reserva un índice de paleta común para una réplica entre gráficas."""
+        usados = [
+            intervalo.indice_color or intervalo.orden or intervalo.numero
+            for gestor in self.gestores_intervalos.values()
+            for intervalo in gestor.listar()
+        ]
+        return max(usados, default=0) + 1
 
     @staticmethod
     def _id_intervalo(columna, numero):
@@ -1654,9 +1714,8 @@ class AreaCentralGraficas(QFrame):
                 c, n, desde, hasta, v
             )
         )
-        # La sección de fórmulas de la ventana comparte el mismo panel que el
-        # principal: el cálculo de sub-intervalos corre con el mismo motor
-        # ``_calcular_por_intervalos`` y los resultados vuelven a esa ventana.
+        # La sección comparte el componente y el motor de la principal, pero sus
+        # aplicaciones se guardan en un registro central exclusivo de subintervalos.
         ventana.panel_calculo.calcularSolicitado.connect(
             lambda v=ventana: self._calcular_subintervalos(v)
         )
@@ -1675,17 +1734,125 @@ class AreaCentralGraficas(QFrame):
             ventana.panel_calculo.eliminarFormulaSolicitado.connect(
                 gestor_formulas.panel_calculo.eliminarFormulaSolicitado.emit
             )
+            ventana.panel_calculo.importarFormulasSolicitado.connect(
+                gestor_formulas.panel_calculo.importarFormulasSolicitado.emit
+            )
+            ventana.panel_calculo.exportarFormulasSolicitado.connect(
+                gestor_formulas.panel_calculo.exportarFormulasSolicitado.emit
+            )
         # Guardar referencia para que la ventana no se destruya y limpiar cerradas.
         self._ventanas_region = [v for v in self._ventanas_region if v.isVisible()]
         self._ventanas_region.append(ventana)
+        self._recalcular_formulas_subintervalos(
+            ventana,
+            restaurar_seleccion=True,
+        )
         ventana.show()
+
+    def aplicar_formula_subintervalos(
+        self,
+        configuracion=None,
+        avisar=True,
+        actualizar_vista=True,
+    ):
+        """Calcula en masa los subintervalos elegidos desde el panel principal."""
+        self._ultimo_error_formula = ""
+        if self.df_grafica_original is None:
+            return self._rechazar_aplicacion_formula(
+                "Primero cargá un archivo CSV.",
+                avisar,
+            )
+
+        configuracion = dict(configuracion or {})
+        clave = configuracion.get("clave") or formulas.formula_predeterminada()
+        configuracion["clave"] = clave
+        if not formulas.hay_formula(clave):
+            return self._rechazar_aplicacion_formula(
+                f"Fórmula «{clave}» desconocida.",
+                avisar,
+            )
+        desc = formulas.descripcion_formula(clave)
+        disponibles = {
+            intervalo["id"]: intervalo
+            for intervalo in self._intervalos_para_panel()
+            if intervalo.get("es_subintervalo")
+        }
+        aplicaciones_propuestas = formulas.registrar_aplicacion_formula(
+            self.formulas_subintervalos_activas,
+            configuracion,
+        )
+        aplicaciones_propuestas = formulas.filtrar_aplicaciones_por_intervalos(
+            aplicaciones_propuestas,
+            disponibles,
+        )
+        configuracion = aplicaciones_propuestas.get(clave)
+        intervalos = (
+            [
+                disponibles[identificador]
+                for identificador in configuracion.get("intervalos", ())
+            ]
+            if configuracion
+            else []
+        )
+        if not intervalos:
+            return self._rechazar_aplicacion_formula(
+                "Marcá al menos un subintervalo para calcular "
+                f"{formulas.nombre_con_articulo(desc)}.",
+                avisar,
+            )
+
+        try:
+            calculo = self._preparar_calculo_subintervalos_global(
+                clave,
+                configuracion,
+                intervalos,
+            )
+        except ErrorFormula as exc:
+            return self._rechazar_aplicacion_formula(str(exc), avisar)
+        if calculo is None:
+            return self._rechazar_aplicacion_formula(
+                "Los subintervalos marcados no tienen datos válidos para calcular "
+                f"{formulas.nombre_con_articulo(desc)}.",
+                avisar,
+            )
+
+        self.formulas_subintervalos_activas = aplicaciones_propuestas
+        self._calculos_formulas_subintervalos[clave] = calculo
+        self._calculos_formulas_subintervalos = {
+            clave_activa: self._calculos_formulas_subintervalos[clave_activa]
+            for clave_activa in self.formulas_subintervalos_activas
+            if clave_activa in self._calculos_formulas_subintervalos
+        }
+        self._sincronizar_ventanas_subintervalos()
+
+        if actualizar_vista and self.nivel_calculo_visible == "subintervalos":
+            self._redibujar_formulas_aplicadas()
+            self._emitir_resultado_formula_actual()
+
+        if avisar:
+            cantidad = len(calculo["datos_panel"]["resultados"])
+            destino = (
+                "un subintervalo"
+                if cantidad == 1
+                else f"{cantidad} subintervalos"
+            )
+            conservadas = (
+                " Las demás fórmulas aplicadas a subintervalos se conservaron."
+                if len(self.formulas_subintervalos_activas) > 1
+                else ""
+            )
+            self.formulaEstadoCambiado.emit(
+                True,
+                f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}."
+                f"{conservadas}",
+            )
+        return True
 
     def _calcular_subintervalos(self, ventana):
         """Calcula la fórmula elegida sobre los sub-intervalos del intervalo abierto.
 
-        Usa el mismo ``_calcular_por_intervalos`` que los intervalos del panel
-        principal; la única diferencia es el destino: la curva va en la gráfica
-        de esta ventana y los resultados en su panel de fórmulas.
+        La aplicación se conserva en el área central para poder restaurarla, pero
+        permanece separada de los cálculos de intervalos padre de la principal.
         """
         if self.df_grafica_original is None:
             ventana.panel_calculo.actualizar_estado(
@@ -1724,43 +1891,60 @@ class AreaCentralGraficas(QFrame):
             return
 
         aplicaciones_propuestas = formulas.registrar_aplicacion_formula(
-            ventana.formulas_activas,
-            {
-                "clave": clave,
-                "intervalos": seleccionados,
-            },
+            self.formulas_subintervalos_activas,
+            {"clave": clave, "intervalos": seleccionados},
         )
-        configuracion = aplicaciones_propuestas[clave]
-        por_id = {intervalo["id"]: intervalo for intervalo in disponibles}
-        intervalos = [
-            por_id[identificador]
-            for identificador in configuracion["intervalos"]
-            if identificador in por_id
-        ]
-
+        disponibles_por_id = {
+            intervalo["id"]: intervalo for intervalo in disponibles
+        }
+        aplicaciones_ventana = formulas.filtrar_aplicaciones_por_intervalos(
+            aplicaciones_propuestas,
+            disponibles_por_id,
+        )
+        configuracion = aplicaciones_ventana.get(clave)
+        intervalos = (
+            [
+                disponibles_por_id[identificador]
+                for identificador in configuracion.get("intervalos", ())
+            ]
+            if configuracion
+            else []
+        )
         try:
             calculo = self._preparar_calculo_subintervalos(
-                ventana,
                 clave,
                 configuracion,
                 intervalos,
+                columna,
             )
         except ErrorFormula as exc:
-            ventana.panel_calculo.actualizar_estado(False, str(exc))
+            ventana.panel_calculo.actualizar_estado(
+                False,
+                str(exc),
+            )
             return
 
         if calculo is None:
             ventana.panel_calculo.actualizar_estado(
-                False, "Los sub-intervalos no tienen datos válidos para calcular "
-                f"{formulas.nombre_con_articulo(desc)}."
+                False,
+                "Los sub-intervalos no tienen datos válidos para calcular "
+                f"{formulas.nombre_con_articulo(desc)}.",
             )
             return
+        self.formulas_subintervalos_activas = aplicaciones_propuestas
+        self._recalcular_calculos_subintervalos_globales()
+        self._sincronizar_ventanas_subintervalos()
+        if self.nivel_calculo_visible == "subintervalos":
+            self._redibujar_formulas_aplicadas()
+            self._emitir_resultado_formula_actual()
 
-        ventana.registrar_calculo_formula(
-            aplicaciones_propuestas,
-            clave,
-            calculo,
-        )
+        calculo = ventana._calculos_formulas.get(clave)
+        if calculo is None:
+            ventana.panel_calculo.actualizar_estado(
+                False,
+                "El cálculo se guardó, pero no pudo mostrarse en esta ventana.",
+            )
+            return
         resultados = calculo["datos_panel"]["resultados"]
         cantidad = len(resultados)
         destino = "un sub-intervalo" if cantidad == 1 else f"{cantidad} sub-intervalos"
@@ -1777,11 +1961,26 @@ class AreaCentralGraficas(QFrame):
 
     def _preparar_calculo_subintervalos(
         self,
-        ventana,
+        clave,
+        configuracion,
+        intervalos,
+        columna_ventana,
+    ):
+        # La preparación global ya agrupa por la columna propietaria. Todos los
+        # elementos de una ventana de detalle pertenecen a ``columna_ventana``.
+        return self._preparar_calculo_subintervalos_global(
+            clave,
+            configuracion,
+            intervalos,
+        )
+
+    def _preparar_calculo_subintervalos_global(
+        self,
         clave,
         configuracion,
         intervalos,
     ):
+        """Prepara resultados de subintervalos agrupados por gráfica propietaria."""
         desc = formulas.descripcion_formula(clave)
         columna_origen, resultados, _tramos, advertencias, segmentos = (
             self._calcular_por_intervalos(clave, intervalos)
@@ -1789,16 +1988,51 @@ class AreaCentralGraficas(QFrame):
         if not resultados:
             return None
 
-        fuente, detalle = self._procedencia([columna_origen])
-        grafica_origen = self.graficas_por_columna.get(columna_origen)
+        intervalos_por_id = {
+            intervalo.get("id"): intervalo for intervalo in intervalos
+        }
+        por_grafica = {}
+        for resultado, segmento in zip(resultados, segmentos):
+            intervalo = intervalos_por_id.get(resultado.get("id"), {})
+            propietario = intervalo.get("columna") or columna_origen
+            if propietario is None:
+                continue
+            grupo = por_grafica.setdefault(
+                propietario,
+                {"resultados": [], "segmentos": []},
+            )
+            grupo["resultados"].append(resultado)
+            grupo["segmentos"].append(segmento)
+
+        usa_senal = bool(desc.get("usa_senal_intervalo"))
+        columnas_origen = (
+            [intervalo.get("columna") for intervalo in intervalos]
+            if usa_senal
+            else [columna_origen] if columna_origen else []
+        )
+        fuente, detalle = self._procedencia(columnas_origen)
+        senales = []
+        if usa_senal:
+            for columna in columnas_origen:
+                grafica = self.graficas_por_columna.get(columna)
+                nombre = grafica.nombre_senal if grafica else columna
+                if nombre and nombre not in senales:
+                    senales.append(nombre)
+        else:
+            grafica_origen = self.graficas_por_columna.get(columna_origen)
+            nombre = (
+                grafica_origen.nombre_senal
+                if grafica_origen
+                else columna_origen
+            )
+            if nombre:
+                senales.append(nombre)
         datos_panel = {
             "clave": clave,
             "nombre": desc["nombre"],
             "expresion": desc["expresion"],
             "unidad": desc["unidad"],
-            "senal": (
-                grafica_origen.nombre_senal if grafica_origen else columna_origen
-            ),
+            "senal": senales[0] if len(senales) == 1 else "",
             "fuente": fuente,
             "detalle_filtro": detalle,
             "resultados": resultados,
@@ -1807,18 +2041,51 @@ class AreaCentralGraficas(QFrame):
         return {
             "configuracion": configuracion,
             "datos_panel": datos_panel,
-            "por_grafica": {
-                ventana.grafica.columna: {
-                    "resultados": resultados,
-                    "segmentos": segmentos,
-                }
-            },
+            "por_grafica": por_grafica,
         }
 
-    def _recalcular_formulas_subintervalos(self, ventana):
-        """Actualiza las fórmulas de una ventana sin sumar sub-intervalos nuevos."""
-        if not ventana.formulas_activas:
-            return
+    def _recalcular_calculos_subintervalos_globales(self):
+        """Reconstruye la capa principal de subintervalos desde su registro."""
+        disponibles = {
+            intervalo["id"]: intervalo
+            for intervalo in self._intervalos_para_panel()
+            if intervalo.get("es_subintervalo")
+        }
+        existentes = {
+            clave: configuracion
+            for clave, configuracion in self.formulas_subintervalos_activas.items()
+            if formulas.hay_formula(clave)
+        }
+        self.formulas_subintervalos_activas = (
+            formulas.filtrar_aplicaciones_por_intervalos(
+                existentes,
+                disponibles,
+            )
+        )
+        calculos = {}
+        for clave, configuracion in self.formulas_subintervalos_activas.items():
+            intervalos = [
+                disponibles[identificador]
+                for identificador in configuracion.get("intervalos", ())
+            ]
+            try:
+                calculo = self._preparar_calculo_subintervalos_global(
+                    clave,
+                    configuracion,
+                    intervalos,
+                )
+            except ErrorFormula:
+                continue
+            if calculo is not None:
+                calculos[clave] = calculo
+        self._calculos_formulas_subintervalos = calculos
+
+    def _recalcular_formulas_subintervalos(
+        self,
+        ventana,
+        restaurar_seleccion=False,
+    ):
+        """Deriva la vista de detalle desde las aplicaciones centrales vigentes."""
         columna, numero_padre = ventana.clave_subgestor
         padre_id = self._id_intervalo(columna, numero_padre)
         disponibles = {
@@ -1826,39 +2093,96 @@ class AreaCentralGraficas(QFrame):
             for intervalo in self._intervalos_para_panel()
             if intervalo.get("padre") == padre_id
         }
-        aplicaciones = {}
+        aplicaciones = formulas.filtrar_aplicaciones_por_intervalos(
+            self.formulas_subintervalos_activas,
+            disponibles,
+        )
         calculos = {}
-        for clave, configuracion in ventana.formulas_activas.items():
+        for clave, configuracion in aplicaciones.items():
             if not formulas.hay_formula(clave):
                 continue
-            seleccion = [
-                identificador
-                for identificador in configuracion.get("intervalos") or ()
-                if identificador in disponibles
+            intervalos = [
+                disponibles[identificador]
+                for identificador in configuracion["intervalos"]
             ]
-            if not seleccion:
-                continue
-            vigente = dict(configuracion)
-            vigente["intervalos"] = seleccion
-            intervalos = [disponibles[identificador] for identificador in seleccion]
             try:
                 calculo = self._preparar_calculo_subintervalos(
-                    ventana,
                     clave,
-                    vigente,
+                    configuracion,
                     intervalos,
+                    columna,
                 )
             except ErrorFormula:
                 continue
             if calculo is None:
                 continue
-            aplicaciones[clave] = vigente
             calculos[clave] = calculo
+        aplicaciones = {
+            clave: configuracion
+            for clave, configuracion in aplicaciones.items()
+            if clave in calculos
+        }
         ventana.establecer_calculos_formulas(aplicaciones, calculos)
+        if restaurar_seleccion and aplicaciones:
+            ultima_clave = next(reversed(aplicaciones))
+            ventana.panel_calculo.set_formula(ultima_clave)
+            ventana.set_subintervalos_seleccionados(
+                aplicaciones[ultima_clave]["intervalos"]
+            )
+
+    def _sincronizar_ventanas_subintervalos(self):
+        """Actualiza todas las ventanas abiertas desde el estado central."""
+        ids_validos = {
+            intervalo["id"]
+            for intervalo in self._intervalos_para_panel()
+            if intervalo.get("es_subintervalo")
+        }
+        existentes = {
+            clave: configuracion
+            for clave, configuracion in self.formulas_subintervalos_activas.items()
+            if formulas.hay_formula(clave)
+        }
+        self.formulas_subintervalos_activas = (
+            formulas.filtrar_aplicaciones_por_intervalos(
+                existentes,
+                ids_validos,
+            )
+        )
+        self._ventanas_region = [
+            ventana for ventana in self._ventanas_region if ventana.isVisible()
+        ]
+        for ventana in self._ventanas_region:
+            self._recalcular_formulas_subintervalos(ventana)
 
     def _quitar_formula_subintervalos(self, ventana):
-        """Saca todas las fórmulas aplicadas en la ventana de sub-intervalos."""
-        ventana.quitar_formulas_aplicadas()
+        """Quita las aplicaciones del intervalo abierto, sin tocar las demás."""
+        columna, numero_padre = ventana.clave_subgestor
+        padre_id = self._id_intervalo(columna, numero_padre)
+        ids_a_quitar = {
+            intervalo["id"]
+            for intervalo in self._intervalos_para_panel()
+            if intervalo.get("padre") == padre_id
+        }
+        ids_a_conservar = {
+            intervalo["id"]
+            for intervalo in self._intervalos_para_panel()
+            if intervalo["id"] not in ids_a_quitar
+        }
+        self.formulas_subintervalos_activas = (
+            formulas.filtrar_aplicaciones_por_intervalos(
+                self.formulas_subintervalos_activas,
+                ids_a_conservar,
+            )
+        )
+        self._recalcular_calculos_subintervalos_globales()
+        self._sincronizar_ventanas_subintervalos()
+        if self.nivel_calculo_visible == "subintervalos":
+            self._redibujar_formulas_aplicadas()
+            self._emitir_resultado_formula_actual()
+        ventana.panel_calculo.actualizar_estado(
+            True,
+            "Se quitaron las fórmulas aplicadas a estos sub-intervalos.",
+        )
 
     def _registrar_subintervalo(self, columna, numero_padre, desde, hasta, ventana):
         """Agrega un sub-intervalo respetando la configuración de superposición."""
@@ -1968,6 +2292,7 @@ class AreaCentralGraficas(QFrame):
                     ),
                     "nota": intervalo.get("nota", ""),
                     "fuente": intervalo.get("fuente", ""),
+                    "indice_color": intervalo.get("indice_color", 0),
                 }
             )
         return filas
@@ -2001,7 +2326,11 @@ class AreaCentralGraficas(QFrame):
                 if fila["tipo"] == "rango":
                     gestor = self.gestores_intervalos.setdefault(columna, GestorIntervalos())
                     gestor.restaurar(
-                        fila["numero"], fila["desde"], fila["hasta"], fila["nombre"]
+                        fila["numero"],
+                        fila["desde"],
+                        fila["hasta"],
+                        fila["nombre"],
+                        indice_color=fila.get("indice_color"),
                     )
                     identificador = self._id_intervalo(columna, fila["numero"])
                 else:
@@ -2019,7 +2348,11 @@ class AreaCentralGraficas(QFrame):
                         (columna, numero_padre), GestorIntervalos("Sub-intervalo")
                     )
                     subgestor.restaurar(
-                        fila["numero"], fila["desde"], fila["hasta"], fila["nombre"]
+                        fila["numero"],
+                        fila["desde"],
+                        fila["hasta"],
+                        fila["nombre"],
+                        indice_color=fila.get("indice_color"),
                     )
                     identificador = self._id_subintervalo(
                         columna, numero_padre, fila["numero"]
@@ -2052,15 +2385,13 @@ class AreaCentralGraficas(QFrame):
 
     def _emitir_intervalos(self):
         self.intervalosCambiados.emit(self._intervalos_para_panel())
-        if self.formulas_activas:
-            self._recalcular_formulas_activas()
         self._ventanas_region = [
             ventana for ventana in self._ventanas_region if ventana.isVisible()
         ]
         for ventana in self._ventanas_region:
             subgestor = self.subgestores.get(ventana.clave_subgestor)
             ventana.mostrar_subintervalos(subgestor.listar() if subgestor else [])
-            self._recalcular_formulas_subintervalos(ventana)
+        self._recalcular_formulas_activas()
 
     def eliminar_intervalos(self, identificadores):
         por_columna = {}
@@ -2122,13 +2453,36 @@ class AreaCentralGraficas(QFrame):
         return self.df_grafica.loc[mascara, [self.columna_x, columna]].copy()
 
     def set_variables_sujeto(self, variables):
-        """Recibe masa y gravedad del panel izquierdo para las fórmulas."""
+        """Recibe masa, estatura y gravedad para las fórmulas."""
         variables = variables or {}
         self.masa_sujeto = variables.get("masa")
+        self.estatura_sujeto = variables.get("estatura")
         self.gravedad = variables.get("gravedad") or self.gravedad
-        # Si hay una fórmula que depende de la masa, se recalcula sola.
-        if self.formulas_activas:
+        # Si una fórmula depende de una variable modificada, se recalcula sola.
+        if self._hay_formulas_aplicadas():
             self._recalcular_formulas_activas()
+
+    def estado_para_proyecto(self):
+        """Datos reproducibles del área: gráficas, filtros y fuente de cálculo."""
+        return {
+            "mapeo": copy.deepcopy(self.mapeo_actual or {}),
+            "filtros": copy.deepcopy(self.configuraciones_filtro_por_columna),
+            "fuente_calculo": self.fuente_calculo,
+        }
+
+    def restaurar_filtros_proyecto(self, configuraciones):
+        """Vuelve a aplicar los filtros guardados y devuelve cuántos restauró."""
+        if not isinstance(configuraciones, dict):
+            return 0
+        restaurados = 0
+        for columna, configuracion in configuraciones.items():
+            if not isinstance(configuracion, dict):
+                continue
+            solicitud = dict(configuracion)
+            solicitud["columnas"] = [columna]
+            if self.aplicar_filtro(solicitud, avisar=False):
+                restaurados += 1
+        return restaurados
 
     def _fuente_de_columna(self, columna):
         """Sobre qué serie se calcula esta columna, de verdad.
@@ -2167,7 +2521,7 @@ class AreaCentralGraficas(QFrame):
         if valor == self.fuente_calculo:
             return
         self.fuente_calculo = valor
-        if self.formulas_activas:
+        if self._hay_formulas_aplicadas():
             self._recalcular_formulas_activas()
 
     def _intervalos_seleccionados(self, identificadores, preservar_por_senal=False):
@@ -2175,8 +2529,8 @@ class AreaCentralGraficas(QFrame):
 
         Se aceptan intervalos de cualquier señal visible: todos comparten el eje de
         frames, que es lo único que hace falta para recortar la fórmula. Los
-        sub-intervalos quedan fuera: se calculan en la ventana que se abre con doble
-        clic sobre su intervalo.
+        subintervalos se excluyen de forma defensiva: tienen su propia ruta de
+        cálculo, accesible desde el selector principal o mediante doble clic.
         """
         intervalos = []
         for identificador in identificadores or []:
@@ -2244,28 +2598,65 @@ class AreaCentralGraficas(QFrame):
             rol for rol in formulas.ROLES if self._columna_de_rol(rol) is not None
         }
 
+    def _rechazar_aplicacion_formula(self, mensaje, avisar):
+        """Conserva el error para que cualquier vista pueda mostrarlo."""
+        self._ultimo_error_formula = str(mensaje)
+        if avisar:
+            self.formulaEstadoCambiado.emit(False, self._ultimo_error_formula)
+        return False
+
+    @staticmethod
+    def _destino_aplicacion_formula(intervalos):
+        """Describe si el cálculo afectó intervalos, sub-intervalos o ambos."""
+        cantidad_sub = sum(
+            1 for intervalo in intervalos if intervalo.get("es_subintervalo")
+        )
+        cantidad_padres = len(intervalos) - cantidad_sub
+        if cantidad_sub and not cantidad_padres:
+            return (
+                "un sub-intervalo"
+                if cantidad_sub == 1
+                else f"{cantidad_sub} sub-intervalos"
+            )
+        if cantidad_padres and not cantidad_sub:
+            return (
+                "un intervalo"
+                if cantidad_padres == 1
+                else f"{cantidad_padres} intervalos"
+            )
+        texto_padres = (
+            "un intervalo"
+            if cantidad_padres == 1
+            else f"{cantidad_padres} intervalos"
+        )
+        texto_sub = (
+            "un sub-intervalo"
+            if cantidad_sub == 1
+            else f"{cantidad_sub} sub-intervalos"
+        )
+        return f"{texto_padres} y {texto_sub}"
+
     def aplicar_formula(self, configuracion=None, avisar=True, actualizar_vista=True):
         """Calcula una fórmula sin borrar las demás fórmulas aplicadas.
 
         Cada fórmula acumula sus intervalos. Volver a aplicarla sobre intervalos nuevos
         amplía la curva existente; aplicar otra conserva las anteriores.
         """
+        self._ultimo_error_formula = ""
         if self.df_grafica_original is None:
-            if avisar:
-                self.formulaEstadoCambiado.emit(
-                    False, "Primero cargá un archivo CSV."
-                )
-            return False
+            return self._rechazar_aplicacion_formula(
+                "Primero cargá un archivo CSV.",
+                avisar,
+            )
 
         configuracion = dict(configuracion or {})
         clave = configuracion.get("clave") or formulas.formula_predeterminada()
         configuracion["clave"] = clave
         if not formulas.hay_formula(clave):
-            if avisar:
-                self.formulaEstadoCambiado.emit(
-                    False, f"Fórmula «{clave}» desconocida."
-                )
-            return False
+            return self._rechazar_aplicacion_formula(
+                f"Fórmula «{clave}» desconocida.",
+                avisar,
+            )
         desc = formulas.descripcion_formula(clave)
         aplicaciones_propuestas = formulas.registrar_aplicacion_formula(
             self.formulas_activas, configuracion
@@ -2278,45 +2669,63 @@ class AreaCentralGraficas(QFrame):
             preservar_por_senal=desc.get("usa_senal_intervalo", False),
         )
         if not intervalos:
-            if avisar:
-                self.formulaEstadoCambiado.emit(
-                    False,
-                    "Marcá al menos un intervalo en una gráfica visible para calcular "
-                    f"{formulas.nombre_con_articulo(desc)}.",
-                )
-            return False
+            return self._rechazar_aplicacion_formula(
+                "Marcá al menos un intervalo en una gráfica visible para calcular "
+                f"{formulas.nombre_con_articulo(desc)}.",
+                avisar,
+            )
 
         try:
-            _columna, resultados, _tramos, advertencias, segmentos = (
+            columna_salida, resultados, _tramos, advertencias, segmentos = (
                 self._calcular_por_intervalos(clave, intervalos)
             )
         except ErrorFormula as exc:
-            if avisar:
-                self.formulaEstadoCambiado.emit(False, str(exc))
-            return False
+            return self._rechazar_aplicacion_formula(str(exc), avisar)
 
         if not resultados:
-            if avisar:
-                self.formulaEstadoCambiado.emit(
-                    False,
-                    "Los intervalos marcados no tienen datos válidos para calcular "
-                    f"{formulas.nombre_con_articulo(desc)}.",
-                )
-            return False
+            return self._rechazar_aplicacion_formula(
+                "Los intervalos marcados no tienen datos válidos para calcular "
+                f"{formulas.nombre_con_articulo(desc)}.",
+                avisar,
+            )
 
-        columna_por_id = {
-            intervalo.get("id"): intervalo.get("columna") for intervalo in intervalos
+        intervalo_por_id = {
+            intervalo.get("id"): intervalo for intervalo in intervalos
         }
+        usa_senal_intervalo = bool(desc.get("usa_senal_intervalo"))
+        intervalos_visibles = []
+        for candidato in self._intervalos_para_panel():
+            grafica_candidata = self.graficas_por_columna.get(
+                candidato.get("columna")
+            )
+            if (
+                not candidato.get("es_subintervalo")
+                and grafica_candidata is not None
+                and not grafica_candidata.isHidden()
+            ):
+                intervalos_visibles.append(candidato)
+
         por_grafica = {}
         for resultado, segmento in zip(resultados, segmentos):
-            propietario = columna_por_id.get(resultado.get("id"))
-            grupo = por_grafica.setdefault(
-                propietario, {"resultados": [], "segmentos": []}
+            intervalo = intervalo_por_id.get(resultado.get("id"), {})
+            destinos = formulas.destinos_visuales_formula(
+                intervalo,
+                columna_salida,
+                intervalos_visibles,
+                usa_senal_intervalo=usa_senal_intervalo,
             )
-            grupo["resultados"].append(resultado)
-            grupo["segmentos"].append(segmento)
+            for propietario in destinos:
+                grupo = por_grafica.setdefault(
+                    propietario, {"resultados": [], "segmentos": []}
+                )
+                grupo["resultados"].append(resultado)
+                grupo["segmentos"].append(segmento)
 
-        fuentes = [intervalo["columna"] for intervalo in intervalos]
+        fuentes = (
+            [intervalo["columna"] for intervalo in intervalos]
+            if usa_senal_intervalo
+            else [columna_salida] if columna_salida else []
+        )
         fuente, detalle = self._procedencia(fuentes)
         datos_panel = {
             "clave": clave,
@@ -2346,11 +2755,11 @@ class AreaCentralGraficas(QFrame):
 
         if actualizar_vista:
             self._redibujar_formulas_aplicadas()
-            self.resultadosFormulaCambiaron.emit(datos_panel)
+            self._emitir_resultado_formula_actual()
+            self._sincronizar_ventanas_subintervalos()
 
         if avisar:
-            cantidad = len(resultados)
-            destino = "un intervalo" if cantidad == 1 else f"{cantidad} intervalos"
+            destino = self._destino_aplicacion_formula(intervalos)
             conservadas = (
                 " Las demás fórmulas aplicadas se conservaron."
                 if len(self.formulas_activas) > 1
@@ -2364,19 +2773,33 @@ class AreaCentralGraficas(QFrame):
         return True
 
     def _redibujar_formulas_aplicadas(self):
-        """Dibuja cada fórmula en una escala vertical independiente."""
+        """Dibuja solo la capa del nivel elegido, sin mezclar padres y subs."""
         for grafica in self.graficas_por_columna.values():
             grafica.limpiar_curva_formula()
 
+        if self.nivel_calculo_visible == "subintervalos":
+            calculos = self._calculos_formulas_subintervalos
+            aplicaciones = self.formulas_subintervalos_activas
+        else:
+            calculos = self._calculos_formulas
+            aplicaciones = self.formulas_activas
         por_grafica = formulas.preparar_curvas_formulas_por_grafica(
-            self._calculos_formulas,
-            self.formulas_activas,
+            calculos,
+            aplicaciones,
         )
         for propietario, curvas in por_grafica.items():
             grafica = self.graficas_por_columna.get(propietario)
             if grafica is None or grafica.isHidden():
                 continue
             grafica.set_curvas_formulas(curvas)
+
+    def set_nivel_calculo_visible(self, nivel):
+        """Cambia entre la capa principal y la capa de subintervalos."""
+        self.nivel_calculo_visible = (
+            "subintervalos" if nivel == "subintervalos" else "intervalos"
+        )
+        self._redibujar_formulas_aplicadas()
+        self._emitir_resultado_formula_actual()
 
     def _recalcular_formulas_activas(self):
         """Recalcula todas las aplicaciones tras cambiar datos o intervalos."""
@@ -2385,23 +2808,16 @@ class AreaCentralGraficas(QFrame):
             for intervalo in self._intervalos_para_panel()
             if not intervalo.get("es_subintervalo")
         }
-        depuradas = {}
-        for clave, configuracion in self.formulas_activas.items():
-            if not formulas.hay_formula(clave):
-                continue
-            seleccion = [
-                identificador
-                for identificador in configuracion.get("intervalos") or ()
-                if identificador in ids_validos
-            ]
-            if not seleccion:
-                continue
-            vigente = dict(configuracion)
-            vigente["intervalos"] = seleccion
-            depuradas[clave] = vigente
-
-        self.formulas_activas = depuradas
-        configuraciones = list(depuradas.values())
+        existentes = {
+            clave: configuracion
+            for clave, configuracion in self.formulas_activas.items()
+            if formulas.hay_formula(clave)
+        }
+        self.formulas_activas = formulas.filtrar_aplicaciones_por_intervalos(
+            existentes,
+            ids_validos,
+        )
+        configuraciones = list(self.formulas_activas.values())
         self._calculos_formulas = {}
         for configuracion in configuraciones:
             self.aplicar_formula(
@@ -2415,24 +2831,91 @@ class AreaCentralGraficas(QFrame):
             if self.formulas_activas
             else None
         )
+        self._recalcular_calculos_subintervalos_globales()
         self._redibujar_formulas_aplicadas()
         self._emitir_resultado_formula_actual()
+        self._sincronizar_ventanas_subintervalos()
 
     def _emitir_resultado_formula_actual(self):
-        for clave in reversed(self.formulas_activas):
-            calculo = self._calculos_formulas.get(clave)
+        if self.nivel_calculo_visible == "subintervalos":
+            aplicaciones = self.formulas_subintervalos_activas
+            calculos = self._calculos_formulas_subintervalos
+        else:
+            aplicaciones = self.formulas_activas
+            calculos = self._calculos_formulas
+        for clave in reversed(aplicaciones):
+            calculo = calculos.get(clave)
             if calculo is not None:
                 self.resultadosFormulaCambiaron.emit(calculo["datos_panel"])
                 return
         self.resultadosFormulaCambiaron.emit(None)
 
     def resultados_formulas_para_exportar(self):
-        """Resultados vigentes, en el orden en que se aplicaron."""
-        return [
+        """Resultados vigentes de intervalos y subintervalos."""
+        principales = [
             self._calculos_formulas[clave]["datos_panel"]
             for clave in self.formulas_activas
             if clave in self._calculos_formulas
         ]
+        return principales + self._resultados_subintervalos_para_exportar()
+
+    def _resultados_subintervalos_para_exportar(self):
+        """Reconstruye resultados de detalle aunque sus ventanas estén cerradas."""
+        disponibles = {
+            intervalo["id"]: intervalo
+            for intervalo in self._intervalos_para_panel()
+            if intervalo.get("es_subintervalo")
+        }
+        aplicaciones = formulas.filtrar_aplicaciones_por_intervalos(
+            self.formulas_subintervalos_activas,
+            disponibles,
+        )
+        calculos = []
+        for clave, configuracion in aplicaciones.items():
+            if not formulas.hay_formula(clave):
+                continue
+            intervalos = [
+                disponibles[identificador]
+                for identificador in configuracion.get("intervalos") or ()
+            ]
+            try:
+                columna_salida, resultados, _curva, advertencias, _segmentos = (
+                    self._calcular_por_intervalos(clave, intervalos)
+                )
+            except ErrorFormula:
+                continue
+            if not resultados:
+                continue
+
+            desc = formulas.descripcion_formula(clave)
+            usa_senal = bool(desc.get("usa_senal_intervalo"))
+            columnas_origen = (
+                [intervalo.get("columna") for intervalo in intervalos]
+                if usa_senal
+                else [columna_salida] if columna_salida else []
+            )
+            fuente, detalle = self._procedencia(columnas_origen)
+            senales = list(
+                dict.fromkeys(
+                    resultado.get("senal", "")
+                    for resultado in resultados
+                    if resultado.get("senal")
+                )
+            )
+            calculos.append(
+                {
+                    "clave": clave,
+                    "nombre": desc["nombre"],
+                    "expresion": desc["expresion"],
+                    "unidad": desc["unidad"],
+                    "senal": senales[0] if len(senales) == 1 else "",
+                    "fuente": fuente,
+                    "detalle_filtro": detalle,
+                    "resultados": resultados,
+                    "advertencias": advertencias,
+                }
+            )
+        return calculos
 
     def curvas_formulas_para_exportar(self, columnas=None):
         """Curvas vigentes separadas por fórmula y por gráfica."""
@@ -2467,8 +2950,9 @@ class AreaCentralGraficas(QFrame):
     def _calcular_por_intervalos(self, clave, intervalos):
         """Motor compartido: resuelve roles, valida y aplica la fórmula.
 
-        Lo usan tanto los intervalos (ventana principal) como los sub-intervalos
-        (ventana de detalle). Dentro de ``logica.formulas`` viven:
+        Lo usan los intervalos y los subintervalos, tanto desde el panel
+        principal como desde las ventanas de detalle. Dentro de
+        ``logica.formulas`` viven:
         - ``resolver_roles``: elige los roles (obligatorios + opcionales) y
           produce las advertencias no bloqueantes.
         - ``validar_formula``: errores bloqueantes (roles/variables que faltan).
@@ -2481,19 +2965,27 @@ class AreaCentralGraficas(QFrame):
         """
         desc = formulas.descripcion_formula(clave)
 
-        # Restricción declarada por la propia fórmula (``intervalos_en_rol``): los
-        # intervalos deben pertenecer a una señal concreta (p. ej. Potencia -> Fz).
-        # No es una regla general: solo aplica a la fórmula que la declara.
-        restriccion = desc.get("intervalos_en_rol")
-        if restriccion:
-            columna_permitida = self._columna_de_rol(restriccion.get("rol"))
-            mensaje = restriccion.get("mensaje")
-            for intervalo in intervalos or []:
-                if (
-                    columna_permitida is None
-                    or intervalo.get("columna") != columna_permitida
-                ):
-                    raise ErrorFormula(mensaje)
+        # Algunas fórmulas declaran una señal principal (por ejemplo Fz). El
+        # intervalo aporta los límites, aunque haya sido marcado o replicado en
+        # otra gráfica; la serie numérica sigue resolviéndose desde ese rol.
+        intervalos_calculo = list(intervalos or ())
+        referencia = desc.get("intervalos_en_rol")
+        if referencia:
+            columna_referencia = self._columna_de_rol(referencia.get("rol"))
+            if columna_referencia is not None:
+                grafica_referencia = self.graficas_por_columna.get(
+                    columna_referencia
+                )
+                nombre_referencia = (
+                    grafica_referencia.nombre_senal
+                    if grafica_referencia is not None
+                    else columna_referencia
+                )
+                intervalos_calculo = formulas.usar_intervalos_como_recortes(
+                    intervalos_calculo,
+                    columna_referencia,
+                    nombre_referencia,
+                )
 
         disponibles = self._roles_disponibles()
         roles_a_usar, eleccion, advertencias = formulas.resolver_roles(
@@ -2508,6 +3000,7 @@ class AreaCentralGraficas(QFrame):
 
         contexto = {
             "masa": self.masa_sujeto,
+            "estatura": self.estatura_sujeto,
             "gravedad": self.gravedad,
             "frecuencia": self.frecuencia_grafica,
         }
@@ -2529,7 +3022,7 @@ class AreaCentralGraficas(QFrame):
         if usa_senal_intervalo:
             resultados, segmentos = [], []
             columna_salida = None
-            for intervalo in intervalos:
+            for intervalo in intervalos_calculo:
                 columna_owner = intervalo.get("columna")
                 datos_owner = self._datos_columna(columna_owner)
                 if datos_owner is None:
@@ -2552,7 +3045,12 @@ class AreaCentralGraficas(QFrame):
                     columna_salida = columna_owner
         else:
             resultados, segmentos = formulas.computar_formula(
-                clave, roles_fijos, x_total, contexto, intervalos, eleccion
+                clave,
+                roles_fijos,
+                x_total,
+                contexto,
+                intervalos_calculo,
+                eleccion,
             )
             salida = desc.get("salida_rol")
             if salida not in roles_fijos and roles_a_usar:
@@ -2587,20 +3085,36 @@ class AreaCentralGraficas(QFrame):
         )
 
     def quitar_formula(self):
-        """Saca todas las fórmulas aplicadas de las gráficas."""
+        """Quita las fórmulas de intervalos padre sin tocar subintervalos."""
         self.formulas_activas = {}
         self._calculos_formulas = {}
         self.formula_activa = None
-        for grafica in self.graficas_por_columna.values():
-            grafica.limpiar_curva_formula()
-        self.resultadosFormulaCambiaron.emit(None)
-        self.formulaEstadoCambiado.emit(True, "Se quitaron las fórmulas aplicadas.")
+        self._redibujar_formulas_aplicadas()
+        self._emitir_resultado_formula_actual()
+        self._sincronizar_ventanas_subintervalos()
+        self.formulaEstadoCambiado.emit(
+            True,
+            "Se quitaron las fórmulas aplicadas a intervalos.",
+        )
+
+    def quitar_formulas_subintervalos(self):
+        """Quita en masa las fórmulas de subintervalos, sin tocar los padres."""
+        self.formulas_subintervalos_activas = {}
+        self._calculos_formulas_subintervalos = {}
+        self._sincronizar_ventanas_subintervalos()
+        self._redibujar_formulas_aplicadas()
+        self._emitir_resultado_formula_actual()
+        self.formulaEstadoCambiado.emit(
+            True,
+            "Se quitaron las fórmulas aplicadas a subintervalos.",
+        )
 
 
-    def aplicar_filtro(self, configuracion):
+    def aplicar_filtro(self, configuracion, avisar=True):
         if self.df_grafica_original is None:
-            self.filtroEstadoCambiado.emit(False, "Primero cargá un archivo CSV.")
-            return
+            if avisar:
+                self.filtroEstadoCambiado.emit(False, "Primero cargá un archivo CSV.")
+            return False
 
         frecuencia = float(configuracion.get("frecuencia_muestreo") or 0)
         tipo = str(configuracion.get("tipo") or "lowpass")
@@ -2625,8 +3139,9 @@ class AreaCentralGraficas(QFrame):
         )
 
         if not columnas:
-            self.filtroEstadoCambiado.emit(False, "No hay señales seleccionadas para filtrar.")
-            return
+            if avisar:
+                self.filtroEstadoCambiado.emit(False, "No hay señales seleccionadas para filtrar.")
+            return False
 
         try:
             for columna in columnas:
@@ -2638,8 +3153,9 @@ class AreaCentralGraficas(QFrame):
                     orden,
                 )
         except ErrorConfiguracionFiltro as exc:
-            self.filtroEstadoCambiado.emit(False, str(exc))
-            return
+            if avisar:
+                self.filtroEstadoCambiado.emit(False, str(exc))
+            return False
 
         self.df_grafica = resultado
         self.columnas_filtradas.update(columnas)
@@ -2648,24 +3164,42 @@ class AreaCentralGraficas(QFrame):
         # cortes distintos, y cada resultado tiene que poder decir cuál usó.
         for columna in columnas:
             self.filtros_por_columna[columna] = descripcion
+            corte_guardado = (
+                list(frecuencias_corte)
+                if isinstance(frecuencias_corte, (list, tuple))
+                else float(frecuencias_corte)
+            )
+            self.configuraciones_filtro_por_columna[columna] = {
+                "frecuencia_muestreo": frecuencia,
+                "frecuencia_original": configuracion.get("frecuencia_original"),
+                "divisor_subframes": configuracion.get("divisor_subframes", 1),
+                "tipo": tipo,
+                "frecuencias_corte": corte_guardado,
+                "orden": orden,
+            }
         self._actualizar_datos_graficas()
         self._emitir_intervalos()
         self.fuenteDatosCambiada.emit(self.hay_filtro_en_visibles())
         cantidad = len(columnas)
         destino = "una señal" if cantidad == 1 else f"{cantidad} señales"
-        self.filtroEstadoCambiado.emit(
-            True,
-            f"Se aplicó {descripcion} a {destino}. La curva original sigue visible.",
-        )
+        if avisar:
+            self.filtroEstadoCambiado.emit(
+                True,
+                f"Filtro aplicado a {destino}: {descripcion}.",
+            )
+        return True
 
     @staticmethod
     def _describir_filtro(tipo, frecuencias_corte):
         if tipo == "highpass":
-            return f"un filtro por encima de {float(frecuencias_corte):g} Hz"
+            return f"pasa-altos {float(frecuencias_corte):g} Hz"
         if tipo == "bandpass":
             inferior, superior = frecuencias_corte
-            return f"un filtro entre {float(inferior):g} y {float(superior):g} Hz"
-        return f"un filtro por debajo de {float(frecuencias_corte):g} Hz"
+            return f"pasa-banda {float(inferior):g}–{float(superior):g} Hz"
+        if tipo == "bandstop":
+            inferior, superior = frecuencias_corte
+            return f"rechazo {float(inferior):g}–{float(superior):g} Hz"
+        return f"pasa-bajos {float(frecuencias_corte):g} Hz"
 
     def restaurar_datos_originales(self, columnas=None):
         if self.df_grafica_original is None:
@@ -2677,13 +3211,14 @@ class AreaCentralGraficas(QFrame):
         if not columnas_a_restaurar:
             self.filtroEstadoCambiado.emit(
                 True,
-                "Las señales seleccionadas ya muestran únicamente los datos originales.",
+                "Las señales seleccionadas no tienen filtro.",
             )
             return
 
         for columna in columnas_a_restaurar:
             self.df_grafica[columna] = self.df_grafica_original[columna]
             self.filtros_por_columna.pop(columna, None)
+            self.configuraciones_filtro_por_columna.pop(columna, None)
         self.columnas_filtradas.difference_update(columnas_a_restaurar)
         self._actualizar_datos_graficas()
         self._emitir_intervalos()

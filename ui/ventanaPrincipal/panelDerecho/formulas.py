@@ -3,9 +3,11 @@ import os
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFrame,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -18,10 +20,12 @@ from PySide6.QtWidgets import (
 )
 
 from logica import formulas as formulas_logica
+from logica import intercambio_formulas
 from logica.config_db import (
     eliminar_formula_personalizada,
     formula_personalizada_a_dict,
     guardar_formula_personalizada,
+    importar_formulas_personalizadas,
     listar_formulas_personalizadas,
 )
 
@@ -42,7 +46,10 @@ class Formulas(QFrame):
     aplicarATodasCambiado = Signal(bool)
     notaGuardada = Signal(str, str)
     formulaSolicitada = Signal(object)
+    formulaSubintervalosSolicitada = Signal(object)
     quitarFormulaSolicitado = Signal()
+    quitarFormulaSubintervalosSolicitado = Signal()
+    nivelCalculoCambiado = Signal(str)
     fuenteCalculoCambiada = Signal(str)
     formulasCambiaron = Signal()
 
@@ -54,6 +61,11 @@ class Formulas(QFrame):
         self.intervalos = []
         self.estados_seleccion = {}
         self.subintervalos_colapsados = set()
+        self.nivel_calculo = "intervalos"
+        self.modos_seleccion = {
+            "intervalos": None,
+            "subintervalos": None,
+        }
         self.modo_seleccion = None
         self.variables_formula = []
         self._cargar_formulas_guardadas()
@@ -79,8 +91,6 @@ class Formulas(QFrame):
 
         titulo = QLabel("Intervalos para cálculos")
         titulo.setObjectName("tituloPanel")
-        subtitulo = QLabel("Elegí todos, algunos, pares o impares")
-        subtitulo.setObjectName("subtituloPanel")
 
         seleccion = QFrame()
         seleccion.setObjectName("seccionMapeo")
@@ -88,26 +98,44 @@ class Formulas(QFrame):
         seleccion_layout.setContentsMargins(10, 10, 10, 10)
         seleccion_layout.setSpacing(8)
 
-        ayuda = QLabel(
-            "Los intervalos pertenecen a la gráfica donde se marcan. Elegí una "
-            "señal y seleccioná los que usarán las operaciones de cálculo."
-        )
-        ayuda.setWordWrap(True)
-        ayuda.setObjectName("lblDeteccion")
-
         fila_senal = QHBoxLayout()
         fila_senal.addWidget(QLabel("Señal:"))
         self.cmb_senal = QComboBox()
         self.cmb_senal.setMinimumWidth(190)
         fila_senal.addWidget(self.cmb_senal, 1)
 
+        fila_nivel = QHBoxLayout()
+        fila_nivel.setSpacing(6)
+        fila_nivel.addWidget(QLabel("Calcular sobre:"))
+        self.grupo_nivel = QButtonGroup(self)
+        self.grupo_nivel.setExclusive(True)
+        self.botones_nivel = {}
+        for texto, nivel in (
+            ("Intervalos", "intervalos"),
+            ("Subintervalos", "subintervalos"),
+        ):
+            boton = QPushButton(texto)
+            boton.setObjectName("btnNivelCalculo")
+            boton.setCheckable(True)
+            boton.setCursor(Qt.PointingHandCursor)
+            boton.setToolTip(
+                "Intervalos completos."
+                if nivel == "intervalos"
+                else "Subintervalos."
+            )
+            boton.clicked.connect(
+                lambda _=False, valor=nivel: self._cambiar_nivel_calculo(valor)
+            )
+            self.grupo_nivel.addButton(boton)
+            self.botones_nivel[nivel] = boton
+            fila_nivel.addWidget(boton, 1)
+        self.botones_nivel[self.nivel_calculo].setChecked(True)
+
         # Cuando está activo, cada recorte se aplica a todas las gráficas visibles.
         self.chk_todas = QCheckBox("Aplicar recorte a todas las gráficas visibles")
         self.chk_todas.setObjectName("chkRecorteTodas")
         self.chk_todas.setChecked(False)
-        self.chk_todas.setToolTip(
-            "Si está marcado, el próximo recorte se agrega a todas las señales visibles."
-        )
+        self.chk_todas.setToolTip("Replica el próximo recorte.")
         self.chk_todas.toggled.connect(self.aplicarATodasCambiado.emit)
 
         accesos = QGridLayout()
@@ -141,8 +169,8 @@ class Formulas(QFrame):
         self.lbl_error.setWordWrap(True)
         self.lbl_error.setStyleSheet("color: #EF5350;")
 
-        seleccion_layout.addWidget(ayuda)
         seleccion_layout.addLayout(fila_senal)
+        seleccion_layout.addLayout(fila_nivel)
         seleccion_layout.addWidget(self.chk_todas)
         seleccion_layout.addLayout(accesos)
         seleccion_layout.addWidget(self.scroll)
@@ -153,7 +181,7 @@ class Formulas(QFrame):
         )
         self.panel_calculo.calcularSolicitado.connect(self._solicitar_formula)
         self.panel_calculo.quitarFormulaSolicitado.connect(
-            self.quitarFormulaSolicitado.emit
+            self._solicitar_quitar_formula
         )
         self.panel_calculo.fuenteCalculoCambiada.connect(
             self.fuenteCalculoCambiada.emit
@@ -168,16 +196,22 @@ class Formulas(QFrame):
             self.panel_calculo.eliminarFormulaSolicitado.connect(
                 self._eliminar_formula_personalizada
             )
+            self.panel_calculo.importarFormulasSolicitado.connect(
+                self._importar_formulas_personalizadas
+            )
+            self.panel_calculo.exportarFormulasSolicitado.connect(
+                self._exportar_formulas_personalizadas
+            )
         seleccion_layout.addWidget(self.panel_calculo)
         seleccion.setLayout(seleccion_layout)
 
         layout.addWidget(titulo)
-        layout.addWidget(subtitulo)
         layout.addWidget(seleccion)
         layout.addStretch()
         self.setLayout(layout)
 
         self.cmb_senal.currentIndexChanged.connect(self._renderizar_intervalos_actuales)
+        self._actualizar_nivel_visual()
         self._actualizar_botones()
 
     def set_hay_filtro(self, hay_filtro):
@@ -250,7 +284,7 @@ class Formulas(QFrame):
         accion = "actualizada" if es_edicion else "guardada"
         self.panel_calculo.actualizar_estado(
             True,
-            f"Fórmula «{persistida['nombre']}» {accion}. Ya está disponible en la lista.",
+            f"Fórmula «{persistida['nombre']}» {accion}.",
         )
 
     def _eliminar_formula_personalizada(self, clave):
@@ -282,36 +316,213 @@ class Formulas(QFrame):
             True, f"Se eliminó la fórmula guardada «{nombre}»."
         )
 
-    def _intervalos_padre_seleccionados(self):
-        """Solo los intervalos, sin sub-intervalos.
+    def _exportar_formulas_personalizadas(self):
+        """Guarda todas las fórmulas propias activas en un TXT portable."""
+        registros = listar_formulas_personalizadas(self.db_session)
+        if not registros:
+            QMessageBox.information(
+                self,
+                "Exportar fórmulas",
+                "No hay fórmulas creadas para exportar.",
+            )
+            return
 
-        Desde este panel la fórmula se calcula únicamente sobre los intervalos.
-        Los sub-intervalos se calculan en la ventana que se abre al hacer doble
-        clic sobre un intervalo, que es donde se los ve en detalle.
-        """
-        subintervalos = {
-            self._id_intervalo(intervalo)
-            for intervalo in self.intervalos
-            if intervalo.get("es_subintervalo")
-        }
-        return [
-            identificador
-            for identificador in self.obtener_intervalos_seleccionados()
-            if identificador not in subintervalos
-        ]
+        ruta, _filtro = QFileDialog.getSaveFileName(
+            self,
+            "Exportar fórmulas",
+            "formulas_abs3.txt",
+            "Archivo de fórmulas (*.txt)",
+        )
+        if not ruta:
+            return
+        if not ruta.lower().endswith(".txt"):
+            ruta += ".txt"
+
+        try:
+            contenido = intercambio_formulas.serializar_formulas(
+                [formula_personalizada_a_dict(registro) for registro in registros]
+            )
+            with open(ruta, "w", encoding="utf-8", newline="\n") as archivo:
+                archivo.write(contenido)
+        except (OSError, intercambio_formulas.ErrorIntercambioFormulas) as exc:
+            QMessageBox.warning(
+                self,
+                "Exportar fórmulas",
+                f"No se pudieron exportar las fórmulas:\n{exc}",
+            )
+            return
+
+        cantidad = len(registros)
+        QMessageBox.information(
+            self,
+            "Exportar fórmulas",
+            f"Se exportaron {cantidad} fórmula(s) correctamente.",
+        )
+
+    def _importar_formulas_personalizadas(self):
+        """Valida e incorpora un TXT sin reemplazar fórmulas existentes."""
+        ruta, _filtro = QFileDialog.getOpenFileName(
+            self,
+            "Importar fórmulas",
+            "",
+            "Archivo de fórmulas (*.txt)",
+        )
+        if not ruta:
+            return
+
+        try:
+            if os.path.getsize(ruta) > intercambio_formulas.MAXIMO_CARACTERES * 4:
+                raise intercambio_formulas.ErrorIntercambioFormulas(
+                    "El archivo es demasiado grande."
+                )
+            with open(ruta, "r", encoding="utf-8-sig") as archivo:
+                importadas = intercambio_formulas.deserializar_formulas(
+                    archivo.read()
+                )
+            existentes = [
+                {
+                    "nombre": descripcion.get("nombre", ""),
+                    "expresion": descripcion.get("expresion_constructor")
+                    or descripcion.get("expresion", ""),
+                    "unidad": descripcion.get("unidad", ""),
+                    "descripcion": descripcion.get("descripcion", ""),
+                    "reutilizable": descripcion.get("reutilizable", True),
+                }
+                for descripcion in formulas_logica.FORMULAS.values()
+            ]
+            # También se incluyen filas antiguas que el registro activo pudo
+            # omitir por estar dañadas; sus nombres tampoco deben pisarse.
+            existentes.extend(
+                formula_personalizada_a_dict(registro)
+                for registro in listar_formulas_personalizadas(self.db_session)
+            )
+            resolucion = intercambio_formulas.resolver_conflictos(
+                importadas, existentes
+            )
+            nuevas = resolucion["formulas"]
+            registros = importar_formulas_personalizadas(
+                self.db_session, nuevas
+            ) if nuevas else []
+        except (
+            OSError,
+            UnicodeError,
+            intercambio_formulas.ErrorIntercambioFormulas,
+            ValueError,
+        ) as exc:
+            if self.db_session is not None:
+                self.db_session.rollback()
+            QMessageBox.warning(
+                self,
+                "Importar fórmulas",
+                f"No se pudieron importar las fórmulas:\n{exc}",
+            )
+            return
+        except Exception as exc:
+            if self.db_session is not None:
+                self.db_session.rollback()
+            QMessageBox.warning(
+                self,
+                "Importar fórmulas",
+                f"No se pudieron guardar las fórmulas:\n{exc}",
+            )
+            return
+
+        if registros:
+            self._cargar_formulas_guardadas()
+            self.panel_calculo.recargar_formulas(
+                seleccionar=registros[-1].clave
+            )
+            self.formulasCambiaron.emit()
+
+        partes = [f"Se importaron {len(registros)} fórmula(s)."]
+        if resolucion["renombradas"]:
+            partes.append(
+                f"{resolucion['renombradas']} se renombraron para no reemplazar otras."
+            )
+        if resolucion["omitidas"]:
+            partes.append(
+                f"{resolucion['omitidas']} duplicada(s) exacta(s) se omitieron."
+            )
+        mensaje = "\n".join(partes)
+        self.panel_calculo.actualizar_estado(True, mensaje.replace("\n", " "))
+
+    def _intervalos_padre_seleccionados(self):
+        """Devuelve los padres marcados únicamente en la señal visible."""
+        return formulas_logica.solo_ids_intervalos_padre_de_columna(
+            self.intervalos,
+            self.obtener_intervalos_seleccionados(),
+            self.cmb_senal.currentData(),
+        )
+
+    def _subintervalos_seleccionados(self):
+        """Devuelve los subintervalos marcados únicamente en la señal visible."""
+        return formulas_logica.solo_ids_subintervalos_de_columna(
+            self.intervalos,
+            self.obtener_intervalos_seleccionados(),
+            self.cmb_senal.currentData(),
+        )
+
+    def _seleccionados_del_nivel_actual(self):
+        if self.nivel_calculo == "subintervalos":
+            return self._subintervalos_seleccionados()
+        return self._intervalos_padre_seleccionados()
+
+    def _cambiar_nivel_calculo(self, nivel):
+        """Alterna la lista entre padres y subintervalos sin mezclar estados."""
+        nivel = "subintervalos" if nivel == "subintervalos" else "intervalos"
+        if nivel == self.nivel_calculo:
+            self._actualizar_nivel_visual()
+            return
+        self._guardar_estados_visibles()
+        self.nivel_calculo = nivel
+        self.modo_seleccion = self.modos_seleccion[nivel]
+        self._actualizar_nivel_visual()
+        self._renderizar_intervalos_actuales()
+        self.actualizar_estado_formula(True, "")
+        self.nivelCalculoCambiado.emit(nivel)
+
+    def _actualizar_nivel_visual(self):
+        for clave, boton in self.botones_nivel.items():
+            activo = clave == self.nivel_calculo
+            boton.blockSignals(True)
+            boton.setChecked(activo)
+            boton.setProperty("activo", "true" if activo else "false")
+            boton.style().unpolish(boton)
+            boton.style().polish(boton)
+            boton.blockSignals(False)
+        self._marcar_modo_seleccion(
+            self.modos_seleccion.get(self.nivel_calculo)
+        )
 
     def _solicitar_formula(self):
-        """Pide el cálculo con los intervalos que estén marcados en ese momento."""
-        seleccionados = self._intervalos_padre_seleccionados()
+        """Pide el cálculo solo para el nivel y la señal que están visibles."""
+        seleccionados = self._seleccionados_del_nivel_actual()
         if not seleccionados:
+            nombre = (
+                "subintervalo"
+                if self.nivel_calculo == "subintervalos"
+                else "intervalo"
+            )
             self.actualizar_estado_formula(
-                False, "Marcá al menos un intervalo para poder calcular."
+                False,
+                f"Marcá al menos un {nombre} para poder calcular.",
             )
             return
         clave = self.panel_calculo.formula_seleccionada() or (
             formulas_logica.formula_predeterminada()
         )
-        self.formulaSolicitada.emit({"clave": clave, "intervalos": seleccionados})
+        configuracion = {"clave": clave, "intervalos": seleccionados}
+        if self.nivel_calculo == "subintervalos":
+            self.formulaSubintervalosSolicitada.emit(configuracion)
+        else:
+            self.formulaSolicitada.emit(configuracion)
+
+    def _solicitar_quitar_formula(self):
+        """Quita únicamente las aplicaciones del nivel que se está viendo."""
+        if self.nivel_calculo == "subintervalos":
+            self.quitarFormulaSubintervalosSolicitado.emit()
+        else:
+            self.quitarFormulaSolicitado.emit()
 
     def actualizar_estado_formula(self, exito, mensaje):
         """Forward: el componente de cálculo es quien pinta el estado."""
@@ -335,7 +546,7 @@ class Formulas(QFrame):
             for intervalo in self.intervalos
             if self._id_intervalo(intervalo) not in ids_anteriores
         ]
-        ids_validos = {self._id_intervalo(intervalo) for intervalo in self.intervalos}
+        ids_validos = [self._id_intervalo(intervalo) for intervalo in self.intervalos]
         self.estados_seleccion = {
             identificador: self.estados_seleccion.get(identificador, True)
             for identificador in ids_validos
@@ -390,9 +601,31 @@ class Formulas(QFrame):
             and not intervalo.get("es_subintervalo")
         ]
 
-        if not padres_visibles:
+        if self.nivel_calculo == "intervalos":
+            for padre in padres_visibles:
+                self._agregar_fila_intervalo_padre(padre)
+            hay_elementos = bool(padres_visibles)
+        else:
+            hay_elementos = False
+            for padre in padres_visibles:
+                padre_id = self._id_intervalo(padre)
+                subintervalos = [
+                    intervalo
+                    for intervalo in self.intervalos
+                    if intervalo.get("padre") == padre_id
+                ]
+                if not subintervalos:
+                    continue
+                hay_elementos = True
+                self._agregar_encabezado_subintervalos(padre, subintervalos)
+                for subintervalo in subintervalos:
+                    self._agregar_fila_subintervalo(subintervalo)
+
+        if not hay_elementos:
             texto = (
-                "Todavía no se seleccionaron intervalos en esta señal."
+                "Todavía no hay subintervalos en esta señal."
+                if self.nivel_calculo == "subintervalos" and padres_visibles
+                else "Todavía no se seleccionaron intervalos en esta señal."
                 if self.intervalos
                 else "Todavía no se seleccionaron intervalos."
             )
@@ -401,98 +634,112 @@ class Formulas(QFrame):
             vacio.setAlignment(Qt.AlignCenter)
             self.layout_intervalos.addWidget(vacio)
 
-        for padre in padres_visibles:
-            padre_id = self._id_intervalo(padre)
-            subintervalos = [r for r in self.intervalos if r.get("padre") == padre_id]
-            colapsado = padre_id in self.subintervalos_colapsados
-
-            # Fila del intervalo padre, con toggle si tiene sub-intervalos.
-            fila = QWidget()
-            fila_layout = QHBoxLayout()
-            fila_layout.setContentsMargins(0, 0, 0, 0)
-            fila_layout.setSpacing(4)
-
-            if subintervalos:
-                btn_toggle = QToolButton()
-                btn_toggle.setText("▸" if colapsado else "▾")
-                btn_toggle.setObjectName("btnToggleSubintervalos")
-                btn_toggle.setCursor(Qt.PointingHandCursor)
-                btn_toggle.setToolTip(
-                    "Mostrar sub-intervalos" if colapsado else "Ocultar sub-intervalos"
-                )
-                btn_toggle.clicked.connect(
-                    lambda _=False, pid=padre_id: self._toggle_subintervalos(pid)
-                )
-                fila_layout.addWidget(btn_toggle)
-            else:
-                espacio = QLabel("")
-                espacio.setFixedWidth(18)
-                fila_layout.addWidget(espacio)
-
-            fila_layout.addWidget(self._crear_checkbox_intervalo(padre))
-            fila_layout.addWidget(self._crear_boton_nota(padre))
-            fila_layout.addStretch(1)
-
-            # Botón para eliminar de una todos los sub-intervalos del padre (el
-            # intervalo en sí se mantiene).
-            if subintervalos:
-                btn_del_todos = QToolButton()
-                btn_del_todos.setText("↳✕")
-                btn_del_todos.setObjectName("btnEliminarTodosSubintervalos")
-                btn_del_todos.setCursor(Qt.PointingHandCursor)
-                btn_del_todos.setToolTip(
-                    "Eliminar todos los sub-intervalos de este intervalo (el intervalo no se elimina)"
-                )
-                btn_del_todos.clicked.connect(
-                    lambda _=False, pid=padre_id: self._eliminar_subintervalos_de(pid)
-                )
-                fila_layout.addWidget(btn_del_todos)
-
-            # Botón para eliminar el intervalo en sí (arrastra sus sub-intervalos, si tiene).
-            btn_del_intervalo = QToolButton()
-            btn_del_intervalo.setText("✕")
-            btn_del_intervalo.setObjectName("btnEliminarIntervalo")
-            btn_del_intervalo.setCursor(Qt.PointingHandCursor)
-            tooltip_intervalo = "Eliminar este intervalo"
-            if subintervalos:
-                plural = "sub-intervalo" if len(subintervalos) == 1 else "sub-intervalos"
-                tooltip_intervalo += f" y sus {len(subintervalos)} {plural}"
-            btn_del_intervalo.setToolTip(tooltip_intervalo)
-            btn_del_intervalo.clicked.connect(
-                lambda _=False, pid=padre_id: self._eliminar_intervalo(pid)
-            )
-            fila_layout.addWidget(btn_del_intervalo)
-
-            fila.setLayout(fila_layout)
-            self.layout_intervalos.addWidget(fila)
-
-            # Sub-intervalos indentados (si no está colapsado).
-            if subintervalos and not colapsado:
-                for sub in subintervalos:
-                    sub_id = self._id_intervalo(sub)
-                    contenedor = QWidget()
-                    cont_layout = QHBoxLayout()
-                    cont_layout.setContentsMargins(44, 0, 0, 0)
-                    cont_layout.setSpacing(4)
-                    cont_layout.addWidget(self._crear_checkbox_intervalo(sub, es_sub=True))
-                    cont_layout.addWidget(self._crear_boton_nota(sub))
-                    cont_layout.addStretch(1)
-                    btn_del_sub = QToolButton()
-                    btn_del_sub.setText("✕")
-                    btn_del_sub.setObjectName("btnEliminarSubintervalo")
-                    btn_del_sub.setCursor(Qt.PointingHandCursor)
-                    btn_del_sub.setToolTip("Eliminar este sub-intervalo")
-                    btn_del_sub.clicked.connect(
-                        lambda _=False, sid=sub_id: self._eliminar_subintervalo(sid)
-                    )
-                    cont_layout.addWidget(btn_del_sub)
-                    contenedor.setLayout(cont_layout)
-                    self.layout_intervalos.addWidget(contenedor)
-
         self.layout_intervalos.addStretch()
         self.lbl_error.clear()
         self._emitir_seleccion()
         self._actualizar_botones()
+
+    def _agregar_fila_intervalo_padre(self, padre):
+        """Agrega una fila seleccionable únicamente para el intervalo padre."""
+        padre_id = self._id_intervalo(padre)
+        subintervalos = [
+            intervalo
+            for intervalo in self.intervalos
+            if intervalo.get("padre") == padre_id
+        ]
+        fila = QWidget()
+        fila_layout = QHBoxLayout()
+        fila_layout.setContentsMargins(0, 0, 0, 0)
+        fila_layout.setSpacing(4)
+        fila_layout.addWidget(self._crear_checkbox_intervalo(padre))
+        fila_layout.addWidget(self._crear_boton_nota(padre))
+        fila_layout.addStretch(1)
+
+        if subintervalos:
+            cantidad = QLabel(f"{len(subintervalos)} sub")
+            cantidad.setObjectName("lblCantidadSubintervalos")
+            cantidad.setToolTip(f"{len(subintervalos)} subintervalo(s).")
+            fila_layout.addWidget(cantidad)
+
+        btn_del_intervalo = QToolButton()
+        btn_del_intervalo.setText("✕")
+        btn_del_intervalo.setObjectName("btnEliminarIntervalo")
+        btn_del_intervalo.setCursor(Qt.PointingHandCursor)
+        tooltip = "Eliminar este intervalo"
+        if subintervalos:
+            tooltip += f" y sus {len(subintervalos)} subintervalo(s)"
+        btn_del_intervalo.setToolTip(tooltip)
+        btn_del_intervalo.clicked.connect(
+            lambda _=False, pid=padre_id: self._eliminar_intervalo(pid)
+        )
+        fila_layout.addWidget(btn_del_intervalo)
+        fila.setLayout(fila_layout)
+        self.layout_intervalos.addWidget(fila)
+
+    def _agregar_encabezado_subintervalos(self, padre, subintervalos):
+        """Agrupa visualmente los subintervalos bajo su intervalo padre."""
+        padre_id = self._id_intervalo(padre)
+        fila = QWidget()
+        fila.setObjectName("grupoSubintervalos")
+        fila_layout = QHBoxLayout()
+        fila_layout.setContentsMargins(6, 4, 2, 2)
+        fila_layout.setSpacing(4)
+        nombre = self._nombre_intervalo(padre)
+        limites = f"{int(padre['desde'])} – {int(padre['hasta'])}"
+        texto_completo = f"{nombre} · {limites}"
+        texto = (
+            texto_completo
+            if len(texto_completo) <= 32
+            else texto_completo[:31] + "…"
+        )
+        etiqueta = QLabel(texto)
+        etiqueta.setMaximumWidth(220)
+        etiqueta.setObjectName("lblGrupoSubintervalos")
+        etiqueta.setToolTip(
+            f"{texto_completo}: contiene {len(subintervalos)} subintervalo(s)"
+        )
+        etiqueta.setStyleSheet(
+            f"color: {padre.get('color', '#B0B0B0')}; font-weight: 600;"
+        )
+        fila_layout.addWidget(etiqueta, 1)
+
+        btn_del_todos = QToolButton()
+        btn_del_todos.setText("✕")
+        btn_del_todos.setObjectName("btnEliminarTodosSubintervalos")
+        btn_del_todos.setCursor(Qt.PointingHandCursor)
+        btn_del_todos.setToolTip(
+            "Eliminar todos los subintervalos de este intervalo padre"
+        )
+        btn_del_todos.clicked.connect(
+            lambda _=False, pid=padre_id: self._eliminar_subintervalos_de(pid)
+        )
+        fila_layout.addWidget(btn_del_todos)
+        fila.setLayout(fila_layout)
+        self.layout_intervalos.addWidget(fila)
+
+    def _agregar_fila_subintervalo(self, subintervalo):
+        """Agrega una casilla de subintervalo dentro de su grupo padre."""
+        sub_id = self._id_intervalo(subintervalo)
+        fila = QWidget()
+        fila_layout = QHBoxLayout()
+        fila_layout.setContentsMargins(18, 0, 0, 0)
+        fila_layout.setSpacing(4)
+        fila_layout.addWidget(
+            self._crear_checkbox_intervalo(subintervalo, es_sub=True)
+        )
+        fila_layout.addWidget(self._crear_boton_nota(subintervalo))
+        fila_layout.addStretch(1)
+        btn_del_sub = QToolButton()
+        btn_del_sub.setText("✕")
+        btn_del_sub.setObjectName("btnEliminarSubintervalo")
+        btn_del_sub.setCursor(Qt.PointingHandCursor)
+        btn_del_sub.setToolTip("Eliminar este subintervalo")
+        btn_del_sub.clicked.connect(
+            lambda _=False, sid=sub_id: self._eliminar_subintervalo(sid)
+        )
+        fila_layout.addWidget(btn_del_sub)
+        fila.setLayout(fila_layout)
+        self.layout_intervalos.addWidget(fila)
 
     LARGO_MAX_ETIQUETA = 24
 
@@ -655,6 +902,7 @@ class Formulas(QFrame):
     def _marcar_modo_seleccion(self, modo):
         """Resalta el botón activo. El borde lo pone el QSS por la propiedad."""
         self.modo_seleccion = modo
+        self.modos_seleccion[self.nivel_calculo] = modo
         for clave, boton in self.botones_seleccion.items():
             boton.setProperty("activo", "true" if clave == modo else "false")
             boton.style().unpolish(boton)
@@ -668,14 +916,7 @@ class Formulas(QFrame):
                 for intervalo in self.intervalos
                 if self._id_intervalo(intervalo) == identificador
             )
-            if modo == "todos":
-                activo = True
-            elif modo == "pares":
-                activo = numero % 2 == 0
-            elif modo == "impares":
-                activo = numero % 2 == 1
-            else:
-                activo = False
+            activo = formulas_logica.modo_selecciona_numero(modo, numero)
             checkbox.blockSignals(True)
             checkbox.setChecked(activo)
             checkbox.blockSignals(False)
@@ -697,32 +938,44 @@ class Formulas(QFrame):
         ]
 
     def _cambiar_estado(self, identificador, activo):
+        if self.modo_seleccion is not None:
+            self._marcar_modo_seleccion(None)
         self.estados_seleccion[identificador] = activo
         self._emitir_seleccion()
 
     def _emitir_seleccion(self):
-        seleccionados = self.obtener_intervalos_seleccionados()
+        seleccionados = self._seleccionados_del_nivel_actual()
         seleccionados_visibles = self._obtener_visibles_seleccionados()
         total = len(self.checkboxes)
+        sustantivo = (
+            "subintervalo(s)"
+            if self.nivel_calculo == "subintervalos"
+            else "intervalo(s)"
+        )
         self.lbl_resumen.setText(
-            f"{len(seleccionados_visibles)} de {total} intervalo(s) seleccionados en esta señal."
+            f"{len(seleccionados_visibles)} de {total} {sustantivo} seleccionados en esta señal."
             if total
-            else "No hay intervalos marcados."
+            else (
+                "No hay subintervalos en esta señal."
+                if self.nivel_calculo == "subintervalos"
+                else "No hay intervalos marcados."
+            )
         )
         self.seleccionIntervalosCambiada.emit(seleccionados)
         self._actualizar_botones()
 
     def _actualizar_botones(self):
-        # El cálculo corre sobre intervalos (no sub-intervalos): sin ninguno marcado
-        # no hay nada que calcular, así que el botón queda gris con la razón en
-        # el tooltip. El texto es genérico: vale para cualquier fórmula.
-        hay_seleccion = bool(self._intervalos_padre_seleccionados())
+        hay_seleccion = bool(self._seleccionados_del_nivel_actual())
+        nivel = (
+            "subintervalos"
+            if self.nivel_calculo == "subintervalos"
+            else "intervalos"
+        )
         self.panel_calculo.set_aplicar_habilitado(
             hay_seleccion,
-            "Calcula la fórmula seleccionada en los intervalos marcados. Los "
-            "sub-intervalos se calculan al abrirlos con doble clic."
+            f"Aplicar a los {nivel} marcados."
             if hay_seleccion
-            else "Marcá al menos un intervalo para poder calcular.",
+            else f"Seleccioná al menos un {nivel[:-1]}.",
         )
 
     def mostrar_error_intervalo(self, mensaje):

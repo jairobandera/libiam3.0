@@ -55,14 +55,73 @@ El filtrado no reemplaza visualmente los datos: la señal original permanece en 
 ### Rangos para cálculos
 
 - Los límites seleccionados se redondean al frame entero más cercano. Por ejemplo, `30.15` pasa a `30` y `30.76` pasa a `31`.
-- Cada rango pertenece únicamente a la gráfica donde se seleccionó y conserva un color propio.
+- Cada intervalo pertenece a la gráfica donde se seleccionó. Cuando se replica
+  en las demás gráficas, todas sus copias comparten el mismo color, aunque las
+  listas tengan órdenes diferentes.
 - La lista se ordena de izquierda a derecha. Los nombres automáticos se actualizan según esa posición, sin perder notas ni sub-rangos asociados.
 - Los rangos de una misma gráfica no pueden superponerse ni compartir un frame extremo. Si una selección invade un rango existente, se ajusta al tramo libre continuo siguiendo la dirección del gesto. Por ejemplo, con `20–30` ya ocupado, seleccionar `24–50` crea `31–50`.
 - La selección ya no abre una ventana modal.
-- El panel `Rangos para cálculos` permite elegir la señal y usar todos sus rangos, solo los pares, solo los impares o una combinación manual mediante casillas.
+- El panel `Intervalos para cálculos` incluye `Calcular sobre: Intervalos |
+  Subintervalos`. La lista muestra solamente el nivel elegido.
+- En modo `Subintervalos` se reúnen, por grupos, los subintervalos de todos los
+  intervalos padre de la señal actual. Así se puede aplicar una fórmula en masa
+  sin abrir cada intervalo con doble clic.
+- `Todos`, `Pares`, `Impares` y `Ninguno` actúan únicamente sobre el nivel
+  visible. Para subintervalos, par o impar se determina dentro de cada padre;
+  por ejemplo, se seleccionan A2, B2 y C2.
+- Al pulsar `Aplicar` se usan únicamente las casillas marcadas de la señal que
+  aparece en el selector. Las selecciones recordadas en otras señales no se
+  incluyen hasta que el usuario cambie a ellas.
 - Cada rango y sub-rango se puede eliminar desde la cruz de su propia fila.
+- `Esc` cancela el primer punto pendiente. Si todavía no se marcó un punto,
+  sale del modo de selección.
+- Las fórmulas aplicadas a sub-rangos se conservan mientras el CSV siga
+  cargado. Al cerrar y volver a abrir su ventana se restauran los resultados,
+  las curvas, la fórmula elegida y las casillas calculadas.
+- Los cálculos de intervalos y subintervalos permanecen separados. Cambiar el
+  selector cambia también las curvas y los resultados visibles; `Aplicar` y
+  `Quitar` afectan solo al nivel elegido.
+- El doble clic continúa abriendo el detalle de un intervalo para crear,
+  revisar o calcular sus subintervalos de forma individual.
+- Un intervalo puede aportar los límites de un cálculo aunque se haya marcado
+  en otra gráfica. Por ejemplo, un recorte replicado en Fx puede delimitar una
+  fórmula de Fz; los valores numéricos siguen tomándose de Fz. La misma curva
+  calculada se dibuja en todas las gráficas visibles que contienen una copia de
+  ese intervalo, sin recalcularla con Fx, Fy u otra señal.
 
 La selección se hace con dos clics sobre una gráfica después de activar `Seleccionar rango`. También se puede ingresar un intervalo entero desde la barra superior.
+
+### Variables y fórmulas personalizadas
+
+- La masa en kilogramos y la estatura en metros se guardan para cada CSV.
+- `masa` y `estatura` están disponibles como datos dentro del constructor de
+  fórmulas, junto con gravedad, frecuencia y tiempo.
+- Las fórmulas creadas se pueden exportar a un `.txt` e importar en otra copia
+  de ABS. Al importar se validan de nuevo, se omiten duplicados exactos y se
+  renombran las coincidencias para no reemplazar fórmulas existentes.
+
+### Guardado y reapertura de proyectos
+
+- `Guardar` conserva la copia del CSV y las anotaciones, y agrega un archivo
+  de estado con masa, estatura, gravedad, frecuencia, filtros aplicados,
+  orden de las gráficas y señales visibles.
+- `Cargar` reconstruye ese estado después de abrir el CSV. Los proyectos de
+  versiones anteriores, que no tienen archivo de estado, continúan abriendo.
+- La ventana principal recuerda su tamaño, posición y estado maximizado. La
+  ventana de subintervalos recuerda además el ancho elegido para cada panel.
+
+### Exportación
+
+- Los cálculos se exportan con una fila por fórmula e intervalo: promedio,
+  máximo y frame donde ocurrió el máximo. No se agregan como valores de fórmula
+  frame por frame dentro del archivo de datos.
+- Se incluyen los cálculos de intervalos y sub-intervalos, incluso si la ventana
+  de detalle está cerrada.
+- El usuario puede exportar todo el registro o marcar recortes específicos. El
+  alcance elegido se aplica a los datos, intervalos y resultados incluidos.
+- La lista de la ventana Exportar contiene todos los intervalos y sub-intervalos
+  existentes de todas las señales. Es independiente de la señal y de las
+  casillas activas en `Intervalos para cálculos`.
 
 ### Acerca de ABS 3.0
 
@@ -83,6 +142,8 @@ logica/
 ├── app_info.py              Datos de versión y referencia
 ├── cargador_csv.py          Carga y detección de señales
 ├── filtros_senales.py       Filtro Butterworth
+├── formulas.py              Validación y cálculo de fórmulas
+├── intercambio_formulas.py Importación y exportación de fórmulas
 ├── lector_csv.py            Lectura rápida y metadatos del CSV
 ├── mapeo_columnas.py        Mapeo automático y manual
 └── rangos.py                Validación de rangos no superpuestos

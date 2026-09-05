@@ -8,24 +8,28 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QMessageBox,
+    QApplication,
 )
-from PySide6.QtCore import Qt, Signal, QRegularExpression
+from PySide6.QtCore import Qt, Signal, QRegularExpression, QThread, QTimer, Slot
 from PySide6.QtGui import QRegularExpressionValidator
 import os
 from logica.cargador_csv import CargadorCSV
 from logica.config_db import (
+    eliminar_variable_archivo,
     listar_secciones_archivo,
     guardar_variable_archivo,
     obtener_variable_archivo,
 )
 from logica.lector_csv import leer_csv_rapido
+from ui.ventanaPrincipal.cargaCSV import CargaCSVDialog, TrabajadorCargaCSV
 
 
 class PanelIzquierdo(QFrame):
     archivoCargado = Signal(str, object, object)
     archivoSeleccionado = Signal(str, object, object)
     modoSeleccionIntervaloCambiado = Signal(bool)
-    # Masa del archivo activo y gravedad de la sesión: las usan las fórmulas.
+    # Masa y estatura del archivo activo, más gravedad de la sesión: las usan
+    # las fórmulas creadas por el usuario.
     variablesCambiaron = Signal(object)
 
     # Gravedad en la superficie terrestre. Es una constante de sesión: se puede
@@ -44,6 +48,14 @@ class PanelIzquierdo(QFrame):
         self.alias_signal_conectado = False
         self.gravedad = self.GRAVEDAD_TIERRA
         self.masa_actual = None
+        self.estatura_actual = None
+        self._dialogo_carga = None
+        self._hilo_carga = None
+        self._trabajador_carga = None
+        self._ruta_carga = None
+        self._resultado_carga = None
+        self._info_resultado_carga = None
+        self._error_carga = None
         self.init_ui()
 
     def init_ui(self):
@@ -52,29 +64,24 @@ class PanelIzquierdo(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Seccion superior: botones de accion
         self.seccion_botones = self.crear_seccion_botones()
         layout.addWidget(self.seccion_botones)
 
-        # Seccion de variables (masa por archivo y gravedad)
         self.seccion_variables = self.crear_seccion_variables()
         layout.addWidget(self.seccion_variables)
 
-        # Espacio vacio reservado para futuras funcionalidades
         layout.addStretch()
 
-        # Seccion central: arbol de archivos (ya no toma espacio extra)
         self.seccion_arbol = self.crear_seccion_arbol()
         layout.addWidget(self.seccion_arbol, 0)
 
-        # Seccion inferior: informacion del archivo
         self.seccion_info = self.crear_seccion_info()
         layout.addWidget(self.seccion_info)
 
         self.setLayout(layout)
 
-        # Sin archivo cargado la masa arranca deshabilitada.
-        self._set_masa_habilitada(False)
+        # Sin archivo cargado las variables propias del CSV están deshabilitadas.
+        self._set_variables_archivo_habilitadas(False)
 
     def crear_seccion_botones(self):
 
@@ -85,17 +92,18 @@ class PanelIzquierdo(QFrame):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        # Boton cargar archivo CSV
         self.btn_cargar = QPushButton("Cargar archivo CSV")
         self.btn_cargar.setObjectName("btnCargarCSV")
         self.btn_cargar.setCursor(Qt.PointingHandCursor)
         self.btn_cargar.clicked.connect(self.cargar_csv)
 
-        # Boton seleccionar intervalo
         self.btn_intervalo = QPushButton("Seleccionar intervalo")
         self.btn_intervalo.setObjectName("btnSeleccionarIntervalo")
         self.btn_intervalo.setCursor(Qt.PointingHandCursor)
         self.btn_intervalo.setCheckable(True)
+        self.btn_intervalo.setToolTip(
+            "Esc cancela el punto pendiente o sale de la selección."
+        )
         self.btn_intervalo.toggled.connect(self.modoSeleccionIntervaloCambiado.emit)
 
         layout.addWidget(self.btn_cargar)
@@ -146,6 +154,35 @@ class PanelIzquierdo(QFrame):
         self.lbl_estado_masa.setWordWrap(True)
         layout.addWidget(self.lbl_estado_masa)
 
+        # --- Estatura (por archivo, en metros, se guarda en la BD) ---
+        fila_estatura = QHBoxLayout()
+        fila_estatura.setSpacing(6)
+
+        lbl_estatura = QLabel("Estatura")
+        lbl_estatura.setObjectName("varLabel")
+        lbl_estatura.setFixedWidth(60)
+
+        self.input_estatura = QLineEdit()
+        self.input_estatura.setObjectName("varInput")
+        self.input_estatura.setPlaceholderText("m")
+        self.input_estatura.setValidator(self._crear_validador_numerico())
+        self.input_estatura.returnPressed.connect(self.guardar_estatura)
+
+        self.btn_guardar_estatura = QPushButton("Guardar")
+        self.btn_guardar_estatura.setObjectName("btnGuardarVar")
+        self.btn_guardar_estatura.setCursor(Qt.PointingHandCursor)
+        self.btn_guardar_estatura.clicked.connect(self.guardar_estatura)
+
+        fila_estatura.addWidget(lbl_estatura)
+        fila_estatura.addWidget(self.input_estatura, 1)
+        fila_estatura.addWidget(self.btn_guardar_estatura)
+        layout.addLayout(fila_estatura)
+
+        self.lbl_estado_estatura = QLabel("")
+        self.lbl_estado_estatura.setObjectName("varEstado")
+        self.lbl_estado_estatura.setWordWrap(True)
+        layout.addWidget(self.lbl_estado_estatura)
+
         # --- Gravedad (constante de sesión, no se guarda en la BD) ---
         fila_gravedad = QHBoxLayout()
         fila_gravedad.setSpacing(6)
@@ -183,42 +220,133 @@ class PanelIzquierdo(QFrame):
         expresion = QRegularExpression(r"^\d{0,7}([.,]\d{0,6})?$")
         return QRegularExpressionValidator(expresion, self)
 
-    def _set_masa_habilitada(self, habilitada):
-        """Habilita o no la fila de masa (solo tiene sentido con un CSV cargado)."""
+    def _set_variables_archivo_habilitadas(self, habilitada):
+        """Habilita masa y estatura únicamente cuando hay un CSV activo."""
         self.input_masa.setEnabled(habilitada)
         self.btn_guardar_masa.setEnabled(habilitada)
+        self.input_estatura.setEnabled(habilitada)
+        self.btn_guardar_estatura.setEnabled(habilitada)
         if not habilitada:
             self.input_masa.clear()
-            self.lbl_estado_masa.setText("Cargá un CSV para asignar su masa.")
+            self.input_estatura.clear()
+            self.lbl_estado_masa.clear()
+            self.lbl_estado_estatura.clear()
 
     def _emitir_variables(self):
-        """Avisa la masa y la gravedad vigentes (las fórmulas dependen de esto)."""
+        """Avisa las variables vigentes de las que dependen las fórmulas."""
         self.variablesCambiaron.emit(
-            {"masa": self.masa_actual, "gravedad": self.gravedad}
+            {
+                "masa": self.masa_actual,
+                "estatura": self.estatura_actual,
+                "gravedad": self.gravedad,
+            }
         )
 
-    def _cargar_masa_archivo(self):
-        """Sincroniza el campo de masa con el archivo actualmente activo."""
+    @staticmethod
+    def _valor_positivo(texto, predeterminado=None):
+        try:
+            valor = float(str(texto).strip().replace(",", "."))
+        except (TypeError, ValueError):
+            return predeterminado
+        return valor if valor > 0 else predeterminado
+
+    def variables_para_proyecto(self):
+        """Toma también valores válidos escritos aunque no se pulsara Guardar."""
+        self.masa_actual = self._valor_positivo(
+            self.input_masa.text(), self.masa_actual
+        )
+        self.estatura_actual = self._valor_positivo(
+            self.input_estatura.text(), self.estatura_actual
+        )
+        self.gravedad = self._valor_positivo(
+            self.input_gravedad.text(), self.gravedad
+        )
+        self._emitir_variables()
+        return {
+            "masa": self.masa_actual,
+            "estatura": self.estatura_actual,
+            "gravedad": self.gravedad,
+        }
+
+    def restaurar_variables_proyecto(self, variables):
+        """Restaura las variables y las asocia silenciosamente al CSV cargado."""
+        if not isinstance(variables, dict) or not self.archivo_actual:
+            return
+
+        masa = self._valor_positivo(variables.get("masa"))
+        estatura = self._valor_positivo(variables.get("estatura"))
+        gravedad = self._valor_positivo(
+            variables.get("gravedad"), self.GRAVEDAD_TIERRA
+        )
+        self.masa_actual = masa
+        self.estatura_actual = estatura
+        self.gravedad = gravedad
+
+        self.input_masa.setText(f"{masa:g}" if masa is not None else "")
+        self.input_estatura.setText(
+            f"{estatura:g}" if estatura is not None else ""
+        )
+        self.input_gravedad.setText(f"{gravedad:g}")
+        self.input_gravedad.setReadOnly(True)
+        self.btn_editar_gravedad.setText("Editar")
+        self.lbl_estado_masa.setText(
+            f"Masa restaurada: {masa:g} kg" if masa is not None else ""
+        )
+        self.lbl_estado_estatura.setText(
+            f"Estatura restaurada: {estatura:g} m"
+            if estatura is not None else ""
+        )
+
+        ruta = self.archivo_actual.get("ruta")
+        if self.db_session and ruta:
+            for nombre, valor in (("masa", masa), ("estatura", estatura)):
+                if valor is None:
+                    eliminar_variable_archivo(
+                        self.db_session, ruta, nombre
+                    )
+                else:
+                    guardar_variable_archivo(
+                        self.db_session, ruta, nombre, valor
+                    )
+        self._emitir_variables()
+
+    def _cargar_variables_archivo(self):
+        """Sincroniza masa y estatura con el archivo actualmente activo."""
         ruta = self.archivo_actual.get("ruta") if self.archivo_actual else None
         if not ruta:
             self.masa_actual = None
-            self._set_masa_habilitada(False)
+            self.estatura_actual = None
+            self._set_variables_archivo_habilitadas(False)
             self._emitir_variables()
             return
 
-        self._set_masa_habilitada(True)
+        self._set_variables_archivo_habilitadas(True)
         self.lbl_estado_masa.setText("")
+        self.lbl_estado_estatura.setText("")
 
-        valor = None
+        masa = None
+        estatura = None
         if self.db_session:
-            valor = obtener_variable_archivo(self.db_session, ruta, "masa")
+            masa = obtener_variable_archivo(self.db_session, ruta, "masa")
+            estatura = obtener_variable_archivo(
+                self.db_session, ruta, "estatura"
+            )
 
-        self.masa_actual = valor
-        if valor is not None:
-            self.input_masa.setText(f"{valor:g}")
-            self.lbl_estado_masa.setText(f"Masa guardada: {valor:g} kg")
+        self.masa_actual = masa
+        if masa is not None:
+            self.input_masa.setText(f"{masa:g}")
+            self.lbl_estado_masa.setText(f"Masa guardada: {masa:g} kg")
         else:
             self.input_masa.clear()
+
+        self.estatura_actual = estatura
+        if estatura is not None:
+            self.input_estatura.setText(f"{estatura:g}")
+            self.lbl_estado_estatura.setText(
+                f"Estatura guardada: {estatura:g} m"
+            )
+        else:
+            self.input_estatura.clear()
         self._emitir_variables()
 
     def guardar_masa(self):
@@ -234,6 +362,8 @@ class PanelIzquierdo(QFrame):
 
         try:
             valor = float(texto)
+            if valor <= 0:
+                raise ValueError
         except ValueError:
             self.lbl_estado_masa.setText("Valor de masa inválido.")
             return
@@ -244,13 +374,32 @@ class PanelIzquierdo(QFrame):
         self.lbl_estado_masa.setText(f"Masa guardada: {valor:g} kg ✓")
         self._emitir_variables()
 
-        nombre_archivo = self.archivo_actual.get("nombre", "")
-        QMessageBox.information(
-            self,
-            "Masa guardada",
-            f"La masa de {valor:g} kg se guardó correctamente"
-            + (f" para «{nombre_archivo}»." if nombre_archivo else "."),
+    def guardar_estatura(self):
+        """Guarda en metros la estatura asociada al archivo actual."""
+        ruta = self.archivo_actual.get("ruta") if self.archivo_actual else None
+        if not ruta or not self.db_session:
+            return
+
+        texto = self.input_estatura.text().strip().replace(",", ".")
+        if not texto:
+            self.lbl_estado_estatura.setText("Ingresá un valor de estatura.")
+            return
+
+        try:
+            valor = float(texto)
+            if valor <= 0:
+                raise ValueError
+        except ValueError:
+            self.lbl_estado_estatura.setText("Valor de estatura inválido.")
+            return
+
+        guardar_variable_archivo(self.db_session, ruta, "estatura", valor)
+        self.estatura_actual = valor
+        self.input_estatura.setText(f"{valor:g}")
+        self.lbl_estado_estatura.setText(
+            f"Estatura guardada: {valor:g} m ✓"
         )
+        self._emitir_variables()
 
     def _toggle_editar_gravedad(self):
         """Alterna entre editar la gravedad y fijarla como constante."""
@@ -291,11 +440,9 @@ class PanelIzquierdo(QFrame):
         layout.setContentsMargins(12, 8, 12, 12)
         layout.setSpacing(6)
 
-        # Titulo de la seccion
         titulo = QLabel("Archivos cargados")
         titulo.setObjectName("tituloSeccion")
 
-        # Arbol de archivos
         self.arbol = QTreeWidget()
         self.arbol.setObjectName("arbolArchivos")
         self.arbol.setHeaderHidden(True)
@@ -304,8 +451,7 @@ class PanelIzquierdo(QFrame):
         self.arbol.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.arbol.itemDoubleClicked.connect(self.al_seleccionar_archivo)
 
-        # Item de ejemplo (se eliminara cuando se carguen archivos reales)
-        item_vacio = QTreeWidgetItem(self.arbol, ["Ningun archivo cargado"])
+        item_vacio = QTreeWidgetItem(self.arbol, ["Ningún archivo cargado"])
         item_vacio.setFlags(Qt.NoItemFlags)
 
         layout.addWidget(titulo)
@@ -323,11 +469,9 @@ class PanelIzquierdo(QFrame):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(6)
 
-        # Titulo de la seccion
-        titulo = QLabel("Informacion del archivo")
+        titulo = QLabel("Información del archivo")
         titulo.setObjectName("tituloSeccion")
 
-        # Cuadricula de informacion
         grid = QVBoxLayout()
         grid.setSpacing(4)
 
@@ -358,16 +502,19 @@ class PanelIzquierdo(QFrame):
         frame.setLayout(layout)
         return frame
 
+    @staticmethod
+    def _texto_cantidad_columnas(info):
+        texto = f"Columnas: {info['columnas']}"
+        omitidas = info.get("cantidad_columnas_ignoradas", 0)
+        if omitidas:
+            texto += f" · {omitidas} omitidas"
+        return texto
+
     def cargar_csv(self):
-
-        # Delegar la carga al cargador CSV
-        resultado = self.cargador.seleccionar_y_cargar()
-
-        if resultado[0] is None:
+        ruta_archivo = self.cargador.seleccionar_archivo()
+        if not ruta_archivo:
             return
-
-        nombre_archivo, df, ruta_archivo = resultado
-        self._procesar_archivo(nombre_archivo, df, ruta_archivo)
+        self.cargar_archivo_desde_ruta(ruta_archivo)
 
     def cargar_archivo_desde_ruta(self, ruta_archivo):
         """Carga un CSV cuya ruta ya se conoce, sin abrir el diálogo de archivos.
@@ -381,21 +528,103 @@ class PanelIzquierdo(QFrame):
             )
             return None
 
-        try:
-            df, _ = leer_csv_rapido(ruta_archivo)
-        except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "Cargar", f"No se pudo leer el CSV:\n{exc}")
-            return None
-
         nombre_archivo = os.path.basename(ruta_archivo)
-        self.cargador.ruta_archivo_actual = ruta_archivo
-        self._procesar_archivo(nombre_archivo, df, ruta_archivo)
-        return nombre_archivo
+        dialogo = CargaCSVDialog(ruta_archivo, self.window())
+        hilo = QThread(self)
+        trabajador = TrabajadorCargaCSV(ruta_archivo)
+        trabajador.moveToThread(hilo)
 
-    def _procesar_archivo(self, nombre_archivo, df, ruta_archivo):
+        self._dialogo_carga = dialogo
+        self._hilo_carga = hilo
+        self._trabajador_carga = trabajador
+        self._ruta_carga = ruta_archivo
+        self._resultado_carga = None
+        self._info_resultado_carga = None
+        self._error_carga = None
+
+        hilo.started.connect(trabajador.ejecutar)
+        trabajador.progresoCambiado.connect(dialogo.actualizar)
+        trabajador.cargaCompletada.connect(self._completar_carga_csv)
+        trabajador.cargaFallida.connect(self._fallar_carga_csv)
+        trabajador.cargaCompletada.connect(hilo.quit)
+        trabajador.cargaFallida.connect(hilo.quit)
+        trabajador.cargaCompletada.connect(trabajador.deleteLater)
+        trabajador.cargaFallida.connect(trabajador.deleteLater)
+
+        QTimer.singleShot(0, hilo.start)
+        dialogo.exec()
+        hilo.quit()
+        hilo.wait()
+        hilo.deleteLater()
+
+        resultado = self._resultado_carga
+        info = self._info_resultado_carga
+        error = self._error_carga
+        self._dialogo_carga = None
+        self._hilo_carga = None
+        self._trabajador_carga = None
+        self._ruta_carga = None
+
+        if error:
+            QMessageBox.critical(
+                self,
+                "Cargar CSV",
+                f"No se pudo cargar el archivo:\n{error}",
+            )
+            return None
+        if resultado and info:
+            self._mostrar_resumen_deteccion(info)
+        return resultado
+
+    @Slot(object, object)
+    def _completar_carga_csv(self, df, metadatos):
+        dialogo = self._dialogo_carga
+        if dialogo is None:
+            return
+
+        ruta_archivo = self._ruta_carga
+        nombre_archivo = os.path.basename(ruta_archivo)
+        try:
+            dialogo.actualizar(82, "Analizando las señales…")
+            dialogo.mostrar_columnas_omitidas(
+                metadatos.get("cantidad_columnas_ignoradas", 0)
+            )
+            QApplication.processEvents()
+            self.cargador.ruta_archivo_actual = ruta_archivo
+            info = self._procesar_archivo(
+                nombre_archivo,
+                df,
+                ruta_archivo,
+                progreso=dialogo.actualizar,
+                mostrar_resumen=False,
+            )
+        except Exception as exc:
+            self._error_carga = str(exc)
+            dialogo.finalizar(False)
+            return
+
+        self._resultado_carga = nombre_archivo
+        self._info_resultado_carga = info
+        dialogo.actualizar(100, "Archivo listo.")
+        QApplication.processEvents()
+        dialogo.finalizar(True)
+
+    @Slot(str)
+    def _fallar_carga_csv(self, mensaje):
+        self._error_carga = mensaje
+        if self._dialogo_carga is not None:
+            self._dialogo_carga.finalizar(False)
+
+    def _procesar_archivo(
+        self,
+        nombre_archivo,
+        df,
+        ruta_archivo,
+        progreso=None,
+        mostrar_resumen=True,
+    ):
         """Aplica secciones de la BD, actualiza la UI y avisa al resto de paneles."""
 
-        # Trackear archivo actual
         self.archivo_actual = {"nombre": nombre_archivo, "df": df, "ruta": ruta_archivo}
 
         # Limpiar secciones del archivo anterior y cargar las de este archivo desde la BD
@@ -416,54 +645,59 @@ class PanelIzquierdo(QFrame):
                 ]
                 if hasattr(self, "panel_derecho_ref"):
                     self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes = secciones
-                print(f"[DEBUG] _procesar_archivo: {len(secciones)} secciones cargadas desde BD para {nombre_archivo}")
 
-        # Si hay secciones, re-parsear el CSV
         if secciones:
             df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
             self.archivo_actual["df"] = df
 
-        # Agregar archivo al arbol
+        if progreso:
+            progreso(85, "Detectando señales…")
+            QApplication.processEvents()
+
         self.agregar_al_arbol(nombre_archivo, df, ruta_archivo)
 
-        # Mostrar informacion del archivo
         info = self.cargador.obtener_info(nombre_archivo, df)
         info["columnas_csv"] = list(df.columns)
         info["df"] = df
         info["ruta_archivo"] = ruta_archivo
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
-        self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
+        self.lbl_columnas.setText(self._texto_cantidad_columnas(info))
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
         self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
         self.lbl_registros.setText(f"Registros: {info['registros']}")
 
+        if progreso:
+            progreso(90, "Preparando las gráficas…")
+            QApplication.processEvents()
+
         self.archivoCargado.emit(nombre_archivo, df, info)
 
-        # Cargar la masa guardada de este archivo (o dejar el campo vacío)
-        self._cargar_masa_archivo()
+        # Cargar masa y estatura guardadas (o dejar sus campos vacíos).
+        self._cargar_variables_archivo()
 
-        # Mostrar resumen de deteccion al usuario
-        self._mostrar_resumen_deteccion(info)
+        if mostrar_resumen:
+            self._mostrar_resumen_deteccion(info)
 
-        # Pasar datos al panel derecho si existe
         if hasattr(self, "panel_derecho_ref"):
+            if progreso:
+                progreso(97, "Actualizando los paneles…")
+                QApplication.processEvents()
             self.panel_derecho_ref.cargar_datos_csv(info)
             if not self.alias_signal_conectado:
                 self.panel_derecho_ref.detectar_cabeceras.aliasesGuardados.connect(
                     lambda _: self._re_detectar_archivo_actual()
                 )
                 self.alias_signal_conectado = True
+        return info
 
     def agregar_al_arbol(self, nombre_archivo, df, ruta_archivo=None):
 
-        # Guardar el dataframe y ruta para uso futuro
         ya_estaba = nombre_archivo in self.archivos_cargados
         self.archivos_cargados[nombre_archivo] = {"df": df, "ruta": ruta_archivo}
 
-        # Si es el primer archivo, limpiar el item vacio
         if self.arbol.topLevelItemCount() == 1:
             primer_item = self.arbol.topLevelItem(0)
-            if primer_item.text(0) == "Ningun archivo cargado":
+            if primer_item.text(0) == "Ningún archivo cargado":
                 self.arbol.clear()
 
         # Si el archivo ya estaba en el arbol solo se vuelve a seleccionar,
@@ -514,7 +748,6 @@ class PanelIzquierdo(QFrame):
                 ]
                 if hasattr(self, "panel_derecho_ref"):
                     self.panel_derecho_ref.detectar_cabeceras.secciones_pendientes = secciones
-                print(f"[DEBUG] al_seleccionar_archivo: {len(secciones)} secciones cargadas desde BD para {nombre_archivo}")
 
         if secciones and ruta_archivo:
             df = self.cargador.parsear_csv_con_secciones(ruta_archivo, secciones)
@@ -526,15 +759,15 @@ class PanelIzquierdo(QFrame):
         info["df"] = df
         info["ruta_archivo"] = ruta_archivo
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
-        self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
+        self.lbl_columnas.setText(self._texto_cantidad_columnas(info))
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
         self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
         self.lbl_registros.setText(f"Registros: {info['registros']}")
 
         self.archivoSeleccionado.emit(nombre_archivo, df, info)
 
-        # Cargar la masa guardada del archivo seleccionado
-        self._cargar_masa_archivo()
+        # Cargar masa y estatura guardadas del archivo seleccionado.
+        self._cargar_variables_archivo()
 
         # Actualizar panel derecho con los datos del archivo seleccionado
         if hasattr(self, "panel_derecho_ref"):
@@ -543,14 +776,11 @@ class PanelIzquierdo(QFrame):
     def _re_detectar_archivo_actual(self):
         """Re-detecta el archivo actualmente seleccionado con los nuevos aliases."""
         if not self.archivo_actual:
-            print("[DEBUG] _re_detectar_archivo_actual: no hay archivo actual")
             return
 
         nombre_archivo = self.archivo_actual["nombre"]
         df = self.archivo_actual["df"]
         ruta_archivo = self.archivo_actual["ruta"]
-
-        print(f"[DEBUG] _re_detectar_archivo_actual: archivo={nombre_archivo}, ruta={ruta_archivo}")
 
         # Obtener secciones del panel derecho directamente
         secciones = None
@@ -571,7 +801,7 @@ class PanelIzquierdo(QFrame):
         info["df"] = df
         info["ruta_archivo"] = ruta_archivo
         self.lbl_nombre_archivo.setText(f"Nombre: {info['nombre']}")
-        self.lbl_columnas.setText(f"Columnas: {info['columnas']}")
+        self.lbl_columnas.setText(self._texto_cantidad_columnas(info))
         self.lbl_tipo_datos.setText(f"Tipo de datos: {info['tipo_datos']}")
         self.lbl_subframes.setText(f"Subframes: {info['tiene_subframes']}")
         self.lbl_registros.setText(f"Registros: {info['registros']}")
@@ -584,23 +814,8 @@ class PanelIzquierdo(QFrame):
     def _mostrar_resumen_deteccion(self, info):
         """Muestra un popup con el resumen de variables detectadas y no reconocidas."""
         deteccion = info.get("deteccion", {})
-        mapeo = deteccion.get("mapeo", {})
         no_reconocidas = deteccion.get("no_reconocidas", [])
         cabeceras_extra = deteccion.get("cabeceras_extra", [])
-
-        reconocidas = []
-        for tipo, ejes in mapeo.items():
-            if tipo in ("Frame", "Tiempo"):
-                continue
-            if isinstance(ejes, dict):
-                for eje, columna in ejes.items():
-                    eje_str = eje.replace("eje_", "").upper() if eje != "ninguno" else ""
-                    if eje_str:
-                        reconocidas.append(f"{tipo} {eje_str} ({columna})")
-                    else:
-                        reconocidas.append(f"{tipo} ({columna})")
-            else:
-                reconocidas.append(f"{tipo} ({ejes})")
 
         no_reconocidas = [
             col for col in no_reconocidas
@@ -614,29 +829,17 @@ class PanelIzquierdo(QFrame):
             if cab["nombre"] not in detectadas_no_graficadas:
                 detectadas_no_graficadas.append(cab["nombre"])
 
-        mensaje = ""
-
-        if reconocidas:
-            mensaje += "<b>Se graficaron las siguientes variables automáticamente:</b><br>"
-            mensaje += "<br>".join(f"• {r}" for r in reconocidas)
-            mensaje += "<br><br>"
-
-        if detectadas_no_graficadas:
-            mensaje += "<b>Se detectaron variables que NO se graficaron y requieren asignación manual de secciones:</b><br>"
-            mensaje += "<br>".join(f"• {d}" for d in detectadas_no_graficadas)
-            mensaje += "<br><br>Estas variables están en el archivo pero fuera de la cabecera principal.<br>"
-            mensaje += "Para graficarlas, abrí el panel «Detectar Cabeceras»,<br>"
-            mensaje += "usá el botón «Abrir CSV en editor» y marcá las secciones correspondientes."
-            mensaje += "<br><br>"
-
-        if no_reconocidas:
-            mensaje += "<b>Se detectaron columnas no reconocidas que requieren asignación manual:</b><br>"
-            mensaje += "<br>".join(f"• {col}" for col in no_reconocidas)
-            mensaje += "<br><br>Para asignarlas, abrí el panel «Detectar Cabeceras»<br>"
-            mensaje += "y usá el botón «Abrir CSV en editor»."
-
-        if not reconocidas and not detectadas_no_graficadas and not no_reconocidas:
-            mensaje = "No se detectaron variables en el archivo."
-
-        if mensaje:
-            QMessageBox.information(self, "Detección de cabeceras", mensaje)
+        pendientes = list(dict.fromkeys(
+            detectadas_no_graficadas + no_reconocidas
+        ))
+        if pendientes:
+            dialogo = QMessageBox(self.window())
+            dialogo.setIcon(QMessageBox.Warning)
+            dialogo.setWindowTitle("Columnas pendientes")
+            dialogo.setText(
+                f"{len(pendientes)} columna(s) requieren asignación."
+            )
+            dialogo.setInformativeText("Revisá «Detectar cabeceras».")
+            dialogo.setDetailedText("\n".join(map(str, pendientes)))
+            dialogo.setStandardButtons(QMessageBox.Ok)
+            dialogo.exec()

@@ -63,10 +63,7 @@ class ConfiguracionDialog(QDialog):
 
         self.chk_superposicion = QCheckBox("Habilitar superposición de intervalos")
         self.chk_superposicion.setChecked(bool(superposicion))
-        self.chk_superposicion.setToolTip(
-            "Permite crear un recorte que se apoya sobre otros ya existentes. "
-            "Si está desactivado, el recorte se corre automáticamente al tramo libre."
-        )
+        self.chk_superposicion.setToolTip("Permite intervalos superpuestos.")
         seccion_layout.addWidget(self.chk_superposicion)
 
         self.chk_no_preguntar = QCheckBox("No preguntar al superponer")
@@ -94,11 +91,6 @@ class ConfiguracionDialog(QDialog):
         # Solo el interruptor principal es visible hasta que se activa el modo.
         self.chk_accesible = QCheckBox("Activar modo accesible")
         self.chk_accesible.setChecked(accesibilidad.activo())
-        self.chk_accesible.setToolTip(
-            "Al activarlo aparecen las opciones de tipo de visión cromática y "
-            "de refuerzo visual (colores, grosor y estilos de línea). "
-            "Con el modo desactivado el software se comporta como siempre."
-        )
         accesibilidad_layout.addWidget(self.chk_accesible)
 
         # --- Tipo de visión cromática ---
@@ -113,20 +105,8 @@ class ConfiguracionDialog(QDialog):
 
         self.grupo_vision = QButtonGroup(self)
         self.radio_rojo_verde = QRadioButton("Deficiencia rojo-verde")
-        self.radio_rojo_verde.setToolTip(
-            "Deuteranomalía, Protanomalía, Protanopia y Deuteranopia. "
-            "Usa la paleta Okabe-Ito."
-        )
         self.radio_azul_amarillo = QRadioButton("Deficiencia azul-amarillo")
-        self.radio_azul_amarillo.setToolTip(
-            "Tritanomalía y Tritanopia. Usa una paleta que separa por "
-            "tonalidad y luminancia los pares que tienden a confundirse."
-        )
         self.radio_completa = QRadioButton("Deficiencia completa")
-        self.radio_completa.setToolTip(
-            "Monocromacia o Acromatopsia. Usa una escala de grises "
-            "ordenada por brillo."
-        )
         self.grupo_vision.addButton(self.radio_rojo_verde)
         self.grupo_vision.addButton(self.radio_azul_amarillo)
         self.grupo_vision.addButton(self.radio_completa)
@@ -156,40 +136,19 @@ class ConfiguracionDialog(QDialog):
 
         self.chk_nombre = QCheckBox("Mostrar el nombre del color en el intervalo")
         self.chk_nombre.setChecked(accesibilidad.mostrar_nombre_color())
-        self.chk_nombre.setToolTip(
-            "Al pasar el cursor sobre un intervalo o subintervalo se muestra el "
-            "nombre del color en el tooltip."
-        )
         gpo_opciones_layout.addWidget(self.chk_nombre)
 
         self.chk_estilos = QCheckBox("Utilizar estilos de línea diferenciados")
         self.chk_estilos.setChecked(accesibilidad.estilos_linea_activos())
-        self.chk_estilos.setToolTip(
-            "Cada tipo de línea (original, filtrada, fórmula) usa un trazo "
-            "distinto además del color."
-        )
         gpo_opciones_layout.addWidget(self.chk_estilos)
 
         self.chk_grosor = QCheckBox("Aumentar grosor de las líneas")
         self.chk_grosor.setChecked(accesibilidad.aumentar_grosor_activo())
-        self.chk_grosor.setToolTip(
-            "Engrosa las señales y los intervalos para que se distingan mejor."
-        )
         gpo_opciones_layout.addWidget(self.chk_grosor)
 
         gpo_opciones.setLayout(gpo_opciones_layout)
         gpo_opciones.setVisible(accesibilidad.activo())
         accesibilidad_layout.addWidget(gpo_opciones)
-
-        ayuda_accesible = QLabel(
-            "Los cambios se aplican al instante sobre las gráficas ya abiertas. "
-            "No modifican los datos ni los archivos guardados."
-        )
-        ayuda_accesible.setWordWrap(True)
-        ayuda_accesible.setStyleSheet(
-            "color: #8A8A8A; font-size: 11px; margin-left: 22px;"
-        )
-        accesibilidad_layout.addWidget(ayuda_accesible)
 
         self.gpo_tipo = gpo_tipo
         self.gpo_opciones = gpo_opciones
@@ -218,10 +177,6 @@ class ConfiguracionDialog(QDialog):
         self.btn_limpiar = QPushButton("Limpiar archivos guardados…")
         self.btn_limpiar.setObjectName("btnDialogoSecundario")
         self.btn_limpiar.setCursor(Qt.PointingHandCursor)
-        self.btn_limpiar.setToolTip(
-            "Elegir qué copias de CSV y anotaciones eliminar de la carpeta "
-            "«archivos»."
-        )
         self.btn_limpiar.clicked.connect(self._abrir_limpiar_archivos)
         fila_limpiar.addWidget(self.btn_limpiar)
         fila_limpiar.addStretch()
@@ -309,15 +264,12 @@ class ConfiguracionDialog(QDialog):
         proyectos = proyecto.listar_proyectos()
         self.btn_limpiar.setEnabled(bool(proyectos))
         if not proyectos:
-            self.lbl_resumen_archivos.setText(
-                "La carpeta «archivos» está vacía."
-            )
+            self.lbl_resumen_archivos.setText("No hay proyectos guardados.")
             return
 
         total = proyecto.formatear_tamano(sum(p["tamano"] for p in proyectos))
         self.lbl_resumen_archivos.setText(
-            f"{len(proyectos)} proyecto(s) guardado(s) · {total} en la carpeta "
-            "«archivos»."
+            f"{len(proyectos)} proyecto(s) · {total}"
         )
 
     def _abrir_limpiar_archivos(self):

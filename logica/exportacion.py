@@ -55,6 +55,9 @@ COLUMNAS_RESULTADOS = (
     "Hasta",
     "Duración (s)",
     "Resultado",
+    "Promedio",
+    "Máximo",
+    "Frame del máximo",
     "Unidad",
     "Datos utilizados",
     "Expresión",
@@ -138,6 +141,7 @@ def preparar_datos(
     curvas_formula=(),
     nombres=None,
     unidades=None,
+    intervalos=None,
 ) -> pd.DataFrame:
     """Crea la tabla de señales sin reemplazar los valores originales.
 
@@ -202,7 +206,35 @@ def preparar_datos(
         salida[etiqueta] = eje_exportado.map(por_x)
         existentes.add(etiqueta)
 
+    if intervalos is not None:
+        mascara_recortes = np.zeros(len(salida), dtype=bool)
+        for intervalo in intervalos or ():
+            try:
+                desde = float(intervalo.get("desde"))
+                hasta = float(intervalo.get("hasta"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            mascara_recortes |= eje_exportado.between(
+                min(desde, hasta),
+                max(desde, hasta),
+                inclusive="both",
+            ).to_numpy(dtype=bool)
+        salida = salida.loc[mascara_recortes]
+
     return salida.reset_index(drop=True)
+
+
+def filtrar_intervalos(intervalos, identificadores=None):
+    """Conserva todos los intervalos o solamente los IDs pedidos."""
+    intervalos = list(intervalos or ())
+    if identificadores is None:
+        return intervalos
+    permitidos = set(identificadores or ())
+    return [
+        intervalo
+        for intervalo in intervalos
+        if intervalo.get("id") in permitidos
+    ]
 
 
 def preparar_intervalos(intervalos) -> pd.DataFrame:
@@ -318,7 +350,7 @@ def preparar_muestras_intervalos(
 
 
 def preparar_resultados_formula(datos) -> pd.DataFrame:
-    """Convierte el último cálculo en una tabla clara y sin columnas vacías."""
+    """Resume cada cálculo con promedio, máximo y frame del máximo."""
     if not datos or not datos.get("resultados"):
         return pd.DataFrame(columns=COLUMNAS_RESULTADOS)
 
@@ -346,12 +378,9 @@ def preparar_resultados_formula(datos) -> pd.DataFrame:
             "Hasta": resultado.get("hasta", ""),
             "Duración (s)": resultado.get("duracion_s"),
             "Resultado": resultado.get("valor"),
-            "Pico": resumen.get("pico"),
-            "Frame del pico": resumen.get("x_pico"),
-            "Mínimo": resumen.get("minimo"),
-            "Frame del mínimo": resumen.get("x_minimo"),
-            "Media": resumen.get("media"),
-            "RMS": resumen.get("rms"),
+            "Promedio": resumen.get("media"),
+            "Máximo": resumen.get("pico"),
+            "Frame del máximo": resumen.get("x_pico"),
             "Muestras válidas": resumen.get("muestras"),
         }
         for detalle in resultado.get("detalles") or ():
@@ -374,25 +403,15 @@ def preparar_resultados_formula(datos) -> pd.DataFrame:
 
     tabla = pd.DataFrame(filas)
     esenciales = ["Fórmula", "Intervalo", "Señal", "Desde", "Hasta", "Duración (s)"]
-    # Si la fórmula ya define medidas propias (por ejemplo, impulso neto y
-    # propulsivo), esas son más útiles que repetir un resumen estadístico
-    # genérico de la curva. Las fórmulas sin detalles sí conservan pico,
-    # mínimo, media y RMS.
-    medidas = ["Resultado"]
-    if columnas_detalle:
-        medidas.append("Muestras válidas")
-    else:
-        medidas.extend(
-            [
-                "Pico",
-                "Frame del pico",
-                "Mínimo",
-                "Frame del mínimo",
-                "Media",
-                "RMS",
-                "Muestras válidas",
-            ]
-        )
+    # Los detalles propios de una fórmula (por ejemplo, impulso neto) se
+    # conservan, pero no sustituyen el resumen pedido para todas las curvas.
+    medidas = [
+        "Resultado",
+        "Promedio",
+        "Máximo",
+        "Frame del máximo",
+        "Muestras válidas",
+    ]
     metadatos = [
         "Unidad",
         "Datos utilizados",
@@ -432,6 +451,27 @@ def preparar_resultados_formulas(calculos) -> pd.DataFrame:
     if not tablas:
         return pd.DataFrame(columns=COLUMNAS_RESULTADOS)
     return pd.concat(tablas, ignore_index=True, sort=False)
+
+
+def filtrar_resultados_formulas(calculos, identificadores=None):
+    """Filtra bloques de resultados sin modificar el estado de la aplicación."""
+    calculos = list(calculos or ())
+    if identificadores is None:
+        return calculos
+    permitidos = set(identificadores or ())
+    filtrados = []
+    for datos in calculos:
+        resultados = [
+            resultado
+            for resultado in datos.get("resultados") or ()
+            if resultado.get("id") in permitidos
+        ]
+        if not resultados:
+            continue
+        copia = dict(datos)
+        copia["resultados"] = resultados
+        filtrados.append(copia)
+    return filtrados
 
 
 def preparar_informacion(

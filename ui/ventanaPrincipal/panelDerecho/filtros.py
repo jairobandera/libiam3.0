@@ -41,10 +41,7 @@ class Filtros(QFrame):
 
         titulo = QLabel("Filtro de frecuencias")
         titulo.setObjectName("tituloPanel")
-        subtitulo = QLabel("Configura qué parte de la señal querés conservar")
-        subtitulo.setObjectName("subtituloPanel")
         layout.addWidget(titulo)
-        layout.addWidget(subtitulo)
 
         layout.addWidget(self._crear_seccion_destino())
         layout.addWidget(self._crear_seccion_configuracion())
@@ -79,16 +76,8 @@ class Filtros(QFrame):
         self.senal_objetivo.addItem("Cargá un archivo CSV", None)
         self.senal_objetivo.setEnabled(False)
 
-        ayuda = QLabel(
-            "Podés aplicar una configuración a todas las señales visibles o "
-            "trabajar con una señal por vez."
-        )
-        ayuda.setWordWrap(True)
-        ayuda.setObjectName("lblDeteccion")
-
         layout.addWidget(titulo)
         layout.addWidget(self.senal_objetivo)
-        layout.addWidget(ayuda)
         seccion.setLayout(layout)
         return seccion
 
@@ -141,10 +130,7 @@ class Filtros(QFrame):
         self.fs_control.setSingleStep(100)
         self.fs_control.setSpecialValueText("Ingresar")
         self.fs_control.setValue(0)
-        self.fs_control.setToolTip(
-            "Frecuencia original del registro. Si el CSV tiene subframes, "
-            "ABS calcula automáticamente la frecuencia efectiva."
-        )
+        self.fs_control.setToolTip("Frecuencia original del registro.")
         formulario.addRow(self.lbl_fs, self.fs_control)
 
         self.lbl_frecuencia = QLabel("Cargá un archivo para habilitar el filtro.")
@@ -157,14 +143,6 @@ class Filtros(QFrame):
         self.lbl_resumen.setObjectName("resumenFiltro")
         self.lbl_resumen.setContentsMargins(10, 0, 10, 0)
 
-        aclaracion = QLabel(
-            "El cambio no es un corte vertical perfecto: el filtro atenúa "
-            "gradualmente el contenido que queda fuera de lo elegido."
-        )
-        aclaracion.setWordWrap(True)
-        aclaracion.setObjectName("lblDeteccion")
-        aclaracion.setContentsMargins(10, 0, 10, 10)
-
         contenedor = QWidget()
         contenedor_layout = QVBoxLayout()
         contenedor_layout.setContentsMargins(0, 0, 0, 0)
@@ -173,7 +151,6 @@ class Filtros(QFrame):
         contenedor_layout.addLayout(formulario)
         contenedor_layout.addWidget(self.lbl_frecuencia)
         contenedor_layout.addWidget(self.lbl_resumen)
-        contenedor_layout.addWidget(aclaracion)
         contenedor_layout.addStretch()
         contenedor.setLayout(contenedor_layout)
 
@@ -255,6 +232,27 @@ class Filtros(QFrame):
         self.lbl_estado.clear()
         self._actualizar_resumen()
 
+    def frecuencia_original_para_proyecto(self):
+        """Frecuencia de adquisición escrita por el usuario, si es válida."""
+        valor = float(self.fs_control.value())
+        return valor if valor > 0 else None
+
+    def restaurar_frecuencia_proyecto(self, valor):
+        """Repone la frecuencia y actualiza también la frecuencia efectiva."""
+        try:
+            valor = float(valor)
+        except (TypeError, ValueError):
+            return False
+        if valor <= 0:
+            return False
+        self.fs_control.blockSignals(True)
+        self.fs_control.setValue(valor)
+        self.fs_control.blockSignals(False)
+        self._recordar_frecuencia_usada(valor)
+        self._actualizar_limites_frecuencia()
+        self._actualizar_resumen()
+        return True
+
     def cargar_senales(self, senales):
         seleccion_anterior = self.senal_objetivo.currentData()
         self.senales_disponibles = [
@@ -305,8 +303,7 @@ class Filtros(QFrame):
             for control in (self.corte_unico, self.corte_inferior, self.corte_superior):
                 control.setMaximum(999_999.99)
             self.lbl_frecuencia.setText(
-                "Ingresá la frecuencia original del registro. Si hay subframes, "
-                "el programa hará la división automáticamente."
+                "Ingresá la frecuencia original."
             )
             self.frecuenciaCambiada.emit(0.0)
             return
@@ -337,8 +334,7 @@ class Filtros(QFrame):
             else ""
         )
         self.lbl_frecuencia.setText(
-            f"Frecuencia efectiva: {fs:g} Hz{detalle} · "
-            f"Nyquist: {nyquist:g} Hz · Límites &lt; {limite:g} Hz."
+            f"Efectiva: {fs:g} Hz{detalle} · Nyquist: {nyquist:g} Hz"
         )
         self.frecuenciaCambiada.emit(float(fs))
 
@@ -382,26 +378,18 @@ class Filtros(QFrame):
         tipo = self.tipo_filtro.currentData()
         orden = self.orden.value()
         if tipo == "lowpass":
-            texto = (
-                "Se conservará principalmente el contenido por debajo de "
-                f"{self.corte_unico.value():g} Hz (orden {orden})."
-            )
+            texto = f"Pasa-bajos · {self.corte_unico.value():g} Hz · orden {orden}"
         elif tipo == "highpass":
-            texto = (
-                "Se conservará principalmente el contenido por encima de "
-                f"{self.corte_unico.value():g} Hz (orden {orden})."
-            )
+            texto = f"Pasa-altos · {self.corte_unico.value():g} Hz · orden {orden}"
         elif tipo == "bandstop":
             texto = (
-                "Se eliminará principalmente el contenido entre "
-                f"{self.corte_inferior.value():g} y "
-                f"{self.corte_superior.value():g} Hz (orden {orden})."
+                f"Rechazo de banda · {self.corte_inferior.value():g}–"
+                f"{self.corte_superior.value():g} Hz · orden {orden}"
             )
         else:
             texto = (
-                "Se conservará principalmente el contenido entre "
-                f"{self.corte_inferior.value():g} y "
-                f"{self.corte_superior.value():g} Hz (orden {orden})."
+                f"Pasa-banda · {self.corte_inferior.value():g}–"
+                f"{self.corte_superior.value():g} Hz · orden {orden}"
             )
 
         es_valida, error = self._validar_configuracion()

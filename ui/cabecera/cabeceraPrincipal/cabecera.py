@@ -15,7 +15,7 @@ from ui.cabecera.cabeceraPrincipal.acerca_de import AcercaDeDialog
 from ui.cabecera.cabeceraPrincipal.configuracion import ConfiguracionDialog
 
 
-class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior en si
+class Cabecera(QFrame):
 
     superposicionIntervalosCambiada = Signal(bool)
     noPreguntarSuperposicionCambiada = Signal(bool)
@@ -27,39 +27,41 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
     # Compatibilidad durante la migración: ver ``configuracion.py``.
     modoDaltonicoCambiado = Signal(bool)
 
-    def __init__(self): #Constructor
+    def __init__(self):
         super().__init__()
         self.setObjectName("topHeader")
-        # Configuración de sesión (no se persiste).
         self.superposicion_intervalos = False
         self.no_preguntar_superposicion = False
         self.init_ui()
 
     def init_ui(self):
 
-        layout = QHBoxLayout() #Todo se organiza en una fila (IZquierda - Derecha)
-        layout.setContentsMargins(20, 4, 20, 4)  #Margenes internos del layout
+        layout = QHBoxLayout()
+        layout.setContentsMargins(20, 4, 20, 4)
         layout.setSpacing(10)
 
-        # IZQUIERDA (LOGO + TEXTO)
         from PySide6.QtGui import QPixmap
         import os
 
         
         BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",".."))
 
-        left_layout = QHBoxLayout() #Logo y texto
+        left_layout = QHBoxLayout()
         left_layout.setSpacing(10)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
-        # LOGO
+        logo_path = os.path.join(BASE_DIR, "utilidades", "icons", "logo.png")
         logo = QLabel()
-        logo_path = os.path.join(BASE_DIR, "utilidades", "icons", "logo.png") #Ruta del logo.
+        logo.setPixmap(
+            QPixmap(logo_path).scaled(
+                60,
+                60,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        )
 
-        logo = QLabel() #Carga la imagen del logo.
-        logo.setPixmap(QPixmap(logo_path).scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)) #Ajusta el tamaño.
-
-        text_layout = QVBoxLayout() #Titulo y subtitulo
+        text_layout = QVBoxLayout()
         text_layout.setSpacing(0)
 
         titulo = QLabel(app_info.NOMBRE)
@@ -76,7 +78,7 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
         left_layout.addWidget(logo)
         left_layout.addLayout(text_layout)
 
-        right_layout = QHBoxLayout() #Botones a la derecha, se organizan en una fila.
+        right_layout = QHBoxLayout()
         right_layout.setSpacing(12)
         right_layout.setAlignment(Qt.AlignVCenter)
 
@@ -89,17 +91,17 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
             ("Acerca de", "utilidades/icons/help.svg"),
         ]
 
-        for texto, icono in botones: #Genera botones dinamicamente.
+        for texto, icono in botones:
 
             btn = QToolButton()
             btn.setText(texto)
-            btn.setIcon(QIcon(os.path.join(BASE_DIR, icono))) #Carga el icono del botón.
-            btn.setIconSize(QSize(20, 20))  #Tamaño del icono.
-            btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon) #Icono y texto.
+            btn.setIcon(QIcon(os.path.join(BASE_DIR, icono)))
+            btn.setIconSize(QSize(20, 20))
+            btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
             btn.setObjectName("toolbarButton")
             btn.setCursor(Qt.PointingHandCursor)
 
-            btn.setMinimumWidth(70) #Evita que el texto se corte.
+            btn.setMinimumWidth(70)
 
             if texto == "Acerca de":
                 btn.clicked.connect(self._mostrar_acerca_de)
@@ -108,15 +110,10 @@ class Cabecera(QFrame): #Componenete visual reautilizable, es la barra superior 
             elif texto == "Guardar":
                 btn.clicked.connect(self.guardarSolicitado.emit)
             elif texto == "Cargar":
-                btn.setToolTip(
-                    "Abrir un proyecto guardado en la carpeta «archivos» "
-                    "con sus intervalos y notas."
-                )
+                btn.setToolTip("Abrir proyecto.")
                 btn.clicked.connect(self.cargarSolicitado.emit)
             elif texto == "Exportar":
-                btn.setToolTip(
-                    "Exportar los datos, intervalos y resultados del análisis."
-                )
+                btn.setToolTip("Exportar análisis.")
                 btn.clicked.connect(self.exportarSolicitado.emit)
 
             right_layout.addWidget(btn)

@@ -371,8 +371,6 @@ class VentanaEditorCSV(QDialog):
         nombre_columna = self.df.columns[col]
         valor_celda = self._valor_a_str(self.df.iloc[fila, col])
 
-        print(f"[DEBUG] _al_doble_click_celda: fila={fila}, col={col}, columna={nombre_columna}, valor={valor_celda}")
-
         if not valor_celda:
             return
 
@@ -414,8 +412,6 @@ class VentanaEditorCSV(QDialog):
     def _marcar_seccion(self):
         fila_cabecera_text = self.txt_fila_cabecera.text().strip()
         fila_fin_text = self.txt_fila_fin.text().strip()
-
-        print(f"[DEBUG] _marcar_seccion: fila_cabecera={fila_cabecera_text}, fila_fin={fila_fin_text}")
 
         if not fila_cabecera_text or not fila_fin_text:
             return
@@ -527,8 +523,7 @@ class VentanaEditorCSV(QDialog):
 
     def _eliminar_seccion(self, idx):
         if idx is not None and 0 <= idx < len(self.secciones_pendientes):
-            sec = self.secciones_pendientes.pop(idx)
-            print(f"[DEBUG] _eliminar_seccion: sección quitada idx={idx}, sec={sec}")
+            self.secciones_pendientes.pop(idx)
             self._reaplicar_resaltado()
             self._actualizar_lista_secciones()
 
@@ -536,7 +531,6 @@ class VentanaEditorCSV(QDialog):
         if not self.secciones_pendientes:
             return
         self.secciones_pendientes.clear()
-        print("[DEBUG] _quitar_todas_secciones: todas las secciones quitadas")
         self._reaplicar_resaltado()
         self._actualizar_lista_secciones()
 
@@ -585,10 +579,8 @@ class VentanaEditorCSV(QDialog):
     def _eliminar_cambio(self, idx):
         if idx is not None and 0 <= idx < len(self.cambios_pendientes):
             cambio = self.cambios_pendientes.pop(idx)
-            print(f"[DEBUG] _eliminar_cambio: cambio quitado idx={idx}, cambio={cambio}")
             if self.ruta_archivo and "id" in cambio:
                 desactivar_cabecera(self.db_session, cambio["id"])
-                print(f"[DEBUG] _eliminar_cambio: cabecera desactivada en BD id={cambio['id']}")
             if "fila" in cambio and "columna_indice" in cambio:
                 self.celdas_asignadas.discard(
                     (cambio["fila"], cambio["columna_indice"])
@@ -601,7 +593,6 @@ class VentanaEditorCSV(QDialog):
             return
         if self.ruta_archivo:
             desactivar_cabeceras_archivo(self.db_session, self.ruta_archivo)
-            print(f"[DEBUG] _quitar_todos_cambios: cabeceras desactivadas en BD")
         self.cambios_pendientes.clear()
         self.celdas_asignadas.clear()
         self._reaplicar_resaltado()
@@ -655,14 +646,9 @@ class VentanaEditorCSV(QDialog):
             self._reaplicar_resaltado()
 
     def _guardar_y_cerrar(self):
-        print(f"[DEBUG] _guardar_y_cerrar: cambios_pendientes={len(self.cambios_pendientes)}, secciones={len(self.secciones_pendientes)}")
-
         if self.ruta_archivo:
             desactivar_cabeceras_archivo(self.db_session, self.ruta_archivo)
-            print(f"[DEBUG] _guardar_y_cerrar: cabeceras desactivadas para {self.ruta_archivo}")
-
             for cambio in self.cambios_pendientes:
-                print(f"[DEBUG] _guardar_y_cerrar: guardando cabecera={cambio}")
                 guardar_cabecera_asignada(
                     self.db_session,
                     self.ruta_archivo,
@@ -672,10 +658,7 @@ class VentanaEditorCSV(QDialog):
                 )
 
             desactivar_secciones_archivo(self.db_session, self.ruta_archivo)
-            print(f"[DEBUG] _guardar_y_cerrar: secciones desactivadas para {self.ruta_archivo}")
-
             for sec in self.secciones_pendientes:
-                print(f"[DEBUG] _guardar_y_cerrar: guardando seccion={sec}")
                 guardar_seccion_archivo(
                     self.db_session,
                     self.ruta_archivo,
@@ -684,6 +667,5 @@ class VentanaEditorCSV(QDialog):
                     ",".join(sec["columnas"]),
                 )
 
-        print("[DEBUG] _guardar_y_cerrar: emitiendo aliasesGuardados")
         self.aliasesGuardados.emit(self.secciones_pendientes)
         self.close()

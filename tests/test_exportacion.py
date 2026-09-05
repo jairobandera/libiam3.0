@@ -71,6 +71,34 @@ class TestExportacion(unittest.TestCase):
             ],
         )
 
+    def test_datos_pueden_limitarse_a_recortes_especificos(self):
+        tabla = exportacion.preparar_datos(
+            self.original,
+            columna_x="Frame",
+            columnas=["Fz", "Fx"],
+            intervalos=[
+                {"id": "Fz::1", "desde": 1, "hasta": 1},
+                {"id": "Fx::2", "desde": 3, "hasta": 3},
+            ],
+        )
+
+        self.assertEqual(tabla["Frame"].tolist(), [1, 3])
+        self.assertEqual(tabla["Fz"].tolist(), [200.0, 400.0])
+
+    def test_todo_conserva_cada_intervalo_sin_mirar_selecciones_externas(self):
+        intervalos = [
+            {"id": "Fz::1", "seleccionado_calculo": True},
+            {"id": "Fx::1", "seleccionado_calculo": False},
+            {"id": "Fy::1", "seleccionado_calculo": False},
+        ]
+
+        exportados = exportacion.filtrar_intervalos(intervalos, None)
+
+        self.assertEqual(
+            [intervalo["id"] for intervalo in exportados],
+            ["Fz::1", "Fx::1", "Fy::1"],
+        )
+
     def test_intervalos_exportan_sus_muestras_y_notas(self):
         intervalos = [
             {
@@ -146,9 +174,11 @@ class TestExportacion(unittest.TestCase):
         self.assertEqual(tabla.loc[0, "Muestras válidas"], 2)
         self.assertEqual(tabla.loc[0, "Impulso neto (N·s)"], 4.0)
         self.assertEqual(tabla.loc[1, "Impulso neto (N·s)"], 6.0)
+        self.assertEqual(tabla.loc[0, "Promedio"], 2.0)
+        self.assertEqual(tabla.loc[0, "Máximo"], 4.0)
+        self.assertEqual(tabla.loc[0, "Frame del máximo"], 2)
         self.assertEqual(tabla.loc[0, "Datos utilizados"], "Señal filtrada")
         self.assertNotIn("Resultado", tabla.columns)
-        self.assertNotIn("Pico", tabla.columns)
         self.assertNotIn("Impulso neto (N·s) (2)", tabla.columns)
 
     def test_resultados_de_curva_sin_detalles_incluyen_su_resumen(self):
@@ -180,9 +210,9 @@ class TestExportacion(unittest.TestCase):
             }
         )
 
-        self.assertEqual(tabla.loc[0, "Pico"], 420.0)
-        self.assertEqual(tabla.loc[0, "Frame del pico"], 2)
-        self.assertEqual(tabla.loc[0, "Media"], 215.0)
+        self.assertEqual(tabla.loc[0, "Máximo"], 420.0)
+        self.assertEqual(tabla.loc[0, "Frame del máximo"], 2)
+        self.assertEqual(tabla.loc[0, "Promedio"], 215.0)
         self.assertNotIn("Resultado", tabla.columns)
 
     def test_exporta_juntas_varias_formulas_aplicadas(self):
@@ -231,8 +261,30 @@ class TestExportacion(unittest.TestCase):
         tabla = exportacion.preparar_resultados_formulas(calculos)
 
         self.assertEqual(tabla["Fórmula"].tolist(), ["Potencia", "Impulso"])
-        self.assertEqual(tabla.loc[0, "Pico"], 420.0)
+        self.assertEqual(tabla.loc[0, "Máximo"], 420.0)
         self.assertEqual(tabla.loc[1, "Impulso neto (N·s)"], 6.0)
+
+    def test_resultados_pueden_filtrarse_por_recortes(self):
+        calculos = [
+            {
+                "nombre": "Potencia",
+                "resultados": [
+                    {"id": "Fz::1", "nombre": "A", "resumen": {"media": 1}},
+                    {"id": "Fz::2", "nombre": "B", "resumen": {"media": 2}},
+                ],
+            }
+        ]
+
+        filtrados = exportacion.filtrar_resultados_formulas(
+            calculos,
+            ["Fz::2"],
+        )
+
+        self.assertEqual(
+            [resultado["id"] for resultado in filtrados[0]["resultados"]],
+            ["Fz::2"],
+        )
+        self.assertEqual(len(calculos[0]["resultados"]), 2)
 
     def test_csv_usa_bom_y_el_paquete_es_integro(self):
         with tempfile.TemporaryDirectory() as carpeta:

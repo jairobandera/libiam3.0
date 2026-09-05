@@ -34,6 +34,9 @@ class IntervaloCalculo:
     # visible de izquierda a derecha y puede cambiar al agregar otro recorte.
     orden: int = 0
     nombre_personalizado: bool = False
+    # Cuando varios intervalos nacen de una misma réplica, comparten este
+    # índice de paleta aunque cada gráfica tenga un orden diferente.
+    indice_color: int = 0
 
     def como_dict(self) -> dict:
         return asdict(self)
@@ -57,8 +60,9 @@ class GestorIntervalos:
 
         La identidad interna (``numero``) no cambia. Esto permite reordenar lo
         que ve el usuario sin romper notas, sub-intervalos ni botones que ya
-        apuntan al recorte. Los nombres automáticos y los colores sí siguen la
-        posición visible; los nombres escritos por el usuario se conservan.
+        apuntan al recorte. Los nombres automáticos y los colores normales
+        siguen la posición visible; los replicados conservan su índice de color
+        compartido y los nombres escritos por el usuario se mantienen.
         """
         ordenados = sorted(
             self._intervalos,
@@ -75,7 +79,9 @@ class GestorIntervalos:
                 replace(
                     intervalo,
                     orden=orden,
-                    color=paleta.color_intervalo(orden),
+                    color=paleta.color_intervalo(
+                        intervalo.indice_color or orden
+                    ),
                     nombre=nombre,
                 )
             )
@@ -101,6 +107,7 @@ class GestorIntervalos:
         hasta: int,
         nombre: str = "",
         permitir_superposicion: bool = False,
+        indice_color: int | None = None,
     ) -> IntervaloCalculo:
         desde, hasta = sorted((int(desde), int(hasta)))
         if desde == hasta:
@@ -116,7 +123,12 @@ class GestorIntervalos:
                     )
 
         numero = self._siguiente_numero
-        color = paleta.color_intervalo(numero)
+        try:
+            indice_color = int(indice_color or 0)
+        except (TypeError, ValueError):
+            indice_color = 0
+        indice_color = indice_color if indice_color > 0 else 0
+        color = paleta.color_intervalo(indice_color or numero)
         nombre = nombre.strip()
         nombre_personalizado = bool(nombre)
         nombre = nombre or f"{self._prefijo_nombre} {numero}"
@@ -128,13 +140,18 @@ class GestorIntervalos:
             nombre=nombre,
             orden=numero,
             nombre_personalizado=nombre_personalizado,
+            indice_color=indice_color,
         )
         self._intervalos.append(intervalo)
         self._siguiente_numero += 1
         return intervalo
 
     def agregar_ajustado(
-        self, inicio: int, fin: int, nombre: str = ""
+        self,
+        inicio: int,
+        fin: int,
+        nombre: str = "",
+        indice_color: int | None = None,
     ) -> tuple[IntervaloCalculo, bool]:
         """Agrega el tramo libre recorrido por el gesto del usuario.
 
@@ -196,21 +213,32 @@ class GestorIntervalos:
                 "en la dirección seleccionada."
             )
 
-        intervalo = self.agregar(inicio_ajustado, fin_ajustado, nombre)
+        intervalo = self.agregar(
+            inicio_ajustado,
+            fin_ajustado,
+            nombre,
+            indice_color=indice_color,
+        )
         fue_ajustado = (
             inicio_ajustado != inicio_original or fin_ajustado != fin_original
         )
         return intervalo, fue_ajustado
 
     def restaurar(
-        self, numero: int, desde: int, hasta: int, nombre: str = ""
+        self,
+        numero: int,
+        desde: int,
+        hasta: int,
+        nombre: str = "",
+        indice_color: int | None = None,
     ) -> IntervaloCalculo:
         """Reinserta un intervalo ya existente conservando su número original.
 
         Se usa al abrir un proyecto guardado: los intervalos vienen del archivo de
         anotaciones, así que no se renumeran ni se revalida la superposición
-        (ya se decidió cuando se crearon). El color se deriva del número, igual
-        que en ``agregar``, para que el proyecto se vea igual que al guardarlo.
+        (ya se decidió cuando se crearon). Si existe un índice de color
+        compartido también se restaura; los proyectos anteriores derivan el
+        color del número como antes.
         """
         numero = int(numero)
         if numero < 1:
@@ -220,7 +248,12 @@ class GestorIntervalos:
         if desde == hasta:
             raise ValueError("El intervalo debe contener al menos dos frames.")
 
-        color = paleta.color_intervalo(numero)
+        try:
+            indice_color = int(indice_color or 0)
+        except (TypeError, ValueError):
+            indice_color = 0
+        indice_color = indice_color if indice_color > 0 else 0
+        color = paleta.color_intervalo(indice_color or numero)
         nombre = (nombre or "").strip()
         nombre_personalizado = bool(nombre) and nombre != (
             f"{self._prefijo_nombre} {numero}"
@@ -234,6 +267,7 @@ class GestorIntervalos:
             nombre=nombre,
             orden=numero,
             nombre_personalizado=nombre_personalizado,
+            indice_color=indice_color,
         )
 
         self._intervalos = [
@@ -257,12 +291,16 @@ class GestorIntervalos:
     def recolorear(self) -> None:
         """Reasigna los colores de todos los intervalos según la paleta activa.
 
-        Se llama al prender o apagar el modo daltónico. Como el color depende
-        solo del número del intervalo, apagar el modo devuelve exactamente los
-        colores anteriores.
+        Se llama al prender o apagar el modo daltónico. Los intervalos
+        replicados conservan su índice compartido al cambiar de paleta.
         """
         self._intervalos = [
-            replace(intervalo, color=paleta.color_intervalo(intervalo.numero))
+            replace(
+                intervalo,
+                color=paleta.color_intervalo(
+                    intervalo.indice_color or intervalo.numero
+                ),
+            )
             for intervalo in self._intervalos
         ]
 

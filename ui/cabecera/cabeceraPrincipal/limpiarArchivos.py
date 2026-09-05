@@ -115,20 +115,16 @@ class LimpiarArchivosDialog(QDialog):
         self.lista.clear()
 
         if not self.proyectos:
-            item = QListWidgetItem("La carpeta «archivos» está vacía.")
+            item = QListWidgetItem("No hay proyectos guardados.")
             item.setFlags(Qt.NoItemFlags)
             self.lista.addItem(item)
-            self.lbl_ayuda.setText(
-                "Todavía no hay copias guardadas para limpiar."
-            )
+            self.lbl_ayuda.setText("")
         else:
             total = proyecto.formatear_tamano(
                 sum(p["tamano"] for p in self.proyectos)
             )
             self.lbl_ayuda.setText(
-                f"La carpeta «archivos» tiene {len(self.proyectos)} proyecto(s), "
-                f"{total} en total. Se elimina el CSV y su archivo de "
-                "anotaciones. Esta acción no se puede deshacer."
+                f"{len(self.proyectos)} proyecto(s) · {total}"
             )
             for datos in self.proyectos:
                 item = QListWidgetItem(self._texto_item(datos))
@@ -150,6 +146,8 @@ class LimpiarArchivosDialog(QDialog):
         partes.append(proyecto.formatear_tamano(datos["tamano"]))
         if not datos["tiene_anotaciones"]:
             partes.append("sin anotaciones")
+        if not datos.get("tiene_estado"):
+            partes.append("sin configuración")
         return "   ·   ".join(partes)
 
     def _aplicar_periodo(self):
@@ -191,7 +189,7 @@ class LimpiarArchivosDialog(QDialog):
         self.btn_eliminar.setEnabled(bool(seleccionados))
 
         if not seleccionados:
-            self.lbl_resumen.setText("No hay ningún archivo marcado.")
+            self.lbl_resumen.setText("0 seleccionados")
             return
 
         tamano = proyecto.formatear_tamano(
@@ -214,9 +212,8 @@ class LimpiarArchivosDialog(QDialog):
         confirmacion = QMessageBox.question(
             self,
             "Confirmar eliminación",
-            f"Se van a eliminar {len(nombres)} proyecto(s) de la carpeta "
-            "«archivos», junto con sus intervalos y notas:\n\n"
-            f"{listado}\n\nEsta acción no se puede deshacer. ¿Continuar?",
+            f"¿Eliminar {len(nombres)} proyecto(s)?\n\n"
+            f"{listado}\n\nEsta acción no se puede deshacer.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -241,6 +238,5 @@ class LimpiarArchivosDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Limpiar archivos",
-                f"Se eliminaron {len(eliminados)} proyecto(s) de la carpeta "
-                "«archivos».",
+                f"Se eliminaron {len(eliminados)} proyecto(s).",
             )

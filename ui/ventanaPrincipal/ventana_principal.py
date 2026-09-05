@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from PySide6.QtCore import Qt, QEvent, QTimer
+from PySide6.QtCore import Qt, QEvent, QSettings, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -30,15 +30,38 @@ from logica import app_info, exportacion, proyecto
 
 class VentanaPrincipal(QWidget):
 
+    CLAVE_GEOMETRIA = "ventana_principal/geometria"
+
     def __init__(self, db_session=None):
         super().__init__()
 
         self.db_session = db_session
+        self._ajustes = QSettings("LIBiAM", app_info.NOMBRE)
         self.setWindowTitle(app_info.NOMBRE)
         self.resize(1600, 900)
 
         self.init_ui()
         self._instalar_drag_drop()
+        geometria = self._ajustes.value(self.CLAVE_GEOMETRIA)
+        self._geometria_restaurada = bool(
+            geometria and self.restoreGeometry(geometria)
+        )
+
+    def mostrar_inicial(self):
+        """Respeta la última geometría; la primera apertura sigue maximizada."""
+        if self._geometria_restaurada:
+            self.show()
+        else:
+            self.showMaximized()
+
+    def closeEvent(self, event):
+        """Conserva posición, tamaño y estado maximizado para la próxima sesión."""
+        for ventana in getattr(self.area_central, "_ventanas_region", ()):
+            if hasattr(ventana, "guardar_geometria"):
+                ventana.guardar_geometria()
+        self._ajustes.setValue(self.CLAVE_GEOMETRIA, self.saveGeometry())
+        self._ajustes.sync()
+        super().closeEvent(event)
 
     def init_ui(self):
 
@@ -152,8 +175,17 @@ class VentanaPrincipal(QWidget):
         self.panel_derecho.formulas.formulaSolicitada.connect(
             self.area_central.aplicar_formula
         )
+        self.panel_derecho.formulas.formulaSubintervalosSolicitada.connect(
+            self.area_central.aplicar_formula_subintervalos
+        )
         self.panel_derecho.formulas.quitarFormulaSolicitado.connect(
             self.area_central.quitar_formula
+        )
+        self.panel_derecho.formulas.quitarFormulaSubintervalosSolicitado.connect(
+            self.area_central.quitar_formulas_subintervalos
+        )
+        self.panel_derecho.formulas.nivelCalculoCambiado.connect(
+            self.area_central.set_nivel_calculo_visible
         )
         self.area_central.formulaEstadoCambiado.connect(
             self.panel_derecho.formulas.actualizar_estado_formula
@@ -213,25 +245,45 @@ class VentanaPrincipal(QWidget):
             if nombres_formulas
             else ""
         )
-        curvas_formula = self._curvas_formula_para_exportar(columnas)
-
         dialogo = ExportarDialog(
             self,
             nombre_archivo=area.nombre_archivo,
             cantidad_frames=len(area.df_grafica_original),
             cantidad_senales=len(columnas),
             cantidad_intervalos=len(intervalos),
+            intervalos=intervalos,
             cantidad_resultados=cantidad_resultados,
             nombre_formula=nombre_formula,
             hay_filtros=bool(set(columnas) & set(area.columnas_filtradas)),
-            hay_curvas_formula=bool(curvas_formula),
+            # Los cálculos se exportan resumidos, no como una columna por frame.
+            hay_curvas_formula=False,
         )
         if dialogo.exec() != ExportarDialog.Accepted:
             return
 
         modo = dialogo.modo_seleccionado()
+        ids_exportados = dialogo.ids_intervalos_seleccionados()
+        intervalos_exportados = exportacion.filtrar_intervalos(
+            intervalos,
+            ids_exportados,
+        )
+        resultados_exportados = exportacion.filtrar_resultados_formulas(
+            resultados_formulas,
+            ids_exportados,
+        )
+        if modo == exportacion.MODO_RESULTADOS and not resultados_exportados:
+            QMessageBox.warning(
+                self,
+                "Exportar resultados",
+                "Los recortes elegidos no tienen cálculos aplicados para exportar.",
+            )
+            return
         titulo_modo = dialogo.titulo_modo_seleccionado()
         resumen_modo = dialogo.resumen_modo_seleccionado()
+        if ids_exportados is not None:
+            resumen_modo += (
+                f" Alcance: {len(intervalos_exportados)} recorte(s) elegido(s)."
+            )
         extension = exportacion.EXTENSIONES_MODO[modo]
         base = exportacion.nombre_base(area.nombre_archivo)
         sufijos = {
@@ -255,11 +307,14 @@ class VentanaPrincipal(QWidget):
 
         try:
             if modo == exportacion.MODO_DATOS:
-                tabla_datos = self._tabla_datos_para_exportar(columnas)
+                tabla_datos = self._tabla_datos_para_exportar(
+                    columnas,
+                    intervalos_exportados if ids_exportados is not None else None,
+                )
                 exportacion.escribir_csv(ruta, tabla_datos)
             elif modo == exportacion.MODO_INTERVALOS:
                 tabla_muestras = exportacion.preparar_muestras_intervalos(
-                    intervalos,
+                    intervalos_exportados,
                     area.df_grafica_original,
                     area.df_grafica,
                     area.columna_x,
@@ -268,21 +323,26 @@ class VentanaPrincipal(QWidget):
                 exportacion.escribir_csv(ruta, tabla_muestras)
             elif modo == exportacion.MODO_RESULTADOS:
                 tabla_resultados = exportacion.preparar_resultados_formulas(
-                    resultados_formulas
+                    resultados_exportados
                 )
                 exportacion.escribir_csv(ruta, tabla_resultados)
             else:
-                tabla_datos = self._tabla_datos_para_exportar(columnas)
-                tabla_intervalos = exportacion.preparar_intervalos(intervalos)
+                tabla_datos = self._tabla_datos_para_exportar(
+                    columnas,
+                    intervalos_exportados if ids_exportados is not None else None,
+                )
+                tabla_intervalos = exportacion.preparar_intervalos(
+                    intervalos_exportados
+                )
                 tabla_muestras = exportacion.preparar_muestras_intervalos(
-                    intervalos,
+                    intervalos_exportados,
                     area.df_grafica_original,
                     area.df_grafica,
                     area.columna_x,
                     area.columnas_filtradas,
                 )
                 tabla_resultados = exportacion.preparar_resultados_formulas(
-                    resultados_formulas
+                    resultados_exportados
                 )
                 informacion = exportacion.preparar_informacion(
                     area.nombre_archivo,
@@ -291,7 +351,7 @@ class VentanaPrincipal(QWidget):
                     area.unidades,
                     area.frecuencia_grafica,
                     area.filtros_por_columna,
-                    resultados_formulas,
+                    resultados_exportados,
                     nombres=self._nombres_senales_para_exportar(columnas),
                 )
                 tablas = {"datos.csv": tabla_datos}
@@ -324,7 +384,7 @@ class VentanaPrincipal(QWidget):
             resumen_modo,
         ).exec()
 
-    def _tabla_datos_para_exportar(self, columnas):
+    def _tabla_datos_para_exportar(self, columnas, intervalos=None):
         area = self.area_central
         return exportacion.preparar_datos(
             area.df_grafica_original,
@@ -332,9 +392,10 @@ class VentanaPrincipal(QWidget):
             area.columna_x,
             columnas,
             area.columnas_filtradas,
-            self._curvas_formula_para_exportar(columnas),
+            (),
             nombres=self._nombres_senales_para_exportar(columnas),
             unidades=area.unidades,
+            intervalos=intervalos,
         )
 
     def _nombres_senales_para_exportar(self, columnas):
@@ -351,7 +412,7 @@ class VentanaPrincipal(QWidget):
         return self.area_central.curvas_formulas_para_exportar(columnas)
 
     def _guardar_proyecto(self):
-        """Guarda una copia del CSV y sus intervalos/notas en la carpeta del proyecto.
+        """Guarda CSV, anotaciones y el estado reproducible del análisis.
 
         Se dispara solo desde el botón «Guardar» de la cabecera. Pide el nombre
         con un cuadro de diálogo propio (no el de Windows) y escribe todo dentro
@@ -387,37 +448,90 @@ class VentanaPrincipal(QWidget):
         proyecto.asegurar_carpeta()
         ruta_csv = proyecto.ruta_csv(nombre)
         ruta_anotaciones = proyecto.ruta_anotaciones(nombre)
+        ruta_estado = proyecto.ruta_estado(nombre)
 
         try:
             # Copia del CSV original (o del DataFrame si no está la ruta).
             if ruta_original and os.path.exists(ruta_original):
-                shutil.copyfile(ruta_original, ruta_csv)
+                # Al volver a guardar un proyecto con el mismo nombre, origen
+                # y destino son el mismo archivo y no hay nada que copiar.
+                origen_normalizado = os.path.normcase(os.path.abspath(ruta_original))
+                destino_normalizado = os.path.normcase(os.path.abspath(ruta_csv))
+                if origen_normalizado != destino_normalizado:
+                    shutil.copyfile(ruta_original, ruta_csv)
             else:
                 df_original.to_csv(ruta_csv, index=False)
 
             # Intervalos, sub-intervalos y notas trabajados.
             anotaciones = self.area_central.exportar_anotaciones()
             proyecto.escribir_anotaciones(ruta_anotaciones, anotaciones)
-        except OSError as exc:
+
+            # Variables, frecuencia, filtros y disposición actual de gráficas.
+            proyecto.escribir_estado(
+                ruta_estado, self._estado_proyecto_actual()
+            )
+        except (OSError, TypeError, ValueError) as exc:
             QMessageBox.critical(self, "Guardar", f"No se pudo guardar:\n{exc}")
             return
 
         QMessageBox.information(
             self,
             "Guardar",
-            "Proyecto guardado en la carpeta «archivos»:\n\n"
-            f"• {os.path.basename(ruta_csv)} (copia del CSV)\n"
-            f"• {os.path.basename(ruta_anotaciones)} "
-            f"({len(anotaciones)} intervalo(s)/sub-intervalo(s) con sus notas)",
+            f"Proyecto «{nombre}» guardado.\n"
+            f"{len(anotaciones)} intervalo(s)/subintervalo(s).",
         )
 
+    def _estado_proyecto_actual(self):
+        """Compone el estado que no pertenece al CSV ni a las anotaciones."""
+        estado_area = self.area_central.estado_para_proyecto()
+        return {
+            "variables": self.panel_izquierdo.variables_para_proyecto(),
+            "frecuencia_original": (
+                self.panel_derecho.filtros.frecuencia_original_para_proyecto()
+            ),
+            "graficas": {"mapeo": estado_area["mapeo"]},
+            "filtros": estado_area["filtros"],
+            "fuente_calculo": estado_area["fuente_calculo"],
+        }
+
+    def _restaurar_estado_proyecto(self, estado):
+        """Repone un estado opcional después de que el CSV terminó de cargarse."""
+        if not isinstance(estado, dict) or not estado:
+            return 0
+
+        self.panel_izquierdo.restaurar_variables_proyecto(
+            estado.get("variables")
+        )
+        self.panel_derecho.filtros.restaurar_frecuencia_proyecto(
+            estado.get("frecuencia_original")
+        )
+
+        graficas = estado.get("graficas") or {}
+        mapeo_guardado = (
+            graficas.get("mapeo") if isinstance(graficas, dict) else None
+        )
+        if isinstance(mapeo_guardado, dict):
+            mapeo = self.panel_derecho.config_columnas.restaurar_mapeo_proyecto(
+                mapeo_guardado
+            )
+            self.area_central.actualizar_mapeo(mapeo)
+
+        filtros_restaurados = self.area_central.restaurar_filtros_proyecto(
+            estado.get("filtros")
+        )
+        fuente = estado.get("fuente_calculo")
+        if fuente:
+            self.panel_derecho.formulas.panel_calculo.set_fuente(fuente)
+            self.area_central.set_fuente_calculo(fuente)
+        return filtros_restaurados
+
     def _cargar_proyecto(self):
-        """Abre un proyecto de la carpeta «archivos» con sus intervalos y notas.
+        """Abre un proyecto con anotaciones y estado, si están disponibles.
 
         El diálogo solo lista esa carpeta: no se puede navegar a otra ruta,
-        porque un CSV de cualquier otro lado no tiene anotaciones asociadas.
-        La asociación es por nombre (``<nombre>.csv`` ↔
-        ``<nombre>_anotaciones.csv``); no se usa la base de datos.
+        porque un CSV de cualquier otro lado no tiene sus archivos asociados.
+        La asociación es por el nombre común de los archivos; los proyectos
+        antiguos sin JSON de estado siguen siendo válidos.
         """
         dialogo = CargarProyectoDialog(self)
         if dialogo.exec() != CargarProyectoDialog.Accepted:
@@ -430,36 +544,43 @@ class VentanaPrincipal(QWidget):
         if self.panel_izquierdo.cargar_archivo_desde_ruta(datos["ruta"]) is None:
             return
 
-        # El CSV ya está graficado: recién ahora se pueden reponer los intervalos,
-        # porque cargar_dataframe() limpia los gestores.
+        # El CSV ya está graficado: recién ahora se puede reponer su estado,
+        # porque cargar_dataframe() reinicia variables visuales y filtros.
+        aviso_estado = ""
+        try:
+            estado = proyecto.leer_estado(
+                datos.get("ruta_estado") or ""
+            )
+        except (OSError, ValueError) as exc:
+            estado = {}
+            aviso_estado = f"No se pudo restaurar la configuración: {exc}"
+        filtros_restaurados = self._restaurar_estado_proyecto(estado)
+
         try:
             anotaciones = proyecto.leer_anotaciones(datos["ruta_anotaciones"])
-        except OSError as exc:
-            QMessageBox.warning(
-                self, "Cargar", f"No se pudieron leer las anotaciones:\n{exc}"
-            )
-            return
+        except (OSError, TypeError, ValueError) as exc:
+            anotaciones = []
+            aviso_anotaciones = f"No se pudieron leer las anotaciones: {exc}"
+        else:
+            aviso_anotaciones = ""
 
-        if not anotaciones:
-            QMessageBox.information(
-                self,
-                "Cargar",
-                f"Se cargó «{datos['nombre']}».\n\n"
-                "El proyecto no tenía intervalos ni notas guardados.",
-            )
-            return
-
-        restaurados, descartados = self.area_central.importar_anotaciones(anotaciones)
+        restaurados, descartados = self.area_central.importar_anotaciones(
+            anotaciones
+        ) if anotaciones else (0, 0)
 
         mensaje = (
-            f"Se cargó «{datos['nombre']}» con "
-            f"{restaurados} intervalo(s)/sub-intervalo(s) y sus notas."
+            f"Proyecto «{datos['nombre']}» cargado.\n"
+            f"{restaurados} intervalo(s)/subintervalo(s) · "
+            f"{filtros_restaurados} filtro(s)."
         )
         if descartados:
             mensaje += (
-                f"\n\nQuedaron {descartados} sin restaurar: su señal no está "
-                "graficada en este archivo. Revisá el mapeo de columnas."
+                f"\n{descartados} intervalo(s) no se restauraron. "
+                "Revisá el mapeo."
             )
+        for aviso in (aviso_estado, aviso_anotaciones):
+            if aviso:
+                mensaje += f"\n{aviso}"
         QMessageBox.information(self, "Cargar", mensaje)
 
     # --- Arrastrar y soltar CSV desde el Explorador ---
@@ -484,6 +605,21 @@ class VentanaPrincipal(QWidget):
         tipo = event.type()
 
         if isinstance(obj, QWidget) and obj.window() is self:
+            if (
+                tipo == QEvent.KeyPress
+                and event.key() == Qt.Key_Escape
+                and self.area_central.modo_seleccion_intervalo
+            ):
+                # Primer Esc: borra el inicio ya marcado y conserva el modo.
+                # Si todavía no había inicio, sale directamente de selección.
+                if event.isAutoRepeat():
+                    event.accept()
+                    return True
+                if not self.area_central.cancelar_propuesta_intervalo():
+                    self.panel_izquierdo.btn_intervalo.setChecked(False)
+                event.accept()
+                return True
+
             if tipo == QEvent.DragLeave:
                 self.dragLeaveEvent(event)
                 return True

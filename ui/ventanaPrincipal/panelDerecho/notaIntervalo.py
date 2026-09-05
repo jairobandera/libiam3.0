@@ -32,14 +32,6 @@ class NotaDialog(QDialog):
         titulo.setWordWrap(True)
         layout.addWidget(titulo)
 
-        ayuda = QLabel(
-            "Escribí una breve descripción o recordatorio de lo que pasa en "
-            "este intervalo."
-        )
-        ayuda.setWordWrap(True)
-        ayuda.setStyleSheet("color: #B0B0B0;")
-        layout.addWidget(ayuda)
-
         self.editor = QPlainTextEdit()
         self.editor.setPlainText(nota or "")
         self.editor.setMinimumHeight(120)

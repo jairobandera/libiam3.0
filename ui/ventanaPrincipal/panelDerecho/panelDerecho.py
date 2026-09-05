@@ -178,6 +178,5 @@ class PanelDerecho(QFrame):
 
     def _on_aliases_guardados(self, secciones):
         """Guarda las secciones pendientes. La re-detección la maneja PanelIzquierdo."""
-        print(f"[DEBUG] PanelDerecho._on_aliases_guardados: secciones={secciones}")
         if hasattr(self, 'detectar_cabeceras') and self.detectar_cabeceras is not None:
             self.detectar_cabeceras.secciones_pendientes = secciones

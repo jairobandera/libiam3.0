@@ -283,6 +283,14 @@ def obtener_variable_archivo(session, ruta_archivo, nombre):
     return variable.valor if variable else None
 
 
+def eliminar_variable_archivo(session, ruta_archivo, nombre):
+    """Elimina una variable para que un valor viejo no reaparezca al recargar."""
+    session.query(VariableArchivo).filter_by(
+        ruta_archivo=ruta_archivo, nombre=nombre.lower()
+    ).delete(synchronize_session=False)
+    session.commit()
+
+
 def formula_personalizada_a_dict(formula):
     return {
         "id": formula.id,
@@ -347,6 +355,50 @@ def guardar_formula_personalizada(
     session.commit()
     session.refresh(existente)
     return existente
+
+
+def importar_formulas_personalizadas(session, formulas):
+    """Guarda un lote ya validado en una única transacción.
+
+    Las claves internas siempre se regeneran en el equipo que importa. Los
+    nombres deben llegar resueltos para no reemplazar fórmulas existentes.
+    """
+    formulas = list(formulas or [])
+    nombres_existentes = {
+        formula.nombre.strip().casefold()
+        for formula in session.query(FormulaPersonalizada).filter_by(activo=True)
+    }
+    nombres_lote = set()
+    registros = []
+    try:
+        for datos in formulas:
+            nombre = str(datos.get("nombre") or "").strip()
+            nombre_clave = nombre.casefold()
+            if not nombre:
+                raise ValueError("Ingresá un nombre para cada fórmula.")
+            if nombre_clave in nombres_existentes or nombre_clave in nombres_lote:
+                raise ValueError(
+                    f"Ya existe una fórmula guardada con el nombre «{nombre}»."
+                )
+            registro = FormulaPersonalizada(
+                clave=f"personalizada_{uuid.uuid4().hex}",
+                nombre=nombre,
+                expresion=str(datos.get("expresion") or "").strip(),
+                unidad=str(datos.get("unidad") or "").strip(),
+                descripcion=str(datos.get("descripcion") or "").strip(),
+                reutilizable=bool(datos.get("reutilizable", True)),
+                activo=True,
+            )
+            session.add(registro)
+            registros.append(registro)
+            nombres_lote.add(nombre_clave)
+        session.commit()
+        for registro in registros:
+            session.refresh(registro)
+        return registros
+    except Exception:
+        session.rollback()
+        raise
 
 
 def eliminar_formula_personalizada(session, clave):

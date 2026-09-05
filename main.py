@@ -40,6 +40,6 @@ for archivo in archivos_qss:
 app.setStyleSheet(estilos)
 
 ventana = VentanaPrincipal(db_session=db_session)
-ventana.showMaximized()
+ventana.mostrar_inicial()
 
 sys.exit(app.exec())
