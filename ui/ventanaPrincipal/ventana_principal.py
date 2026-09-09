@@ -220,7 +220,10 @@ class VentanaPrincipal(QWidget):
         if not hasattr(self, "cabecera"):
             return
         perfil = perfil_interfaz(self.width(), self.height())
-        self.cabecera.ajustar_modo(perfil.compacto, perfil.muy_compacto)
+        self.cabecera.ajustar_modo(
+            perfil.cabecera_compacta,
+            perfil.cabecera_muy_compacta,
+        )
         self.panel_izquierdo.ajustar_modo(
             perfil.panel_izquierdo,
             perfil.compacto,

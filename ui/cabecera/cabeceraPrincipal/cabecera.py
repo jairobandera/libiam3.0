@@ -90,8 +90,8 @@ class Cabecera(QFrame):
 
         botones = [
             ("Inicio", "utilidades/icons/home.svg"),
+            ("Abrir", "utilidades/icons/load.svg"),
             ("Guardar", "utilidades/icons/save.svg"),
-            ("Cargar", "utilidades/icons/load.svg"),
             ("Exportar", "utilidades/icons/export.svg"),
             ("Configurar", "utilidades/icons/config.svg"),
             ("Acerca de", "utilidades/icons/help.svg"),
@@ -121,8 +121,8 @@ class Cabecera(QFrame):
                 btn.clicked.connect(self._mostrar_configuracion)
             elif texto == "Guardar":
                 btn.clicked.connect(self.guardarSolicitado.emit)
-            elif texto == "Cargar":
-                btn.setToolTip("Abrir proyecto.")
+            elif texto == "Abrir":
+                btn.setToolTip("Abrir un proyecto guardado.")
                 btn.clicked.connect(self.cargarSolicitado.emit)
             elif texto == "Exportar":
                 btn.setToolTip("Exportar análisis.")

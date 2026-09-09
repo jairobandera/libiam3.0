@@ -11,6 +11,13 @@ from logica.interfaz_adaptativa import (
 
 
 class TestCalculosInterfazAdaptativa(unittest.TestCase):
+    def test_la_cabecera_de_1150_por_647_conserva_textos(self):
+        perfil = perfil_interfaz(1150, 647)
+
+        self.assertTrue(perfil.compacto)
+        self.assertFalse(perfil.cabecera_compacta)
+        self.assertFalse(perfil.cabecera_muy_compacta)
+
     def test_los_perfiles_reservan_espacio_para_las_graficas(self):
         for ancho, alto in ((640, 480), (800, 600), (1024, 768), (1920, 1080)):
             perfil = perfil_interfaz(ancho, alto)
@@ -209,6 +216,17 @@ class TestVentanasAdaptativas(unittest.TestCase):
         cabecera.ajustar_modo(True, True)
         self.assertEqual(cabecera.subtitulo.text(), app_info.LABORATORIO_CORTO)
         self.assertTrue(cabecera.subtitulo.isVisibleTo(cabecera))
+        cabecera.close()
+
+    def test_el_orden_del_encabezado_comienza_por_inicio_abrir_guardar_exportar(self):
+        from ui.cabecera.cabeceraPrincipal.cabecera import Cabecera
+
+        cabecera = Cabecera()
+
+        self.assertEqual(
+            list(cabecera.botones)[:4],
+            ["Inicio", "Abrir", "Guardar", "Exportar"],
+        )
         cabecera.close()
 
     def test_todas_las_ventanas_recuerdan_su_tamano_y_siguen_visibles(self):

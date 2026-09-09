@@ -8,6 +8,8 @@ from dataclasses import dataclass
 class PerfilInterfaz:
     compacto: bool
     muy_compacto: bool
+    cabecera_compacta: bool
+    cabecera_muy_compacta: bool
     panel_izquierdo: int
     barra_derecha: int
     panel_derecho: int
@@ -21,6 +23,8 @@ def perfil_interfaz(ancho, alto):
     alto = max(1, int(alto or 1))
     compacto = ancho < 1280 or alto < 720
     muy_compacto = ancho < 980
+    cabecera_compacta = ancho < 1050
+    cabecera_muy_compacta = ancho < 760
 
     if ancho < 760:
         izquierdo, barra, derecho, minimo = 165, 44, 195, 170
@@ -38,6 +42,8 @@ def perfil_interfaz(ancho, alto):
     return PerfilInterfaz(
         compacto=compacto,
         muy_compacto=muy_compacto,
+        cabecera_compacta=cabecera_compacta,
+        cabecera_muy_compacta=cabecera_muy_compacta,
         panel_izquierdo=izquierdo,
         barra_derecha=barra,
         panel_derecho=derecho,
