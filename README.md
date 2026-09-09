@@ -107,8 +107,22 @@ La selección se hace con dos clics sobre una gráfica después de activar `Sele
   orden de las gráficas y señales visibles.
 - `Cargar` reconstruye ese estado después de abrir el CSV. Los proyectos de
   versiones anteriores, que no tienen archivo de estado, continúan abriendo.
-- La ventana principal recuerda su tamaño, posición y estado maximizado. La
-  ventana de subintervalos recuerda además el ancho elegido para cada panel.
+- La ventana principal y todos los diálogos propios recuerdan su tamaño y
+  posición. La ventana de subintervalos y el editor CSV también recuerdan el
+  reparto interno elegido para sus paneles.
+
+### Interfaz adaptable e Inicio
+
+- La cabecera, los paneles laterales, las gráficas y los diálogos ajustan sus
+  tamaños al espacio disponible y a la escala configurada en el sistema.
+- En ventanas angostas se reducen márgenes e iconos y los contenidos extensos
+  pasan a disposición vertical o quedan accesibles mediante desplazamiento.
+- Si cambió el monitor o su resolución, una geometría guardada se limita y se
+  reubica para que la ventana vuelva a quedar visible.
+- `Inicio` cierra el análisis actual y vuelve al estado anterior a cargar un
+  CSV: quita archivos de la sesión, intervalos, subintervalos, filtros,
+  resultados, variables del sujeto y paneles abiertos. No elimina proyectos
+  ni fórmulas guardadas.
 
 ### Exportación
 

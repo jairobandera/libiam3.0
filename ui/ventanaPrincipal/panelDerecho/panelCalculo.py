@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -175,7 +176,7 @@ class PanelCalculo(QFrame):
         bloque_layout.addWidget(self.lbl_expresion_formula)
 
         if self.permitir_gestion:
-            fila = QHBoxLayout()
+            fila = QGridLayout()
             fila.setSpacing(5)
             self.btn_crear_formula = QPushButton("Crear fórmula")
             self.btn_crear_formula.setObjectName("btnAplicarMapeo")
@@ -192,23 +193,25 @@ class PanelCalculo(QFrame):
             self.btn_eliminar_formula.setCursor(Qt.PointingHandCursor)
             self.btn_eliminar_formula.clicked.connect(self._pedir_eliminacion)
 
-            fila.addWidget(self.btn_crear_formula, 1)
-            fila.addWidget(self.btn_editar_formula)
-            fila.addWidget(self.btn_eliminar_formula)
+            fila.addWidget(self.btn_crear_formula, 0, 0, 1, 2)
+            fila.addWidget(self.btn_editar_formula, 1, 0)
+            fila.addWidget(self.btn_eliminar_formula, 1, 1)
             bloque_layout.addLayout(fila)
 
             fila_intercambio = QHBoxLayout()
             fila_intercambio.setSpacing(5)
-            self.btn_importar_formulas = QPushButton("Importar fórmulas")
+            self.btn_importar_formulas = QPushButton("Importar")
             self.btn_importar_formulas.setObjectName("btnResetMapeo")
             self.btn_importar_formulas.setCursor(Qt.PointingHandCursor)
+            self.btn_importar_formulas.setToolTip("Importar fórmulas")
             self.btn_importar_formulas.clicked.connect(
                 self.importarFormulasSolicitado.emit
             )
 
-            self.btn_exportar_formulas = QPushButton("Exportar fórmulas")
+            self.btn_exportar_formulas = QPushButton("Exportar")
             self.btn_exportar_formulas.setObjectName("btnResetMapeo")
             self.btn_exportar_formulas.setCursor(Qt.PointingHandCursor)
+            self.btn_exportar_formulas.setToolTip("Exportar fórmulas")
             self.btn_exportar_formulas.clicked.connect(
                 self.exportarFormulasSolicitado.emit
             )
@@ -314,6 +317,14 @@ class PanelCalculo(QFrame):
         self.lbl_advertencia.setText("")
         self.lbl_advertencia.hide()
         self.btn_quitar_formula.setEnabled(False)
+
+    def reiniciar_sesion(self):
+        self.cmb_fuente.setCurrentIndex(0)
+        self.set_hay_filtro(False)
+        if self.cmb_formula.count():
+            self.cmb_formula.setCurrentIndex(0)
+        self.limpiar_resultados()
+        self.set_aplicar_habilitado(False, "Seleccioná al menos un intervalo.")
 
     def mostrar_resultados(self, datos):
         """Un bloque por intervalo calculado, con sus valores destacados."""

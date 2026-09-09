@@ -29,6 +29,7 @@ class BarraBotones(QFrame):
     def init_ui(self):
 
         layout = QVBoxLayout()
+        self.layout_principal = layout
         layout.setContentsMargins(6, 12, 6, 12)
         layout.setSpacing(12)
 
@@ -83,6 +84,32 @@ class BarraBotones(QFrame):
         layout.addStretch()
 
         self.setLayout(layout)
+
+    def ajustar_modo(self, ancho, compacto=False, muy_compacto=False):
+        """Mantiene utilizables los cuatro accesos en ventanas angostas."""
+        ancho = max(40, int(ancho))
+        self.setFixedWidth(ancho)
+        margen = 3 if compacto else 6
+        self.layout_principal.setContentsMargins(margen, 8, margen, 8)
+        self.layout_principal.setSpacing(7 if compacto else 12)
+        ancho_boton = max(34, ancho - 2 * margen)
+        alto_boton = 32 if muy_compacto else 35
+        icono = QSize(18, 18) if compacto else QSize(20, 20)
+        for boton in (
+            self.btn_mapeo,
+            self.btn_filtros,
+            self.btn_formulas,
+            self.btn_detectar_cabeceras,
+        ):
+            boton.setFixedSize(ancho_boton, alto_boton)
+            boton.setIconSize(icono)
+
+    def reiniciar_estado(self):
+        """Deja la barra sin ningún panel marcado como activo."""
+        for nombre in ("mapeo", "filtros", "formulas", "detectar_cabeceras"):
+            self.actualizar_icono(nombre, False)
+            self.establecer_activo(nombre, False)
+        self.panel_activo = None
 
     def toggle_panel(self, panel_nombre):
         if self.panel_activo == panel_nombre:

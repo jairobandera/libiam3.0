@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from logica import proyecto
+from logica.interfaz_adaptativa import configurar_geometria_persistente
 
 
 class CargarProyectoDialog(QDialog):
@@ -28,10 +29,16 @@ class CargarProyectoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Cargar proyecto")
         self.setModal(True)
-        self.setMinimumWidth(460)
         self.setObjectName("dialogoCargar")
         self.proyectos = proyecto.listar_proyectos()
         self._init_ui()
+        configurar_geometria_persistente(
+            self,
+            "dialogos/cargar_proyecto/geometria",
+            ideal=(560, 460),
+            minimo=(360, 320),
+            piso=(300, 240),
+        )
 
     def _init_ui(self):
         layout = QVBoxLayout()
@@ -44,7 +51,7 @@ class CargarProyectoDialog(QDialog):
 
         self.lista = QListWidget()
         self.lista.setObjectName("listaProyectos")
-        self.lista.setMinimumHeight(220)
+        self.lista.setMinimumHeight(140)
         self.lista.itemDoubleClicked.connect(self._on_doble_click)
         self.lista.currentItemChanged.connect(self._actualizar_detalle)
         layout.addWidget(self.lista, 1)

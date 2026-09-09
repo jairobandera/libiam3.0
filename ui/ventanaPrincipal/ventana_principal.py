@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from PySide6.QtCore import Qt, QEvent, QSettings, QTimer
+from PySide6.QtCore import Qt, QEvent, QTimer
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -26,6 +26,11 @@ from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
 from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
 from ui.ventanaPrincipal.barraBotones import BarraBotones
 from logica import app_info, exportacion, proyecto
+from logica.interfaz_adaptativa import (
+    configurar_geometria_persistente,
+    guardar_geometria,
+    perfil_interfaz,
+)
 
 
 class VentanaPrincipal(QWidget):
@@ -36,16 +41,20 @@ class VentanaPrincipal(QWidget):
         super().__init__()
 
         self.db_session = db_session
-        self._ajustes = QSettings("LIBiAM", app_info.NOMBRE)
         self.setWindowTitle(app_info.NOMBRE)
-        self.resize(1600, 900)
 
         self.init_ui()
         self._instalar_drag_drop()
-        geometria = self._ajustes.value(self.CLAVE_GEOMETRIA)
-        self._geometria_restaurada = bool(
-            geometria and self.restoreGeometry(geometria)
+        self._geometria_restaurada, self._ajustes = (
+            configurar_geometria_persistente(
+                self,
+                self.CLAVE_GEOMETRIA,
+                ideal=(1600, 900),
+                minimo=(800, 520),
+                piso=(640, 420),
+            )
         )
+        self._actualizar_interfaz_adaptativa()
 
     def mostrar_inicial(self):
         """Respeta la última geometría; la primera apertura sigue maximizada."""
@@ -59,8 +68,8 @@ class VentanaPrincipal(QWidget):
         for ventana in getattr(self.area_central, "_ventanas_region", ()):
             if hasattr(ventana, "guardar_geometria"):
                 ventana.guardar_geometria()
-        self._ajustes.setValue(self.CLAVE_GEOMETRIA, self.saveGeometry())
-        self._ajustes.sync()
+        self.panel_derecho.guardar_estado()
+        guardar_geometria(self)
         super().closeEvent(event)
 
     def init_ui(self):
@@ -118,6 +127,7 @@ class VentanaPrincipal(QWidget):
         self.cabecera.guardarSolicitado.connect(self._guardar_proyecto)
         self.cabecera.cargarSolicitado.connect(self._cargar_proyecto)
         self.cabecera.exportarSolicitado.connect(self._exportar)
+        self.cabecera.inicioSolicitado.connect(self._reiniciar_sesion)
 
         # Conectar panel izquierdo con panel derecho
         self.panel_izquierdo.panel_derecho_ref = self.panel_derecho
@@ -205,6 +215,59 @@ class VentanaPrincipal(QWidget):
         self.panel_derecho.formulas.formulasCambiaron.connect(
             self.area_central.actualizar_formulas_abiertas
         )
+
+    def _actualizar_interfaz_adaptativa(self):
+        if not hasattr(self, "cabecera"):
+            return
+        perfil = perfil_interfaz(self.width(), self.height())
+        self.cabecera.ajustar_modo(perfil.compacto, perfil.muy_compacto)
+        self.panel_izquierdo.ajustar_modo(
+            perfil.panel_izquierdo,
+            perfil.compacto,
+            perfil.muy_compacto,
+        )
+        self.barra_botones.ajustar_modo(
+            perfil.barra_derecha,
+            perfil.compacto,
+            perfil.muy_compacto,
+        )
+        self.panel_derecho.configurar_limites(
+            perfil.panel_derecho_minimo,
+            perfil.panel_derecho_maximo,
+            perfil.panel_derecho,
+        )
+
+    def _reiniciar_sesion(self, confirmar=True):
+        """Vuelve al estado anterior a cargar el primer CSV de la sesión."""
+        hay_datos = self.area_central.df_original is not None or bool(
+            self.panel_izquierdo.archivos_cargados
+        )
+        if confirmar and hay_datos:
+            respuesta = QMessageBox.question(
+                self,
+                "Volver a Inicio",
+                "Se cerrarán los archivos cargados y se quitarán los intervalos, "
+                "filtros y cálculos de esta sesión.\n\n"
+                "Los proyectos y las fórmulas guardadas no se eliminarán.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if respuesta != QMessageBox.Yes:
+                return False
+
+        hilo_carga = getattr(self.panel_izquierdo, "_hilo_carga", None)
+        if hilo_carga is not None and hilo_carga.isRunning():
+            return False
+        for ventana in QApplication.topLevelWidgets():
+            if ventana is not self and ventana.isVisible():
+                ventana.close()
+        self.area_central.reiniciar_sesion()
+        if not self.panel_izquierdo.reiniciar_sesion():
+            return False
+        self.panel_derecho.reiniciar_sesion()
+        self.barra_botones.reiniciar_estado()
+        self._ocultar_overlay_drop()
+        return True
 
     def _exportar(self):
         """Exporta el estado actual sin alterar el proyecto guardado."""
@@ -758,5 +821,6 @@ class VentanaPrincipal(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._actualizar_interfaz_adaptativa()
         if hasattr(self, "_overlay_drop"):
             self._overlay_drop.setGeometry(self.rect().adjusted(6, 6, -6, -6))

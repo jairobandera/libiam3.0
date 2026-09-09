@@ -68,6 +68,7 @@ class Formulas(QFrame):
         }
         self.modo_seleccion = None
         self.variables_formula = []
+        self._diseno_estrecho = None
         self._cargar_formulas_guardadas()
         self.init_ui()
 
@@ -101,12 +102,13 @@ class Formulas(QFrame):
         fila_senal = QHBoxLayout()
         fila_senal.addWidget(QLabel("Señal:"))
         self.cmb_senal = QComboBox()
-        self.cmb_senal.setMinimumWidth(190)
+        self.cmb_senal.setMinimumWidth(120)
         fila_senal.addWidget(self.cmb_senal, 1)
 
-        fila_nivel = QHBoxLayout()
+        fila_nivel = QGridLayout()
+        self.fila_nivel = fila_nivel
         fila_nivel.setSpacing(6)
-        fila_nivel.addWidget(QLabel("Calcular sobre:"))
+        fila_nivel.addWidget(QLabel("Calcular sobre:"), 0, 0, 1, 2)
         self.grupo_nivel = QButtonGroup(self)
         self.grupo_nivel.setExclusive(True)
         self.botones_nivel = {}
@@ -128,11 +130,11 @@ class Formulas(QFrame):
             )
             self.grupo_nivel.addButton(boton)
             self.botones_nivel[nivel] = boton
-            fila_nivel.addWidget(boton, 1)
+            fila_nivel.addWidget(boton, 1, len(self.botones_nivel) - 1)
         self.botones_nivel[self.nivel_calculo].setChecked(True)
 
         # Cuando está activo, cada recorte se aplica a todas las gráficas visibles.
-        self.chk_todas = QCheckBox("Aplicar recorte a todas las gráficas visibles")
+        self.chk_todas = QCheckBox("Replicar en gráficas visibles")
         self.chk_todas.setObjectName("chkRecorteTodas")
         self.chk_todas.setChecked(False)
         self.chk_todas.setToolTip("Replica el próximo recorte.")
@@ -159,7 +161,7 @@ class Formulas(QFrame):
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.setMinimumHeight(250)
+        self.scroll.setMinimumHeight(160)
         self.scroll.setWidget(self.contenedor)
 
         self.lbl_resumen = QLabel("No hay intervalos marcados.")
@@ -213,6 +215,55 @@ class Formulas(QFrame):
         self.cmb_senal.currentIndexChanged.connect(self._renderizar_intervalos_actuales)
         self._actualizar_nivel_visual()
         self._actualizar_botones()
+        self._ajustar_diseno_adaptativo()
+
+    def _ajustar_diseno_adaptativo(self):
+        if not hasattr(self, "fila_nivel"):
+            return
+        estrecho = self.width() < 210
+        if estrecho == self._diseno_estrecho:
+            return
+        self._diseno_estrecho = estrecho
+        boton_intervalos = self.botones_nivel["intervalos"]
+        boton_subintervalos = self.botones_nivel["subintervalos"]
+        self.fila_nivel.removeWidget(boton_intervalos)
+        self.fila_nivel.removeWidget(boton_subintervalos)
+        if estrecho:
+            self.fila_nivel.addWidget(boton_intervalos, 1, 0, 1, 2)
+            self.fila_nivel.addWidget(boton_subintervalos, 2, 0, 1, 2)
+            self.chk_todas.setText("Replicar recorte")
+        else:
+            self.fila_nivel.addWidget(boton_intervalos, 1, 0)
+            self.fila_nivel.addWidget(boton_subintervalos, 1, 1)
+            self.chk_todas.setText("Replicar en gráficas visibles")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._ajustar_diseno_adaptativo()
+
+    def reiniciar_sesion(self):
+        self.checkboxes = {}
+        self.intervalos = []
+        self.estados_seleccion = {}
+        self.subintervalos_colapsados = set()
+        self.nivel_calculo = "intervalos"
+        self.modos_seleccion = {
+            "intervalos": None,
+            "subintervalos": None,
+        }
+        self.modo_seleccion = None
+        self.variables_formula = []
+        self.chk_todas.blockSignals(True)
+        self.chk_todas.setChecked(False)
+        self.chk_todas.blockSignals(False)
+        self.cmb_senal.blockSignals(True)
+        self.cmb_senal.clear()
+        self.cmb_senal.setEnabled(False)
+        self.cmb_senal.blockSignals(False)
+        self.panel_calculo.reiniciar_sesion()
+        self._actualizar_nivel_visual()
+        self._renderizar_intervalos_actuales()
+        self.aplicarATodasCambiado.emit(False)
 
     def set_hay_filtro(self, hay_filtro):
         """Solo tiene sentido elegir la fuente si alguna señal visible tiene filtro."""

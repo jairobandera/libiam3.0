@@ -5,13 +5,14 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QMouseEvent
 
 from ui.ventanaPrincipal.panelDerecho.configColumnas import ConfigColumnas
 from ui.ventanaPrincipal.panelDerecho.filtros import Filtros
 from ui.ventanaPrincipal.panelDerecho.formulas import Formulas
 from ui.ventanaPrincipal.panelDerecho.detectarCabeceras import DetectarCabeceras
+from logica import app_info
 
 
 class PanelDerecho(QFrame):
@@ -21,12 +22,22 @@ class PanelDerecho(QFrame):
     ANCHO_MINIMO = 340
     ANCHO_MAXIMO = 800
     ZONA_ARRASTRE = 5
+    CLAVE_ANCHO = "panel_derecho/ancho"
 
     def __init__(self, db_session=None):
         super().__init__()
         self.setObjectName("panelDerecho")
         self.db_session = db_session
-        self.setFixedWidth(self.ANCHO_EXPANDIDO)
+        self._ajustes = QSettings("LIBiAM", app_info.NOMBRE)
+        ancho_guardado = self._ajustes.value(self.CLAVE_ANCHO)
+        try:
+            ancho_guardado = int(ancho_guardado)
+        except (TypeError, ValueError):
+            ancho_guardado = self.ANCHO_EXPANDIDO
+        self._ancho_personalizado = self._ajustes.contains(self.CLAVE_ANCHO)
+        self.ancho_minimo_actual = self.ANCHO_MINIMO
+        self.ancho_maximo_actual = self.ANCHO_MAXIMO
+        self.setFixedWidth(ancho_guardado)
         self.hide()
         self.expandido = False
         self.redimensionando = False
@@ -34,7 +45,8 @@ class PanelDerecho(QFrame):
         self.ancho_inicio = 0
         self.panel_activo = None
         self.info_actual = None
-        self.ancho_expandido_actual = self.ANCHO_EXPANDIDO
+        self.ancho_preferido = ancho_guardado
+        self.ancho_expandido_actual = ancho_guardado
         self.init_ui()
 
     def init_ui(self):
@@ -103,9 +115,45 @@ class PanelDerecho(QFrame):
             self.setFixedWidth(self.ancho_expandido_actual)
             self.show()
 
+    def configurar_limites(self, minimo, maximo, ideal=None):
+        """Ajusta el panel a la pantalla sin olvidar un ancho elegido."""
+        self.ancho_minimo_actual = max(160, int(minimo))
+        self.ancho_maximo_actual = max(
+            self.ancho_minimo_actual, int(maximo)
+        )
+        objetivo = self.ancho_preferido
+        if not self._ancho_personalizado and ideal is not None:
+            objetivo = int(ideal)
+        self.ancho_expandido_actual = max(
+            self.ancho_minimo_actual,
+            min(self.ancho_maximo_actual, objetivo),
+        )
+        if self.expandido:
+            self.setFixedWidth(self.ancho_expandido_actual)
+
+    def guardar_estado(self):
+        if not self._ancho_personalizado:
+            return
+        self._ajustes.setValue(self.CLAVE_ANCHO, self.ancho_preferido)
+        self._ajustes.sync()
+
+    def reiniciar_sesion(self):
+        """Limpia los datos de los paneles, conservando preferencias globales."""
+        self.info_actual = None
+        for panel in (
+            self.config_columnas,
+            self.filtros,
+            self.formulas,
+            self.detectar_cabeceras,
+        ):
+            reiniciar = getattr(panel, "reiniciar_sesion", None)
+            if reiniciar is not None:
+                reiniciar()
+        self.colapsar_panel()
+
     def colapsar_panel(self):
         """Oculta el panel en una sola actualización de la interfaz."""
-        if self.width() >= self.ANCHO_MINIMO:
+        if self.width() >= self.ancho_minimo_actual:
             self.ancho_expandido_actual = self.width()
         self.expandido = False
         self.panel_activo = None
@@ -126,7 +174,8 @@ class PanelDerecho(QFrame):
             self.colapsar_panel()
             return
         self.ancho_expandido_actual = max(
-            self.ANCHO_MINIMO, min(self.ANCHO_MAXIMO, int(ancho_final))
+            self.ancho_minimo_actual,
+            min(self.ancho_maximo_actual, int(ancho_final)),
         )
         self.expandido = True
         self.setFixedWidth(self.ancho_expandido_actual)
@@ -151,7 +200,10 @@ class PanelDerecho(QFrame):
         """Maneja el arrastre para redimensionar el panel."""
         if self.redimensionando:
             delta = self.posicion_inicio_x - event.globalPos().x()
-            nuevo_ancho = max(self.ANCHO_MINIMO, min(self.ANCHO_MAXIMO, self.ancho_inicio + delta))
+            nuevo_ancho = max(
+                self.ancho_minimo_actual,
+                min(self.ancho_maximo_actual, self.ancho_inicio + delta),
+            )
             self.setFixedWidth(nuevo_ancho)
             event.accept()
         else:
@@ -165,6 +217,9 @@ class PanelDerecho(QFrame):
         """Finaliza el arrastre."""
         if self.redimensionando:
             self.ancho_expandido_actual = self.width()
+            self.ancho_preferido = self.ancho_expandido_actual
+            self._ancho_personalizado = True
+            self.guardar_estado()
         self.redimensionando = False
         self.setCursor(Qt.ArrowCursor)
         event.accept()

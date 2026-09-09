@@ -1,14 +1,20 @@
 import sys
 import os
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QIcon
 
 from logica.config_db import init_db, get_session
+from logica.idioma import configurar_idioma_espanol
 from ui.ventanaPrincipal.ventana_principal import VentanaPrincipal
 
 
+QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+    Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+)
 app = QApplication(sys.argv)
+configurar_idioma_espanol(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 
 )
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPixmap
 
 from logica import app_info
 from ui.cabecera.cabeceraPrincipal.acerca_de import AcercaDeDialog
@@ -22,6 +22,7 @@ class Cabecera(QFrame):
     guardarSolicitado = Signal()
     cargarSolicitado = Signal()
     exportarSolicitado = Signal()
+    inicioSolicitado = Signal()
     # Cambió algún ajuste de accesibilidad; el área central relee el estado.
     accesibilidadCambiada = Signal()
     # Compatibilidad durante la migración: ver ``configuracion.py``.
@@ -39,11 +40,10 @@ class Cabecera(QFrame):
         layout = QHBoxLayout()
         layout.setContentsMargins(20, 4, 20, 4)
         layout.setSpacing(10)
+        self.layout_principal = layout
 
-        from PySide6.QtGui import QPixmap
         import os
 
-        
         BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",".."))
 
         left_layout = QHBoxLayout()
@@ -52,6 +52,8 @@ class Cabecera(QFrame):
 
         logo_path = os.path.join(BASE_DIR, "utilidades", "icons", "logo.png")
         logo = QLabel()
+        self.logo = logo
+        self.logo_path = logo_path
         logo.setPixmap(
             QPixmap(logo_path).scaled(
                 60,
@@ -65,20 +67,24 @@ class Cabecera(QFrame):
         text_layout.setSpacing(0)
 
         titulo = QLabel(app_info.NOMBRE)
+        self.titulo = titulo
         titulo.setObjectName("mainTitle")
 
-        subtitulo = QLabel(
-            "Laboratorio de Investigación en Biomecánica y Análisis de Movimiento"
-        )
+        subtitulo = QLabel(app_info.LABORATORIO)
+        self.subtitulo = subtitulo
         subtitulo.setObjectName("subTitle")
+        subtitulo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        subtitulo.setToolTip(app_info.LABORATORIO)
+        subtitulo.setAccessibleName(app_info.LABORATORIO)
 
-        text_layout.addWidget(titulo) 
+        text_layout.addWidget(titulo)
         text_layout.addWidget(subtitulo)
 
         left_layout.addWidget(logo)
         left_layout.addLayout(text_layout)
 
         right_layout = QHBoxLayout()
+        self.layout_botones = right_layout
         right_layout.setSpacing(12)
         right_layout.setAlignment(Qt.AlignVCenter)
 
@@ -91,6 +97,7 @@ class Cabecera(QFrame):
             ("Acerca de", "utilidades/icons/help.svg"),
         ]
 
+        self.botones = {}
         for texto, icono in botones:
 
             btn = QToolButton()
@@ -100,10 +107,15 @@ class Cabecera(QFrame):
             btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
             btn.setObjectName("toolbarButton")
             btn.setCursor(Qt.PointingHandCursor)
-
+            btn.setAccessibleName(texto)
+            btn.setToolTip(texto)
             btn.setMinimumWidth(70)
+            self.botones[texto] = btn
 
-            if texto == "Acerca de":
+            if texto == "Inicio":
+                btn.setToolTip("Volver al estado inicial.")
+                btn.clicked.connect(self.inicioSolicitado.emit)
+            elif texto == "Acerca de":
                 btn.clicked.connect(self._mostrar_acerca_de)
             elif texto == "Configurar":
                 btn.clicked.connect(self._mostrar_configuracion)
@@ -123,6 +135,44 @@ class Cabecera(QFrame):
         layout.addLayout(right_layout)
 
         self.setLayout(layout)
+        self.ajustar_modo(False, False)
+
+    def ajustar_modo(self, compacto=False, muy_compacto=False):
+        """Reduce la cabecera sin ocultar acciones en pantallas angostas."""
+        compacto = bool(compacto)
+        muy_compacto = bool(muy_compacto)
+        margen = 6 if compacto else 20
+        separacion = 4 if compacto else 10
+        self.layout_principal.setContentsMargins(margen, 3, margen, 3)
+        self.layout_principal.setSpacing(separacion)
+        self.layout_botones.setSpacing(3 if compacto else 12)
+        self.subtitulo.setText(
+            app_info.LABORATORIO_CORTO if compacto else app_info.LABORATORIO
+        )
+        self.subtitulo.setVisible(True)
+
+        tamano_logo = 36 if muy_compacto else 44 if compacto else 60
+        self.logo.setPixmap(
+            QPixmap(self.logo_path).scaled(
+                tamano_logo,
+                tamano_logo,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+        )
+
+        for boton in self.botones.values():
+            if compacto:
+                boton.setToolButtonStyle(Qt.ToolButtonIconOnly)
+                ancho = 38 if muy_compacto else 42
+                boton.setMinimumWidth(ancho)
+                boton.setMaximumWidth(ancho + 4)
+                boton.setIconSize(QSize(19, 19))
+            else:
+                boton.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+                boton.setMinimumWidth(70)
+                boton.setMaximumWidth(16777215)
+                boton.setIconSize(QSize(20, 20))
 
     def _mostrar_acerca_de(self):
         AcercaDeDialog(self.window()).exec()

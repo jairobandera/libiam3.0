@@ -23,7 +23,6 @@ from logica.intervalos import GestorIntervalos, IntervaloSuperpuestoError
 
 RAIZ = Path(__file__).resolve().parents[1]
 CSV_FUERZA = RAIZ / "utilidades" / "resources" / "Carlos Bigolotti Americano CM Fuerza solo.csv"
-CSV_CON_DELSYS = RAIZ / "utilidades" / "resources" / "EmilianoAmericanoCM.csv"
 
 
 class TestLectorCSV(unittest.TestCase):
@@ -49,9 +48,47 @@ class TestLectorCSV(unittest.TestCase):
         self.assertIsNone(calcular_frecuencia_efectiva(0, subframes))
 
     def test_ignora_canales_delsys_del_csv_completo(self):
-        df, metadatos = leer_csv_rapido(CSV_CON_DELSYS)
+        grupos = [
+            "", "",
+            "AMTI-AP - Force", "", "",
+            "AMTI-AP - Moment", "", "",
+            "AMTI-AP - CoP", "", "",
+            "Imported Delsys EMG", "",
+            "Combined Force", "", "",
+            "Combined Moment", "", "",
+            "Combined CoP", "", "",
+        ]
+        cabeceras = [
+            "Frame", "Sub Frame",
+            "Fx", "Fy", "Fz", "Mx", "My", "Mz", "Cx", "Cy", "Cz",
+            "EMG1", "EMG2",
+            "Fx", "Fy", "Fz", "Mx", "My", "Mz", "Cx", "Cy", "Cz",
+        ]
+        unidades = [
+            "", "",
+            "N", "N", "N", "N.mm", "N.mm", "N.mm", "mm", "mm", "mm",
+            "V", "V",
+            "N", "N", "N", "N.mm", "N.mm", "N.mm", "mm", "mm", "mm",
+        ]
+        fila_1 = list(range(1, 23))
+        fila_2 = list(range(101, 123))
+        contenido = "\n".join(
+            [
+                ",".join(["Devices"] + [""] * 21),
+                ",".join(["2000"] + [""] * 21),
+                ",".join(grupos),
+                ",".join(cabeceras),
+                ",".join(unidades),
+                ",".join(map(str, fila_1)),
+                ",".join(map(str, fila_2)),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directorio:
+            ruta = Path(directorio) / "amti_y_delsys.csv"
+            ruta.write_text(contenido, encoding="utf-8")
+            df, metadatos = leer_csv_rapido(ruta)
 
-        self.assertEqual(df.shape, (101000, 11))
+        self.assertEqual(df.shape, (2, 11))
         self.assertEqual(
             df.columns.tolist(),
             [
@@ -68,10 +105,9 @@ class TestLectorCSV(unittest.TestCase):
                 "Cz",
             ],
         )
-        self.assertEqual(metadatos["cantidad_columnas_ignoradas"], 233)
-        self.assertEqual(df["Frame"].iloc[-1], 12625)
-        self.assertAlmostEqual(df["Cx"].iloc[0], 62.74)
-        self.assertAlmostEqual(df["Cy"].iloc[0], 178.764)
+        self.assertEqual(metadatos["cantidad_columnas_ignoradas"], 11)
+        self.assertEqual(df["Frame"].tolist(), [1, 101])
+        self.assertEqual(df["Cx"].tolist(), [9, 109])
         self.assertEqual(metadatos["grupos_columnas"]["Cx"], "AMTI-AP - CoP")
         self.assertFalse(any("EMG" in columna.upper() for columna in df.columns))
         self.assertTrue(all(np.issubdtype(tipo, np.number) for tipo in df.dtypes))
@@ -957,6 +993,29 @@ class TestRegistroFormulas(unittest.TestCase):
         )
 
         self.assertEqual(destinos, ["Fz", "Fx", "Fy"])
+
+    def test_senal_del_intervalo_expande_la_seleccion_a_cada_replica(self):
+        seleccionado = {
+            "id": "Fz::1",
+            "columna": "Fz",
+            "indice_color": 6,
+        }
+        disponibles = [
+            seleccionado,
+            {"id": "Fx::2", "columna": "Fx", "indice_color": 6},
+            {"id": "Fy::4", "columna": "Fy", "indice_color": 6},
+            {"id": "Mz::1", "columna": "Mz", "indice_color": 7},
+        ]
+
+        expandidos = formulas.expandir_intervalos_replicados(
+            [seleccionado],
+            disponibles,
+        )
+
+        self.assertEqual(
+            [intervalo["id"] for intervalo in expandidos],
+            ["Fz::1", "Fx::2", "Fy::4"],
+        )
 
     def test_senal_del_intervalo_no_copia_su_curva_a_otra_senal(self):
         seleccionado = {

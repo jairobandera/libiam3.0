@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pandas as pd
+import numpy as np
 
 
 DEPENDENCIAS_UI = all(
@@ -142,6 +143,114 @@ class TestInteraccionGrafica(unittest.TestCase):
         self.assertEqual(
             [intervalo["id"] for intervalo in seleccionados],
             ["Fz::1"],
+        )
+
+    def test_senal_del_intervalo_calcula_cada_replica_visible(self):
+        class GraficaVisible:
+            @staticmethod
+            def isHidden():
+                return False
+
+        intervalos = [
+            {
+                "id": "Fz::1", "columna": "Fz", "desde": 10, "hasta": 20,
+                "indice_color": 5, "es_subintervalo": False,
+            },
+            {
+                "id": "Fx::2", "columna": "Fx", "desde": 10, "hasta": 20,
+                "indice_color": 5, "es_subintervalo": False,
+            },
+            {
+                "id": "Fy::3", "columna": "Fy", "desde": 10, "hasta": 20,
+                "indice_color": 5, "es_subintervalo": False,
+            },
+        ]
+        por_id = {intervalo["id"]: intervalo for intervalo in intervalos}
+        area = SimpleNamespace(
+            graficas_por_columna={
+                columna: GraficaVisible() for columna in ("Fx", "Fy", "Fz")
+            },
+            _buscar_intervalo=lambda identificador: por_id.get(identificador),
+            _intervalos_para_panel=lambda: intervalos,
+        )
+
+        seleccionados = AreaCentralGraficas._intervalos_seleccionados(
+            area,
+            ["Fz::1"],
+            preservar_por_senal=True,
+        )
+
+        self.assertEqual(
+            {intervalo["id"] for intervalo in seleccionados},
+            {"Fx::2", "Fy::3", "Fz::1"},
+        )
+
+    def test_una_formula_con_senal_dibuja_un_resultado_distinto_por_replica(self):
+        from logica import formulas
+
+        clave = "senal_replicada_test"
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave,
+                "nombre": "Señal duplicada",
+                "expresion": "senal * 2",
+                "unidad": "N",
+            }
+        )
+        self.addCleanup(formulas.quitar_formula_personalizada, clave)
+
+        area = AreaCentralGraficas()
+        self.addCleanup(area.close)
+        area.cargar_dataframe(
+            "replicas.csv",
+            pd.DataFrame(
+                {
+                    "Frame": [0, 1, 2],
+                    "Fx": [1.0, 2.0, 3.0],
+                    "Fy": [10.0, 20.0, 30.0],
+                    "Fz": [100.0, 200.0, 300.0],
+                }
+            ),
+            {
+                "deteccion": {
+                    "mapeo": {
+                        "Fuerza": {
+                            "eje_x": "Fx",
+                            "eje_y": "Fy",
+                            "eje_z": "Fz",
+                        }
+                    }
+                }
+            },
+        )
+        for columna in ("Fx", "Fy", "Fz"):
+            area.gestores_intervalos[columna].agregar(
+                0,
+                2,
+                indice_color=4,
+            )
+
+        self.assertTrue(
+            area.aplicar_formula(
+                {"clave": clave, "intervalos": ["Fz::1"]},
+                avisar=False,
+                actualizar_vista=False,
+            )
+        )
+        calculo = area._calculos_formulas[clave]
+
+        self.assertEqual(set(calculo["por_grafica"]), {"Fx", "Fy", "Fz"})
+        np.testing.assert_allclose(
+            calculo["por_grafica"]["Fx"]["segmentos"][0][1],
+            [2.0, 4.0, 6.0],
+        )
+        np.testing.assert_allclose(
+            calculo["por_grafica"]["Fy"]["segmentos"][0][1],
+            [20.0, 40.0, 60.0],
+        )
+        np.testing.assert_allclose(
+            calculo["por_grafica"]["Fz"]["segmentos"][0][1],
+            [200.0, 400.0, 600.0],
         )
 
     def test_el_panel_principal_envia_solo_intervalos_padre(self):

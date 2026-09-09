@@ -61,6 +61,7 @@ class PanelIzquierdo(QFrame):
     def init_ui(self):
 
         layout = QVBoxLayout()
+        self.layout_principal = layout
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
@@ -83,12 +84,78 @@ class PanelIzquierdo(QFrame):
         # Sin archivo cargado las variables propias del CSV están deshabilitadas.
         self._set_variables_archivo_habilitadas(False)
 
+    def ajustar_modo(self, ancho, compacto=False, muy_compacto=False):
+        """Ajusta el panel lateral al ancho lógico disponible."""
+        ancho = max(160, int(ancho))
+        self.setFixedWidth(ancho)
+        margen = 8 if compacto else 12
+        for layout in (
+            self.layout_botones,
+            self.layout_variables,
+            self.layout_arbol,
+            self.layout_info,
+        ):
+            layout.setContentsMargins(margen, margen, margen, margen)
+        extremo = ancho < 180
+        self.lbl_masa.setText("Masa")
+        self.lbl_estatura.setText("Altura" if extremo else "Estatura")
+        self.lbl_gravedad.setText("Grav." if extremo else "Gravedad")
+        self.lbl_estatura.setToolTip("Estatura en metros")
+        self.lbl_gravedad.setToolTip("Gravedad")
+        ancho_etiqueta = 45 if extremo else 60 if muy_compacto else 62
+        for etiqueta in self.etiquetas_variables:
+            etiqueta.setFixedWidth(ancho_etiqueta)
+        self.btn_guardar_masa.setText("Guardar")
+        self.btn_guardar_estatura.setText("Guardar")
+        self.btn_guardar_masa.setToolTip("Guardar masa")
+        self.btn_guardar_estatura.setToolTip("Guardar estatura")
+        if not self.input_gravedad.isReadOnly():
+            self.btn_editar_gravedad.setText("Aceptar")
+        self.btn_cargar.setText("Cargar CSV" if compacto else "Cargar archivo CSV")
+        self.seccion_arbol.setMaximumHeight(
+            205 if muy_compacto else 250 if compacto else 300
+        )
+
+    def reiniciar_sesion(self):
+        """Limpia únicamente los archivos y valores de la sesión visible."""
+        if self._hilo_carga is not None and self._hilo_carga.isRunning():
+            return False
+        self.btn_intervalo.setChecked(False)
+        self.archivos_cargados = {}
+        self.archivo_actual = {}
+        self.cargador.ruta_archivo_actual = None
+        self._dialogo_carga = None
+        self._hilo_carga = None
+        self._trabajador_carga = None
+        self._ruta_carga = None
+        self._resultado_carga = None
+        self._info_resultado_carga = None
+        self._error_carga = None
+        self.arbol.clear()
+        item_vacio = QTreeWidgetItem(self.arbol, ["Ningún archivo cargado"])
+        item_vacio.setFlags(Qt.NoItemFlags)
+        self.lbl_nombre_archivo.setText("Nombre: ---")
+        self.lbl_columnas.setText("Columnas: ---")
+        self.lbl_tipo_datos.setText("Tipo de datos: ---")
+        self.lbl_subframes.setText("Subframes: ---")
+        self.lbl_registros.setText("Registros: ---")
+        self.masa_actual = None
+        self.estatura_actual = None
+        self.gravedad = self.GRAVEDAD_TIERRA
+        self.input_gravedad.setText(f"{self.GRAVEDAD_TIERRA:g}")
+        self.input_gravedad.setReadOnly(True)
+        self.btn_editar_gravedad.setText("Editar")
+        self._set_variables_archivo_habilitadas(False)
+        self._emitir_variables()
+        return True
+
     def crear_seccion_botones(self):
 
         frame = QFrame()
         frame.setObjectName("seccionBotones")
 
         layout = QVBoxLayout()
+        self.layout_botones = layout
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
@@ -118,6 +185,7 @@ class PanelIzquierdo(QFrame):
         frame.setObjectName("seccionVariables")
 
         layout = QVBoxLayout()
+        self.layout_variables = layout
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
@@ -130,6 +198,7 @@ class PanelIzquierdo(QFrame):
         fila_masa.setSpacing(6)
 
         lbl_masa = QLabel("Masa")
+        self.lbl_masa = lbl_masa
         lbl_masa.setObjectName("varLabel")
         lbl_masa.setFixedWidth(60)
 
@@ -159,6 +228,7 @@ class PanelIzquierdo(QFrame):
         fila_estatura.setSpacing(6)
 
         lbl_estatura = QLabel("Estatura")
+        self.lbl_estatura = lbl_estatura
         lbl_estatura.setObjectName("varLabel")
         lbl_estatura.setFixedWidth(60)
 
@@ -188,6 +258,7 @@ class PanelIzquierdo(QFrame):
         fila_gravedad.setSpacing(6)
 
         lbl_gravedad = QLabel("Gravedad")
+        self.lbl_gravedad = lbl_gravedad
         lbl_gravedad.setObjectName("varLabel")
         lbl_gravedad.setFixedWidth(60)
 
@@ -208,6 +279,11 @@ class PanelIzquierdo(QFrame):
         layout.addLayout(fila_gravedad)
 
         frame.setLayout(layout)
+        self.etiquetas_variables = [
+            self.lbl_masa,
+            self.lbl_estatura,
+            self.lbl_gravedad,
+        ]
         return frame
 
     def _crear_validador_numerico(self):
@@ -437,6 +513,7 @@ class PanelIzquierdo(QFrame):
         frame.setMaximumHeight(300)
 
         layout = QVBoxLayout()
+        self.layout_arbol = layout
         layout.setContentsMargins(12, 8, 12, 12)
         layout.setSpacing(6)
 
@@ -466,6 +543,7 @@ class PanelIzquierdo(QFrame):
         frame.setObjectName("seccionInfo")
 
         layout = QVBoxLayout()
+        self.layout_info = layout
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(6)
 
@@ -477,18 +555,23 @@ class PanelIzquierdo(QFrame):
 
         self.lbl_nombre_archivo = QLabel("Nombre: ---")
         self.lbl_nombre_archivo.setObjectName("infoLabel")
+        self.lbl_nombre_archivo.setWordWrap(True)
 
         self.lbl_columnas = QLabel("Columnas: ---")
         self.lbl_columnas.setObjectName("infoLabel")
+        self.lbl_columnas.setWordWrap(True)
 
         self.lbl_tipo_datos = QLabel("Tipo de datos: ---")
         self.lbl_tipo_datos.setObjectName("infoLabel")
+        self.lbl_tipo_datos.setWordWrap(True)
 
         self.lbl_subframes = QLabel("Subframes: ---")
         self.lbl_subframes.setObjectName("infoLabel")
+        self.lbl_subframes.setWordWrap(True)
 
         self.lbl_registros = QLabel("Registros: ---")
         self.lbl_registros.setObjectName("infoLabel")
+        self.lbl_registros.setWordWrap(True)
 
         grid.addWidget(self.lbl_nombre_archivo)
         grid.addWidget(self.lbl_columnas)

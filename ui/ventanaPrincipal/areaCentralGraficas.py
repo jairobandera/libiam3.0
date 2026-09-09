@@ -192,6 +192,24 @@ class GraficaSenal(pg.PlotWidget):
             vista.setGeometry(rectangulo)
             vista.linkedViewChanged(self.plotItem.vb, vista.XAxis)
 
+    def resizeEvent(self, event):
+        """Reserva menos espacio al eje cuando la gráfica queda angosta."""
+        super().resizeEvent(event)
+        # PlotWidget puede disparar resizeEvent mientras su constructor todavía
+        # no creó plotItem. En ese instante no hay un eje que ajustar.
+        plot_item = getattr(self, "plotItem", None)
+        if plot_item is None:
+            return
+        if self.width() < 480:
+            ancho_eje = 76
+        elif self.width() < 720:
+            ancho_eje = 88
+        else:
+            ancho_eje = 100
+        eje = plot_item.getAxis("left")
+        eje.setStyle(tickTextWidth=max(58, ancho_eje - 18))
+        eje.setWidth(ancho_eje)
+
     def set_datos(self, x, y_original, y_filtrada=None):
         self.x = np.asarray(x, dtype=float)
         self.y_original = np.asarray(y_original, dtype=float)
@@ -1053,6 +1071,48 @@ class AreaCentralGraficas(QFrame):
         self.fuenteDatosCambiada.emit(False)
         self._crear_graficas()
         self._actualizar_visibilidad()
+
+    def reiniciar_sesion(self):
+        """Descarta el análisis visible y vuelve al estado sin CSV cargado."""
+        for ventana in list(self._ventanas_region):
+            ventana.close()
+        self._ventanas_region = []
+        self.modo_seleccion_intervalo = False
+        self.nombre_archivo = None
+        self.df_original = None
+        self.df_grafica_original = None
+        self.df_grafica = None
+        self.columna_x = None
+        self.mapeo_actual = None
+        self.unidades = {}
+        self.frecuencia_grafica = None
+        self.gestores_intervalos = {}
+        self.subgestores = {}
+        self.notas = {}
+        self.columnas_filtradas = set()
+        self.filtros_por_columna = {}
+        self.configuraciones_filtro_por_columna = {}
+        self.aplicar_corte_todas = False
+        self.formulas_activas = {}
+        self._calculos_formulas = {}
+        self.formulas_subintervalos_activas = {}
+        self._calculos_formulas_subintervalos = {}
+        self.nivel_calculo_visible = "intervalos"
+        self._ultimo_error_formula = ""
+        self.formula_activa = None
+        self.masa_sujeto = None
+        self.estatura_sujeto = None
+        self.gravedad = 9.8
+        self.fuente_calculo = FUENTE_FILTRADA
+        self._limpiar_graficas()
+        self._mostrar_placeholder("Cargá un archivo CSV.")
+        self.scroll.verticalScrollBar().setValue(0)
+        self.intervalosCambiados.emit([])
+        self.resultadosFormulaCambiaron.emit(None)
+        self.senalesDisponiblesCambiaron.emit([])
+        self.variablesFormulaCambiaron.emit([])
+        self.fuenteDatosCambiada.emit(False)
+        self.formulaEstadoCambiado.emit(False, "")
 
     def actualizar_mapeo(self, mapeo):
         self.mapeo_actual = mapeo
@@ -2542,11 +2602,27 @@ class AreaCentralGraficas(QFrame):
                 continue
             intervalos.append(datos)
 
-        # Las fórmulas generales no repiten un mismo intervalo. Las que usan
-        # «Señal del intervalo» sí lo conservan por columna porque los datos cambian.
+        if preservar_por_senal:
+            visibles = []
+            for candidato in self._intervalos_para_panel():
+                grafica = self.graficas_por_columna.get(candidato.get("columna"))
+                if (
+                    not candidato.get("es_subintervalo")
+                    and grafica is not None
+                    and not grafica.isHidden()
+                ):
+                    visibles.append(candidato)
+            intervalos = formulas.expandir_intervalos_replicados(
+                intervalos,
+                visibles,
+            )
+
         vistos = set()
         unicos = []
-        for datos in sorted(intervalos, key=lambda d: (d["desde"], d["hasta"])):
+        for datos in sorted(
+            intervalos,
+            key=lambda d: (d["desde"], d["hasta"], str(d.get("columna") or "")),
+        ):
             clave = (datos["desde"], datos["hasta"])
             if preservar_por_senal:
                 clave += (datos.get("columna"),)
@@ -2658,6 +2734,7 @@ class AreaCentralGraficas(QFrame):
                 avisar,
             )
         desc = formulas.descripcion_formula(clave)
+        usa_senal_intervalo = bool(desc.get("usa_senal_intervalo"))
         aplicaciones_propuestas = formulas.registrar_aplicacion_formula(
             self.formulas_activas, configuracion
         )
@@ -2666,7 +2743,7 @@ class AreaCentralGraficas(QFrame):
 
         intervalos = self._intervalos_seleccionados(
             seleccionados,
-            preservar_por_senal=desc.get("usa_senal_intervalo", False),
+            preservar_por_senal=usa_senal_intervalo,
         )
         if not intervalos:
             return self._rechazar_aplicacion_formula(
@@ -2674,6 +2751,13 @@ class AreaCentralGraficas(QFrame):
                 f"{formulas.nombre_con_articulo(desc)}.",
                 avisar,
             )
+
+        if usa_senal_intervalo:
+            configuracion = dict(configuracion)
+            configuracion["intervalos"] = [
+                intervalo["id"] for intervalo in intervalos
+            ]
+            aplicaciones_propuestas[clave] = configuracion
 
         try:
             columna_salida, resultados, _tramos, advertencias, segmentos = (
@@ -2692,7 +2776,6 @@ class AreaCentralGraficas(QFrame):
         intervalo_por_id = {
             intervalo.get("id"): intervalo for intervalo in intervalos
         }
-        usa_senal_intervalo = bool(desc.get("usa_senal_intervalo"))
         intervalos_visibles = []
         for candidato in self._intervalos_para_panel():
             grafica_candidata = self.graficas_por_columna.get(

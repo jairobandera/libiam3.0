@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -22,6 +23,10 @@ from PySide6.QtWidgets import (
 )
 
 from logica import formulas as formulas_logica
+from logica.interfaz_adaptativa import (
+    configurar_geometria_persistente,
+    guardar_geometria,
+)
 from ui.ventanaPrincipal.panelDerecho.vistaFormula import VistaFormulaMatematica
 
 
@@ -56,6 +61,8 @@ class ConstructorFormula(QDialog):
     # Margen para el marco y la barra de título que dibuja el sistema sobre
     # el área disponible (availableGeometry ya excluye la barra de tareas).
     MARGEN_DECORACION = 40
+    CLAVE_GEOMETRIA = "constructor_formula/geometria"
+    CLAVE_DIVISION = "constructor_formula/division"
 
     def __init__(
         self,
@@ -72,11 +79,20 @@ class ConstructorFormula(QDialog):
         )
         self.setObjectName("constructorFormulaDialog")
         self.setModal(True)
-        ancho, alto = self._tamaño_inicial()
-        self.resize(ancho, alto)
-        minimo_ancho, minimo_alto = self._tamaño_minimo_pantalla()
-        self.setMinimumSize(minimo_ancho, minimo_alto)
+        self._orientacion_actual = None
         self._crear_ui()
+        _, self._ajustes = configurar_geometria_persistente(
+            self,
+            self.CLAVE_GEOMETRIA,
+            ideal=self.TAMANO_IDEAL,
+            minimo=self.TAMANO_MINIMO,
+            margen=self.MARGEN_DECORACION,
+            piso=self.PISO_ABSOLUTO,
+        )
+        division = self._ajustes.value(self.CLAVE_DIVISION)
+        if division and self.separador.restoreState(division):
+            self._orientacion_actual = self.separador.orientation()
+        self._ajustar_diseno_adaptativo()
         self._cargar_formula()
         self._validar()
         self.input_expresion.setFocus()
@@ -159,8 +175,15 @@ class ConstructorFormula(QDialog):
         scroll_editor.viewport().setObjectName("viewportEditorFormula")
         scroll_editor.setWidget(columna_editor)
 
-        cuerpo_layout.addWidget(scroll_editor, 3)
-        cuerpo_layout.addWidget(self._crear_paleta(), 2)
+        self.scroll_editor = scroll_editor
+        self.paleta = self._crear_paleta()
+        self.separador = QSplitter(Qt.Horizontal)
+        self.separador.setObjectName("separadorConstructorFormula")
+        self.separador.setChildrenCollapsible(False)
+        self.separador.setHandleWidth(6)
+        self.separador.addWidget(self.scroll_editor)
+        self.separador.addWidget(self.paleta)
+        cuerpo_layout.addWidget(self.separador, 1)
         cuerpo.setLayout(cuerpo_layout)
         principal.addWidget(cuerpo, 1)
 
@@ -389,7 +412,7 @@ class ConstructorFormula(QDialog):
 
     def _crear_paleta(self):
         marco, layout = self._tarjeta("Añadí piezas")
-        marco.setMinimumWidth(350)
+        marco.setMinimumWidth(280)
         self.tabs_constructor = QTabWidget()
         self.tabs_constructor.setObjectName("tabsConstructorFormula")
         self.tabs_constructor.addTab(
@@ -403,6 +426,44 @@ class ConstructorFormula(QDialog):
         )
         layout.addWidget(self.tabs_constructor, 1)
         return marco
+
+    def _ajustar_diseno_adaptativo(self):
+        if not hasattr(self, "separador"):
+            return
+        orientacion = Qt.Vertical if self.width() < 820 else Qt.Horizontal
+        if orientacion == self._orientacion_actual:
+            return
+        self._orientacion_actual = orientacion
+        self.separador.setOrientation(orientacion)
+        if orientacion == Qt.Vertical:
+            self.scroll_editor.setMinimumWidth(0)
+            self.paleta.setMinimumWidth(0)
+            self.paleta.setMinimumHeight(170)
+            self.separador.setSizes([max(240, self.height() * 3 // 5), 220])
+        else:
+            self.scroll_editor.setMinimumWidth(320)
+            self.paleta.setMinimumWidth(280)
+            self.paleta.setMinimumHeight(0)
+            self.separador.setSizes([620, 380])
+
+    def _guardar_estado_ventana(self):
+        if not hasattr(self, "_ajustes"):
+            return
+        self._ajustes.setValue(self.CLAVE_DIVISION, self.separador.saveState())
+        self._ajustes.sync()
+        guardar_geometria(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._ajustar_diseno_adaptativo()
+
+    def closeEvent(self, event):
+        self._guardar_estado_ventana()
+        super().closeEvent(event)
+
+    def done(self, resultado):
+        self._guardar_estado_ventana()
+        super().done(resultado)
 
     @staticmethod
     def _envolver_tab(contenido):

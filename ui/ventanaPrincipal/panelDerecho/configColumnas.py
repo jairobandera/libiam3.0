@@ -192,6 +192,18 @@ class ConfigColumnas(QFrame):
 
         self.generar_filas_mapeo("Todos")
 
+    def reiniciar_sesion(self):
+        self.mapeo.inicializar({}, [])
+        self._orden_filas = {}
+        self.lbl_deteccion.setText("Cargá un archivo CSV.")
+        self.lbl_deteccion.setObjectName("lblDeteccion")
+        self.cmb_tipo_dato.blockSignals(True)
+        self.cmb_tipo_dato.clear()
+        self.cmb_tipo_dato.addItem("Todos")
+        self.cmb_tipo_dato.blockSignals(False)
+        self.lista_filas.clear()
+        self.lbl_columnas.clear()
+
     def generar_filas_mapeo(self, tipo_filtro):
         """Genera las filas de mapeo como items nativos reordenables.
 

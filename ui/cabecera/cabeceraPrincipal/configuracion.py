@@ -8,10 +8,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
 from logica import accesibilidad, proyecto
+from logica.interfaz_adaptativa import configurar_geometria_persistente
 
 
 class ConfiguracionDialog(QDialog):
@@ -39,11 +42,18 @@ class ConfiguracionDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Configuración")
         self.setModal(True)
-        self.setMinimumWidth(440)
         self._init_ui(superposicion, no_preguntar)
+        configurar_geometria_persistente(
+            self,
+            "dialogos/configuracion/geometria",
+            ideal=(540, 650),
+            minimo=(380, 360),
+            piso=(300, 240),
+        )
 
     def _init_ui(self, superposicion, no_preguntar):
-        layout = QVBoxLayout()
+        contenido = QWidget()
+        layout = QVBoxLayout(contenido)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
 
@@ -195,7 +205,14 @@ class ConfiguracionDialog(QDialog):
         botones.addWidget(btn_cerrar)
         layout.addLayout(botones)
 
-        self.setLayout(layout)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(contenido)
+        principal = QVBoxLayout(self)
+        principal.setContentsMargins(0, 0, 0, 0)
+        principal.addWidget(scroll)
 
         self.chk_superposicion.toggled.connect(self._on_superposicion)
         self.chk_no_preguntar.toggled.connect(self.noPreguntarSuperposicionCambiada.emit)

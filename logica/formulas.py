@@ -965,6 +965,36 @@ def usar_intervalos_como_recortes(intervalos, columna, senal):
     return resultado
 
 
+def expandir_intervalos_replicados(intervalos, intervalos_disponibles):
+    """Incluye las copias de cada intervalo replicado en otras señales."""
+    resultado = list(intervalos or ())
+    grupos = set()
+    for intervalo in resultado:
+        try:
+            indice = int(intervalo.get("indice_color") or 0)
+        except (TypeError, ValueError):
+            indice = 0
+        if indice > 0 and not intervalo.get("es_subintervalo"):
+            grupos.add(indice)
+
+    if not grupos:
+        return resultado
+
+    ids = {intervalo.get("id") for intervalo in resultado}
+    for candidato in intervalos_disponibles or ():
+        if candidato.get("es_subintervalo"):
+            continue
+        try:
+            indice = int(candidato.get("indice_color") or 0)
+        except (TypeError, ValueError):
+            continue
+        identificador = candidato.get("id")
+        if indice in grupos and identificador not in ids:
+            resultado.append(candidato)
+            ids.add(identificador)
+    return resultado
+
+
 def destinos_visuales_formula(
     intervalo,
     columna_salida,

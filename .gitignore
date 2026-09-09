@@ -25,3 +25,6 @@ Thumbs.db
 # Archivos temporales
 *.tmp
 *.bak
+
+# Archivo de validación grande; se conserva fuera del repositorio
+/utilidades/resources/EmilianoAmericanoCM.csv

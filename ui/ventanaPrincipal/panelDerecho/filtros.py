@@ -232,6 +232,29 @@ class Filtros(QFrame):
         self.lbl_estado.clear()
         self._actualizar_resumen()
 
+    def reiniciar_sesion(self):
+        self.info_actual = {}
+        self.frecuencia_detectada = None
+        self.clave_archivo_actual = None
+        self.frecuencias_por_archivo = {}
+        self.senales_disponibles = []
+        self.senal_objetivo.blockSignals(True)
+        self.senal_objetivo.clear()
+        self.senal_objetivo.addItem("Cargá un archivo CSV", None)
+        self.senal_objetivo.setEnabled(False)
+        self.senal_objetivo.blockSignals(False)
+        self.tipo_filtro.setCurrentIndex(0)
+        self.orden.setValue(4)
+        self.fs_control.blockSignals(True)
+        self.fs_control.setValue(0)
+        self.fs_control.blockSignals(False)
+        self.lbl_frecuencia.setText("Cargá un archivo para habilitar el filtro.")
+        self.lbl_resumen.clear()
+        self.lbl_estado.clear()
+        self.btn_aplicar.setEnabled(False)
+        self.btn_restaurar.setEnabled(False)
+        self.frecuenciaCambiada.emit(0.0)
+
     def frecuencia_original_para_proyecto(self):
         """Frecuencia de adquisición escrita por el usuario, si es válida."""
         valor = float(self.fs_control.value())

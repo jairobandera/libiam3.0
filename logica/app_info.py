@@ -15,6 +15,7 @@ AUTORES = (
 )
 INSTITUCION = "Universidad Tecnológica (UTEC)"
 LABORATORIO = "Laboratorio de Investigación en Biomecánica y Análisis del Movimiento (LIBiAM)"
+LABORATORIO_CORTO = "LIBiAM — UTEC"
 
 
 NOMBRE = f"{NOMBRE_BASE} {VERSION}"

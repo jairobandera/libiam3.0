@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from logica.lector_csv import leer_csv_rapido
+from logica.interfaz_adaptativa import configurar_geometria_persistente
 
 
 class TrabajadorCargaCSV(QObject):
@@ -43,10 +44,16 @@ class CargaCSVDialog(QDialog):
         self.setObjectName("dialogoCargaCSV")
         self.setWindowTitle("Cargando CSV")
         self.setModal(True)
-        self.setFixedWidth(460)
         self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
         self.setWindowFlag(Qt.WindowCloseButtonHint, False)
         self._crear_interfaz(os.path.basename(ruta_archivo))
+        configurar_geometria_persistente(
+            self,
+            "dialogos/carga_csv/geometria",
+            ideal=(460, 230),
+            minimo=(320, 190),
+            piso=(280, 180),
+        )
 
     def _crear_interfaz(self, nombre_archivo):
         layout = QVBoxLayout(self)

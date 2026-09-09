@@ -2,6 +2,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QComboBox,
     QCheckBox,
@@ -74,7 +75,8 @@ class DetectarCabeceras(QFrame):
         self.scroll_detectadas.setWidget(self.contenedor_detectadas)
         self.scroll_detectadas.setWidgetResizable(True)
         self.scroll_detectadas.setFrameShape(QFrame.NoFrame)
-        self.scroll_detectadas.setFixedHeight(500)
+        self.scroll_detectadas.setMinimumHeight(140)
+        self.scroll_detectadas.setMaximumHeight(320)
         self.scroll_detectadas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         layout.addWidget(lbl_titulo)
@@ -108,7 +110,8 @@ class DetectarCabeceras(QFrame):
         self.scroll_sin_asignar.setWidget(self.contenedor_sin_asignar)
         self.scroll_sin_asignar.setWidgetResizable(True)
         self.scroll_sin_asignar.setFrameShape(QFrame.NoFrame)
-        self.scroll_sin_asignar.setFixedHeight(200)
+        self.scroll_sin_asignar.setMinimumHeight(120)
+        self.scroll_sin_asignar.setMaximumHeight(260)
         self.scroll_sin_asignar.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         layout.addWidget(lbl_titulo)
@@ -180,6 +183,15 @@ class DetectarCabeceras(QFrame):
         self.renderizar_detectadas()
         self.renderizar_sin_asignar()
 
+    def reiniciar_sesion(self):
+        self.df_actual = None
+        self.ruta_archivo_actual = None
+        self.cabeceras_detectadas = []
+        self.cabeceras_sin_asignar = []
+        self.secciones_pendientes = []
+        self.renderizar_detectadas()
+        self.renderizar_sin_asignar()
+
     def renderizar_detectadas(self):
         while self.layout_detectadas.count():
             hijo = self.layout_detectadas.takeAt(0)
@@ -238,13 +250,13 @@ class DetectarCabeceras(QFrame):
         frame = QFrame()
         frame.setObjectName("filaMapeo")
 
-        layout = QHBoxLayout()
+        layout = QGridLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
         label_nombre = QLabel(nombre_columna)
         label_nombre.setObjectName("lblColumnaCSV")
-        label_nombre.setMinimumWidth(100)
+        label_nombre.setWordWrap(True)
 
         cmb_tipo = QComboBox()
         cmb_tipo.setObjectName("cmbTipo")
@@ -266,16 +278,17 @@ class DetectarCabeceras(QFrame):
         btn_guardar = QPushButton("Guardar")
         btn_guardar.setObjectName("btnAplicarMapeo")
         btn_guardar.setCursor(Qt.PointingHandCursor)
-        btn_guardar.setFixedWidth(70)
         btn_guardar.clicked.connect(
             lambda checked, col=nombre_columna, ct=cmb_tipo, ce=cmb_eje:
             self.guardar_alias(col, ct, ce)
         )
 
-        layout.addWidget(label_nombre)
-        layout.addWidget(cmb_tipo, 1)
-        layout.addWidget(cmb_eje, 1)
-        layout.addWidget(btn_guardar)
+        layout.addWidget(label_nombre, 0, 0, 1, 2)
+        layout.addWidget(cmb_tipo, 1, 0)
+        layout.addWidget(cmb_eje, 1, 1)
+        layout.addWidget(btn_guardar, 2, 0, 1, 2)
+        layout.setColumnStretch(0, 1)
+        layout.setColumnStretch(1, 1)
 
         frame.setLayout(layout)
         return frame

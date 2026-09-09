@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from logica import app_info
+from logica.interfaz_adaptativa import configurar_geometria_persistente
 
 
 class AcercaDeDialog(QDialog):
@@ -17,8 +18,14 @@ class AcercaDeDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Acerca de {app_info.NOMBRE}")
         self.setModal(True)
-        self.setMinimumWidth(620)
         self._init_ui()
+        configurar_geometria_persistente(
+            self,
+            "dialogos/acerca_de/geometria",
+            ideal=(680, 460),
+            minimo=(420, 340),
+            piso=(300, 260),
+        )
 
     def _init_ui(self):
         layout = QVBoxLayout()
@@ -29,6 +36,7 @@ class AcercaDeDialog(QDialog):
         titulo.setStyleSheet("font-size: 22px; font-weight: 700;")
         nombre_completo = QLabel(app_info.NOMBRE_COMPLETO)
         nombre_completo.setStyleSheet("font-size: 14px; color: #B0B0B0;")
+        nombre_completo.setWordWrap(True)
 
         informacion = QLabel(
             f"<b>Versión:</b> {app_info.VERSION}<br>"

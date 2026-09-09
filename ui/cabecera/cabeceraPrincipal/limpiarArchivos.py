@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from logica import proyecto
+from logica.interfaz_adaptativa import configurar_geometria_persistente
 
 
 class LimpiarArchivosDialog(QDialog):
@@ -34,11 +35,17 @@ class LimpiarArchivosDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Limpiar archivos guardados")
         self.setModal(True)
-        self.setMinimumWidth(500)
         self.setObjectName("dialogoLimpiar")
         self.proyectos = []
         self._poblando = False
         self._init_ui()
+        configurar_geometria_persistente(
+            self,
+            "dialogos/limpiar_archivos/geometria",
+            ideal=(620, 500),
+            minimo=(380, 340),
+            piso=(300, 260),
+        )
         self._recargar()
 
     def _init_ui(self):
@@ -69,7 +76,7 @@ class LimpiarArchivosDialog(QDialog):
 
         self.lista = QListWidget()
         self.lista.setObjectName("listaLimpiar")
-        self.lista.setMinimumHeight(200)
+        self.lista.setMinimumHeight(130)
         # Los nombres largos se recortan con «…» (el completo va en el tooltip)
         # en vez de sacar una barra horizontal.
         self.lista.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

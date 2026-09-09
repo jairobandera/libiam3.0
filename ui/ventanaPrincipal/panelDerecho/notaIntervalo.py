@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from logica.interfaz_adaptativa import configurar_geometria_persistente
+
 
 class NotaDialog(QDialog):
     """Editor de una nota breve para un intervalo o sub-intervalo, con contador."""
@@ -19,8 +21,14 @@ class NotaDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Nota del intervalo")
         self.setModal(True)
-        self.setMinimumWidth(420)
         self._init_ui(nombre, nota)
+        configurar_geometria_persistente(
+            self,
+            "dialogos/nota_intervalo/geometria",
+            ideal=(520, 360),
+            minimo=(340, 260),
+            piso=(290, 230),
+        )
 
     def _init_ui(self, nombre, nota):
         layout = QVBoxLayout()
@@ -34,7 +42,7 @@ class NotaDialog(QDialog):
 
         self.editor = QPlainTextEdit()
         self.editor.setPlainText(nota or "")
-        self.editor.setMinimumHeight(120)
+        self.editor.setMinimumHeight(100)
         layout.addWidget(self.editor)
 
         self.lbl_contador = QLabel()

@@ -16,10 +16,16 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QLineEdit,
     QFrame,
+    QGridLayout,
     QStyle,
 )
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QIcon
+
+from logica.interfaz_adaptativa import (
+    configurar_geometria_persistente,
+    guardar_geometria,
+)
 
 PALETA_COLORES = [
     QColor(0, 120, 0),
@@ -133,6 +139,8 @@ class ModeloCSV(QAbstractTableModel):
 
 class VentanaEditorCSV(QDialog):
     aliasesGuardados = Signal(object)
+    CLAVE_GEOMETRIA = "editor_csv/geometria"
+    CLAVE_DIVISION = "editor_csv/division"
 
     def __init__(self, df, db_session, ruta_archivo, parent=None):
         super().__init__(parent)
@@ -140,14 +148,25 @@ class VentanaEditorCSV(QDialog):
         self.db_session = db_session
         self.ruta_archivo = ruta_archivo
         self.setWindowTitle("Editor CSV - Asignar Cabeceras")
-        self.resize(1200, 700)
         self.setWindowFlags(self.windowFlags() | Qt.WindowMaximizeButtonHint)
         self.cambios_pendientes = []
         self.secciones_pendientes = []
         self.fila_seleccionada = None
         self.click_numero = 0
         self.celdas_asignadas = set()
+        self._orientacion_listas = None
         self.init_ui()
+        _, self._ajustes = configurar_geometria_persistente(
+            self,
+            self.CLAVE_GEOMETRIA,
+            ideal=(1200, 700),
+            minimo=(700, 480),
+            piso=(560, 400),
+        )
+        division = self._ajustes.value(self.CLAVE_DIVISION)
+        if division and self.separador_listas.restoreState(division):
+            self._orientacion_listas = self.separador_listas.orientation()
+        self._ajustar_diseno_adaptativo()
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -173,16 +192,15 @@ class VentanaEditorCSV(QDialog):
         layout.addWidget(self.seccion_controles)
 
         # Secciones definidas + Cabeceras asignadas, lado a lado
-        paneles_layout = QHBoxLayout()
-        paneles_layout.setSpacing(8)
-
         self.seccion_lista = self.crear_lista_secciones()
-        paneles_layout.addWidget(self.seccion_lista, 3)
-
         self.cambios_lista = self.crear_lista_cambios()
-        paneles_layout.addWidget(self.cambios_lista, 2)
-
-        layout.addLayout(paneles_layout)
+        self.separador_listas = QSplitter(Qt.Horizontal)
+        self.separador_listas.setChildrenCollapsible(False)
+        self.separador_listas.setHandleWidth(6)
+        self.separador_listas.addWidget(self.seccion_lista)
+        self.separador_listas.addWidget(self.cambios_lista)
+        self.separador_listas.setSizes([600, 400])
+        layout.addWidget(self.separador_listas)
 
         self.tabla = QTableView()
         self.modelo_tabla = ModeloCSV(self.df, self.tabla)
@@ -223,26 +241,25 @@ class VentanaEditorCSV(QDialog):
 
     def crear_controles_secciones(self):
         group = QGroupBox("Definir nueva sección")
-        layout = QHBoxLayout()
+        layout = QGridLayout()
         layout.setContentsMargins(10, 10, 10, 10)
 
-        layout.addWidget(QLabel("Fila cabecera:"))
+        layout.addWidget(QLabel("Fila cabecera:"), 0, 0)
         self.txt_fila_cabecera = QLineEdit()
         self.txt_fila_cabecera.setFixedWidth(60)
-        layout.addWidget(self.txt_fila_cabecera)
+        layout.addWidget(self.txt_fila_cabecera, 0, 1)
 
-        layout.addWidget(QLabel("Fila fin:"))
+        layout.addWidget(QLabel("Fila fin:"), 0, 2)
         self.txt_fila_fin = QLineEdit()
         self.txt_fila_fin.setFixedWidth(60)
-        layout.addWidget(self.txt_fila_fin)
+        layout.addWidget(self.txt_fila_fin, 0, 3)
 
         self.btn_marcar_seccion = QPushButton("Marcar como nueva sección")
         self.btn_marcar_seccion.setObjectName("btnAplicarMapeo")
         self.btn_marcar_seccion.setCursor(Qt.PointingHandCursor)
         self.btn_marcar_seccion.clicked.connect(self._marcar_seccion)
-        layout.addWidget(self.btn_marcar_seccion)
-
-        layout.addStretch()
+        layout.addWidget(self.btn_marcar_seccion, 1, 0, 1, 4)
+        layout.setColumnStretch(3, 1)
         group.setLayout(layout)
         return group
 
@@ -273,7 +290,8 @@ class VentanaEditorCSV(QDialog):
         self.scroll_secciones = QScrollArea()
         self.scroll_secciones.setWidgetResizable(True)
         self.scroll_secciones.setFrameShape(QFrame.NoFrame)
-        self.scroll_secciones.setFixedHeight(160)
+        self.scroll_secciones.setMinimumHeight(100)
+        self.scroll_secciones.setMaximumHeight(160)
 
         self.contenedor_secciones = QWidget()
         self.layout_secciones = QVBoxLayout()
@@ -314,7 +332,8 @@ class VentanaEditorCSV(QDialog):
         self.scroll_cambios = QScrollArea()
         self.scroll_cambios.setWidgetResizable(True)
         self.scroll_cambios.setFrameShape(QFrame.NoFrame)
-        self.scroll_cambios.setFixedHeight(160)
+        self.scroll_cambios.setMinimumHeight(100)
+        self.scroll_cambios.setMaximumHeight(160)
 
         self.contenedor_cambios = QWidget()
         self.layout_cambios = QVBoxLayout()
@@ -669,3 +688,30 @@ class VentanaEditorCSV(QDialog):
 
         self.aliasesGuardados.emit(self.secciones_pendientes)
         self.close()
+
+    def _ajustar_diseno_adaptativo(self):
+        if not hasattr(self, "separador_listas"):
+            return
+        orientacion = Qt.Vertical if self.width() < 760 else Qt.Horizontal
+        if orientacion != self._orientacion_listas:
+            self._orientacion_listas = orientacion
+            self.separador_listas.setOrientation(orientacion)
+            self.separador_listas.setSizes(
+                [130, 130] if orientacion == Qt.Vertical else [600, 400]
+            )
+        alto = 110 if self.height() < 620 else 140 if self.height() < 760 else 160
+        self.scroll_secciones.setMaximumHeight(alto)
+        self.scroll_cambios.setMaximumHeight(alto)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._ajustar_diseno_adaptativo()
+
+    def closeEvent(self, event):
+        if hasattr(self, "_ajustes"):
+            self._ajustes.setValue(
+                self.CLAVE_DIVISION, self.separador_listas.saveState()
+            )
+            self._ajustes.sync()
+            guardar_geometria(self)
+        super().closeEvent(event)

@@ -1,4 +1,4 @@
-from PySide6.QtCore import QSettings, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -15,7 +15,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from logica import app_info, formulas as formulas_logica
+from logica import formulas as formulas_logica
+from logica.interfaz_adaptativa import (
+    asegurar_ventana_visible,
+    configurar_geometria_persistente,
+    guardar_geometria as guardar_geometria_ventana,
+)
 from ui.ventanaPrincipal.panelDerecho.panelCalculo import PanelCalculo
 
 
@@ -45,13 +50,12 @@ class VentanaRegion(QDialog):
         permitir_gestion_formulas=False,
     ):
         super().__init__(parent)
-        self._ajustes = QSettings("LIBiAM", app_info.NOMBRE)
         self.formulas_activas = {}
         self._calculos_formulas = {}
         self._seleccion_subintervalos = {}
+        self.clave_subgestor = (columna, 0)
         self.setWindowTitle(titulo or "Sub-intervalos")
         self.setModal(False)
-        self.resize(1180, 540)
         self.setStyleSheet("QDialog { background-color: #1E1E1E; }")
         self._init_ui(
             titulo,
@@ -63,12 +67,17 @@ class VentanaRegion(QDialog):
             columna,
             permitir_gestion_formulas,
         )
-        geometria = self._ajustes.value(self.CLAVE_GEOMETRIA)
-        if geometria:
-            self.restoreGeometry(geometria)
+        _, self._ajustes = configurar_geometria_persistente(
+            self,
+            self.CLAVE_GEOMETRIA,
+            ideal=(1180, 600),
+            minimo=(720, 440),
+            piso=(600, 380),
+        )
         division = self._ajustes.value(self.CLAVE_DIVISION)
         if division:
             self.separador.restoreState(division)
+        self._ajustar_diseno_adaptativo()
 
     def _init_ui(
         self,
@@ -155,14 +164,18 @@ class VentanaRegion(QDialog):
         scroll_derecho.setWidgetResizable(True)
         scroll_derecho.setFrameShape(QFrame.NoFrame)
         scroll_derecho.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_derecho.setMinimumWidth(340)
+        scroll_derecho.setMinimumWidth(280)
         scroll_derecho.setWidget(panel_derecho)
+        self.scroll_derecho = scroll_derecho
+        self.caja_izquierda = caja_izquierda
 
         self.separador = QSplitter(Qt.Horizontal)
         self.separador.addWidget(caja_izquierda)
         self.separador.addWidget(scroll_derecho)
         self.separador.setSizes([820, 360])
         self.separador.setCollapsible(0, False)
+        self.separador.setCollapsible(1, False)
+        self.separador.setHandleWidth(6)
         layout.addWidget(self.separador, 1)
 
         self.setLayout(layout)
@@ -234,9 +247,31 @@ class VentanaRegion(QDialog):
 
     def guardar_geometria(self):
         """Permite guardar también cuando se cierra la aplicación completa."""
-        self._ajustes.setValue(self.CLAVE_GEOMETRIA, self.saveGeometry())
         self._ajustes.setValue(self.CLAVE_DIVISION, self.separador.saveState())
         self._ajustes.sync()
+        guardar_geometria_ventana(self)
+
+    def _ajustar_diseno_adaptativo(self):
+        if not hasattr(self, "scroll_derecho"):
+            return
+        if self.width() < 800:
+            ancho_panel, ancho_grafica = 230, 280
+        elif self.width() < 980:
+            ancho_panel, ancho_grafica = 260, 320
+        else:
+            ancho_panel, ancho_grafica = 300, 420
+        self.scroll_derecho.setMinimumWidth(ancho_panel)
+        self.caja_izquierda.setMinimumWidth(ancho_grafica)
+        alto_lista = 82 if self.height() < 560 else 100 if self.height() < 700 else 118
+        self.lista_subintervalos.setMaximumHeight(alto_lista)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._ajustar_diseno_adaptativo()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        asegurar_ventana_visible(self)
 
     def mostrar_subintervalos(self, subintervalos):
         subintervalos = list(subintervalos or [])

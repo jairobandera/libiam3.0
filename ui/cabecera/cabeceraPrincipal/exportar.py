@@ -16,10 +16,13 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
 from logica import exportacion
+from logica.interfaz_adaptativa import configurar_geometria_persistente
 
 
 def _cantidad_legible(cantidad, singular, plural=None):
@@ -48,8 +51,6 @@ class ExportarDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Exportar análisis")
         self.setModal(True)
-        self.resize(680, 760)
-        self.setMinimumSize(600, 620)
         self.setObjectName("dialogoExportar")
 
         self.nombre_archivo = str(nombre_archivo or "Archivo sin nombre")
@@ -71,6 +72,13 @@ class ExportarDialog(QDialog):
         self._radios = {}
         self._definiciones = self._crear_definiciones()
         self._init_ui()
+        configurar_geometria_persistente(
+            self,
+            "dialogos/exportar/geometria",
+            ideal=(680, 760),
+            minimo=(480, 460),
+            piso=(300, 260),
+        )
 
     def _crear_definiciones(self):
         detalle_datos = (
@@ -125,7 +133,8 @@ class ExportarDialog(QDialog):
         }
 
     def _init_ui(self):
-        principal = QVBoxLayout()
+        contenido = QWidget()
+        principal = QVBoxLayout(contenido)
         principal.setContentsMargins(24, 22, 24, 20)
         principal.setSpacing(12)
 
@@ -182,7 +191,14 @@ class ExportarDialog(QDialog):
 
         principal.addWidget(self._crear_separador())
         principal.addLayout(self._crear_botones())
-        self.setLayout(principal)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(contenido)
+        exterior = QVBoxLayout(self)
+        exterior.setContentsMargins(0, 0, 0, 0)
+        exterior.addWidget(scroll)
 
         predeterminada = (
             exportacion.MODO_DATOS
@@ -242,7 +258,7 @@ class ExportarDialog(QDialog):
         # Antes el layout podía comprimir la lista hasta dejar visible una sola
         # fila, lo que parecía un filtrado por la señal activa. Se reserva un
         # área suficiente y el resto continúa accesible con su barra de scroll.
-        self.lista_recortes.setMinimumHeight(170)
+        self.lista_recortes.setMinimumHeight(120)
         self.lista_recortes.setMaximumHeight(240)
         for intervalo in self.intervalos:
             identificador = intervalo.get("id")
@@ -385,8 +401,6 @@ class ExportacionCompletadaDialog(QDialog):
         self.ruta = Path(ruta).absolute()
         self.setWindowTitle("Exportación completada")
         self.setModal(True)
-        self.resize(590, 330)
-        self.setMinimumWidth(540)
         self.setObjectName("dialogoExportacionCompletada")
 
         principal = QVBoxLayout()
@@ -405,6 +419,13 @@ class ExportacionCompletadaDialog(QDialog):
         principal.addWidget(ExportarDialog._crear_separador())
         principal.addLayout(self._crear_botones())
         self.setLayout(principal)
+        configurar_geometria_persistente(
+            self,
+            "dialogos/exportacion_completada/geometria",
+            ideal=(590, 330),
+            minimo=(420, 280),
+            piso=(300, 240),
+        )
 
     def _crear_encabezado(self):
         encabezado = QHBoxLayout()
