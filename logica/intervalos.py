@@ -23,6 +23,27 @@ class IntervaloSuperpuestoError(ValueError):
         )
 
 
+def entero_frame(valor) -> int:
+    """Convierte un límite de frame a ``int`` rechazando valores no enteros.
+
+    Los límites de frame del modelo son enteros. Truncarlos (``int(10.9)``) haría
+    coincidir dos límites distintos y uniría intervalos que no lo son, así que
+    cualquier valor no entero se rechaza aquí, en el límite de entrada, en vez de
+    recortarse en silencio.
+    """
+    if isinstance(valor, bool):
+        raise ValueError(f"El límite de frame «{valor}» no es un número entero.")
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"El límite de frame «{valor}» no es un número entero."
+        ) from None
+    if numero != valor:
+        raise ValueError(f"El límite de frame {valor!r} no es un número entero.")
+    return numero
+
+
 @dataclass(frozen=True)
 class IntervaloCalculo:
     numero: int
@@ -89,7 +110,7 @@ class GestorIntervalos:
 
     def hay_superposicion(self, desde: int, hasta: int) -> bool:
         """Indica si el intervalo se superpone con algún intervalo existente."""
-        desde, hasta = sorted((int(desde), int(hasta)))
+        desde, hasta = sorted((entero_frame(desde), entero_frame(hasta)))
         return any(
             desde <= existente.hasta and hasta >= existente.desde
             for existente in self._intervalos
@@ -102,7 +123,7 @@ class GestorIntervalos:
         nombre: str = "",
         permitir_superposicion: bool = False,
     ) -> IntervaloCalculo:
-        desde, hasta = sorted((int(desde), int(hasta)))
+        desde, hasta = sorted((entero_frame(desde), entero_frame(hasta)))
         if desde == hasta:
             raise ValueError("El intervalo debe contener al menos dos frames.")
 
@@ -143,8 +164,8 @@ class GestorIntervalos:
         libre en esa dirección. Si el gesto encuentra otro intervalo, termina en
         el frame inmediatamente anterior. Los extremos son inclusivos.
         """
-        inicio_original = int(inicio)
-        fin_original = int(fin)
+        inicio_original = entero_frame(inicio)
+        fin_original = entero_frame(fin)
         if inicio_original == fin_original:
             raise ValueError("El intervalo debe contener al menos dos frames.")
 
@@ -216,7 +237,7 @@ class GestorIntervalos:
         if numero < 1:
             raise ValueError("El número de intervalo debe ser mayor o igual a 1.")
 
-        desde, hasta = sorted((int(desde), int(hasta)))
+        desde, hasta = sorted((entero_frame(desde), entero_frame(hasta)))
         if desde == hasta:
             raise ValueError("El intervalo debe contener al menos dos frames.")
 

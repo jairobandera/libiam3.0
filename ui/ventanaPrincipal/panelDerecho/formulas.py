@@ -56,6 +56,7 @@ class Formulas(QFrame):
         self.subintervalos_colapsados = set()
         self.modo_seleccion = None
         self.variables_formula = []
+        self.senales_disponibles = []
         self._cargar_formulas_guardadas()
         self.init_ui()
 
@@ -326,6 +327,48 @@ class Formulas(QFrame):
         """Un bloque por intervalo calculado, con sus valores destacados."""
         self.panel_calculo.mostrar_resultados(datos)
 
+    def cargar_senales(self, senales):
+        seleccion_anterior = self.cmb_senal.currentData()
+        self.senales_disponibles = [
+            senal for senal in (senales or []) if senal.get("visible", True)
+        ]
+        self._poblar_senales(seleccion_anterior)
+        self._renderizar_intervalos_actuales()
+
+    def _poblar_senales(self, preferida=None):
+        """Repuebla el combo con «Todas» más cada señal visible.
+
+        Las señales provienen de ``cargar_senales``. Si todavía no se recibieron
+        (por ejemplo al importar un proyecto antes de recalcular la visibilidad),
+        se derivan de los intervalos ya cargados para no perderlos.
+        """
+        senales = list(self.senales_disponibles or [])
+        if not senales:
+            for intervalo in self.intervalos:
+                columna = intervalo.get("columna", "__global__")
+                if columna not in {senal.get("columna") for senal in senales}:
+                    senales.append(
+                        {
+                            "columna": columna,
+                            "nombre": intervalo.get("senal") or str(columna),
+                        }
+                    )
+
+        self.cmb_senal.blockSignals(True)
+        self.cmb_senal.clear()
+        if senales:
+            self.cmb_senal.addItem("Todas las señales visibles", None)
+            for senal in senales:
+                columna = senal.get("columna")
+                nombre = senal.get("nombre") or columna or ""
+                self.cmb_senal.addItem(nombre, columna)
+            indice = self.cmb_senal.findData(preferida)
+            self.cmb_senal.setCurrentIndex(indice if indice >= 0 else 0)
+        else:
+            self.cmb_senal.addItem("No hay señales visibles", None)
+        self.cmb_senal.setEnabled(bool(senales))
+        self.cmb_senal.blockSignals(False)
+
     def cargar_intervalos(self, intervalos):
         self._guardar_estados_visibles()
         ids_anteriores = {self._id_intervalo(intervalo) for intervalo in self.intervalos}
@@ -346,22 +389,7 @@ class Formulas(QFrame):
             if intervalos_nuevos
             else self.cmb_senal.currentData()
         )
-        senales = []
-        for intervalo in self.intervalos:
-            columna = intervalo.get("columna", "__global__")
-            if columna not in {item[0] for item in senales}:
-                senales.append((columna, intervalo.get("senal", str(columna))))
-
-        self.cmb_senal.blockSignals(True)
-        self.cmb_senal.clear()
-        for columna, nombre in senales:
-            self.cmb_senal.addItem(nombre, columna)
-        if columna_actual is not None:
-            indice = self.cmb_senal.findData(columna_actual)
-            if indice >= 0:
-                self.cmb_senal.setCurrentIndex(indice)
-        self.cmb_senal.setEnabled(bool(senales))
-        self.cmb_senal.blockSignals(False)
+        self._poblar_senales(columna_actual)
         self._renderizar_intervalos_actuales()
 
     @staticmethod
@@ -383,12 +411,19 @@ class Formulas(QFrame):
                 widget.deleteLater()
 
         columna_actual = self.cmb_senal.currentData()
-        padres_visibles = [
-            intervalo
-            for intervalo in self.intervalos
-            if intervalo.get("columna", "__global__") == columna_actual
-            and not intervalo.get("es_subintervalo")
-        ]
+        if columna_actual is None:
+            padres_visibles = [
+                intervalo
+                for intervalo in self.intervalos
+                if not intervalo.get("es_subintervalo")
+            ]
+        else:
+            padres_visibles = [
+                intervalo
+                for intervalo in self.intervalos
+                if intervalo.get("columna", "__global__") == columna_actual
+                and not intervalo.get("es_subintervalo")
+            ]
 
         if not padres_visibles:
             texto = (

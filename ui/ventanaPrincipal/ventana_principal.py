@@ -125,6 +125,9 @@ class VentanaPrincipal(QWidget):
         self.area_central.senalesDisponiblesCambiaron.connect(
             self.panel_derecho.filtros.cargar_senales
         )
+        self.area_central.senalesDisponiblesCambiaron.connect(
+            self.panel_derecho.formulas.cargar_senales
+        )
         self.area_central.variablesFormulaCambiaron.connect(
             self.panel_derecho.formulas.cargar_variables_formula
         )

@@ -243,9 +243,9 @@ class GraficaSenal(pg.PlotWidget):
             style=self._estilo_linea(accesibilidad.TIPO_LINEA_FILTRADA),
         )
 
-    def _pen_formula(self):
+    def _pen_formula(self, color=None):
         return pg.mkPen(
-            paleta.color_senal_formula(),
+            color if color is not None else paleta.color_senal_formula(),
             width=accesibilidad.grosor_senal(accesibilidad.TIPO_LINEA_FORMULA),
             style=self._estilo_linea(accesibilidad.TIPO_LINEA_FORMULA),
         )
@@ -271,11 +271,12 @@ class GraficaSenal(pg.PlotWidget):
         if self._curvas_formula_dibujadas:
             color = paleta.color_senal_formula()
             for registro in self._curvas_formula_dibujadas:
-                registro["curva"].setPen(self._pen_formula())
+                color_registro = registro.get("color") or color
+                registro["curva"].setPen(self._pen_formula(color_registro))
                 if registro["marcador"] is not None:
-                    registro["marcador"].setBrush(pg.mkBrush(color))
+                    registro["marcador"].setBrush(pg.mkBrush(color_registro))
                 if registro["caja"] is not None:
-                    registro["caja"].border = pg.mkPen(color, width=1)
+                    registro["caja"].border = pg.mkPen(color_registro, width=1)
             self.plotItem.getAxis("right").setPen(pg.mkPen(color))
             self.plotItem.getAxis("right").setTextPen(pg.mkPen(color))
         if self.intervalos_actuales:
@@ -325,6 +326,7 @@ class GraficaSenal(pg.PlotWidget):
                 if not self._curvas_formula_dibujadas
                 else self._crear_vista_formula_adicional()
             )
+            color_curva = datos.get("color") or color
             unidad = (datos.get("unidad") or "").strip()
             nombre = datos.get("nombre") or "Fórmula"
             eje_propio = bool(
@@ -341,7 +343,8 @@ class GraficaSenal(pg.PlotWidget):
 
             etiqueta = f"{nombre} ({unidad})" if unidad else nombre
             curva = pg.PlotDataItem(
-                x, y, pen=self._pen_formula(), name=etiqueta, connect="finite"
+                x, y, pen=self._pen_formula(color_curva), name=etiqueta,
+                connect="finite"
             )
             curva.setZValue(10)
             vista.addItem(curva)
@@ -355,10 +358,11 @@ class GraficaSenal(pg.PlotWidget):
                 "picos": list(datos.get("picos") or []),
                 "info": {"nombre": nombre, "unidad": unidad},
                 "eje_propio": eje_propio,
+                "color": color_curva,
                 "marcador": None,
                 "caja": None,
             }
-            self._crear_items_formula(registro, color)
+            self._crear_items_formula(registro, color_curva)
             self._curvas_formula_dibujadas.append(registro)
             self.leyenda.addItem(curva, etiqueta)
 
@@ -701,7 +705,9 @@ class GraficaSenal(pg.PlotWidget):
         if pico and pico.get("etiqueta"):
             nombre = f"{nombre} · {pico['etiqueta']}"
         datos = (pico or {}).get("resumen") or {}
-        color = paleta.color_senal_formula()
+        # Color de la curva del intervalo que se está leyendo, no un color global:
+        # así el título de la caja no sugiere que el valor es de otra curva.
+        color = registro.get("color") or paleta.color_senal_formula()
         sufijo = f" {unidad}" if unidad else ""
 
         def fila(etiqueta, valor, destacada=False):
@@ -1690,6 +1696,16 @@ class AreaCentralGraficas(QFrame):
                 False, f"Fórmula «{clave}» desconocida."
             )
             return
+        if clave == "fuerza_resultante":
+            # Esta ventana recorta una sola señal: no hay forma de marcar Fx, Fy y
+            # Fz con los mismos límites, así que la FR se rechaza con un motivo claro.
+            ventana.panel_calculo.actualizar_estado(
+                False,
+                "La fuerza resultante no se calcula sobre sub-intervalos: necesita "
+                "Fx, Fy y Fz con los mismos límites. Marcá un intervalo en cada una "
+                "de las tres señales y calculala desde el panel de fórmulas.",
+            )
+            return
         desc = formulas.descripcion_formula(clave)
 
         columna, numero_padre = ventana.clave_subgestor
@@ -2167,7 +2183,12 @@ class AreaCentralGraficas(QFrame):
         Se aceptan intervalos de cualquier señal visible: todos comparten el eje de
         frames, que es lo único que hace falta para recortar la fórmula. Los
         sub-intervalos quedan fuera: se calculan en la ventana que se abre con doble
-        clic sobre su intervalo.
+        clic sobre un intervalo.
+
+        La fuerza resultante conserva los intervalos por columna
+        (``preservar_por_senal``) y decide la agrupación por límites más tarde, en
+        ``formulas.agrupar_intervalos_fuerza_resultante``: deduplicar por tiempo
+        aquí impediría comprobar que Fx, Fy y Fz están las tres presentes.
         """
         intervalos = []
         for identificador in identificadores or []:
@@ -2264,11 +2285,14 @@ class AreaCentralGraficas(QFrame):
         configuracion = aplicaciones_propuestas[clave]
         seleccionados = configuracion.get("intervalos") or []
 
-        intervalos = self._intervalos_seleccionados(
+        es_fr = (clave == "fuerza_resultante")
+        intervalos_seleccionados = self._intervalos_seleccionados(
             seleccionados,
-            preservar_por_senal=desc.get("usa_senal_intervalo", False),
+            # La FR necesita conservar los intervalos por columna para poder
+            # comprobar que Fx, Fy y Fz están las tres presentes.
+            preservar_por_senal=desc.get("usa_senal_intervalo", False) or es_fr,
         )
-        if not intervalos:
+        if not intervalos_seleccionados:
             if avisar:
                 self.formulaEstadoCambiado.emit(
                     False,
@@ -2276,6 +2300,35 @@ class AreaCentralGraficas(QFrame):
                     f"{formulas.nombre_con_articulo(desc)}.",
                 )
             return False
+
+        advertencias_fr = []
+        if es_fr:
+            # La agrupación por (desde, hasta) se hace DESPUÉS de identificar el
+            # rol de cada intervalo, para poder exigir las tres componentes.
+            try:
+                intervalos, advertencias_fr = (
+                    formulas.agrupar_intervalos_fuerza_resultante(
+                        intervalos_seleccionados,
+                        {
+                            rol: self._columna_de_rol(rol)
+                            for rol in formulas.ROLES_FUERZA_RESULTANTE
+                        },
+                    )
+                )
+            except ErrorFormula as exc:
+                if avisar:
+                    self.formulaEstadoCambiado.emit(False, str(exc))
+                return False
+            if not intervalos:
+                if avisar:
+                    motivo = " ".join(advertencias_fr) or (
+                        "Marcá un intervalo con los mismos límites en Fx, Fy y "
+                        "Fz para calcular la fuerza resultante."
+                    )
+                    self.formulaEstadoCambiado.emit(False, motivo)
+                return False
+        else:
+            intervalos = intervalos_seleccionados
 
         try:
             _columna, resultados, _tramos, advertencias, segmentos = (
@@ -2285,6 +2338,20 @@ class AreaCentralGraficas(QFrame):
             if avisar:
                 self.formulaEstadoCambiado.emit(False, str(exc))
             return False
+        if es_fr:
+            # Un grupo completo (Fx+Fy+Fz con los mismos límites) puede no producir
+            # resultado si le faltan muestras válidas dentro del tramo (p. ej. una
+            # componente con NaN en todo el intervalo). El motor lo descarta de forma
+            # silenciosa; aquí se avisa al usuario en lugar de omitirlo sin más.
+            ids_con_resultado = {resultado.get("id") for resultado in resultados}
+            for grupo in intervalos:
+                if grupo.get("id") not in ids_con_resultado:
+                    advertencias_fr.append(
+                        f"No se calculó el intervalo Frame {grupo['desde']}\u2013"
+                        f"{grupo['hasta']}: no hay suficientes muestras válidas de "
+                        "Fx, Fy y Fz."
+                    )
+        advertencias = list(advertencias) + advertencias_fr
 
         if not resultados:
             if avisar:
@@ -2337,6 +2404,9 @@ class AreaCentralGraficas(QFrame):
 
         if actualizar_vista:
             self._redibujar_formulas_aplicadas()
+        if es_fr and actualizar_vista:
+            self._abrir_ventana_resultados_fr(datos_panel, segmentos)
+        elif actualizar_vista:
             self.resultadosFormulaCambiaron.emit(datos_panel)
 
         if avisar:
@@ -2347,21 +2417,69 @@ class AreaCentralGraficas(QFrame):
                 if len(self.formulas_activas) > 1
                 else ""
             )
+            omitidos = (
+                " Se omitieron intervalos; mirá las advertencias."
+                if advertencias_fr
+                else ""
+            )
             self.formulaEstadoCambiado.emit(
                 True,
                 f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}."
-                f"{conservadas}",
+                f"{conservadas}{omitidos}",
             )
         return True
 
+    def _abrir_ventana_resultados_fr(self, datos_panel, segmentos):
+        from ui.ventanaPrincipal.ventanaResultadosFR import VentanaResultadosFR
+
+        ventana = VentanaResultadosFR(
+            self.window() or self,
+            resultados_panel=datos_panel,
+            segmentos=segmentos,
+        )
+        ventanas = getattr(self, "_ventanas_resultados_fr", None)
+        if ventanas is None:
+            ventanas = []
+            self._ventanas_resultados_fr = ventanas
+        ventanas.append(ventana)
+        # Se destruye al cerrar y se olvida de la lista para no dejar referencias
+        # colgantes ni acumular ventanas viejas.
+        ventana.setAttribute(Qt.WA_DeleteOnClose, True)
+        ventana.finished.connect(
+            lambda _resultado=None, v=ventana: self._olvidar_ventana_fr(v)
+        )
+        ventana.show()
+        ventana.raise_()
+        ventana.activateWindow()
+
+    def _olvidar_ventana_fr(self, ventana):
+        ventanas = getattr(self, "_ventanas_resultados_fr", None)
+        if ventanas and ventana in ventanas:
+            ventanas.remove(ventana)
+
     def _redibujar_formulas_aplicadas(self):
-        """Dibuja cada fórmula en una escala vertical independiente."""
+        """Dibuja cada fórmula en una escala vertical independiente.
+
+        La fuerza resultante se excluye a propósito: su curva vive solo en su
+        ventana de resultados y nunca debe agregarse a las gráficas originales
+        de Fx, Fy o Fz (ni por ``salida_rol`` ni por la columna del intervalo).
+        """
         for grafica in self.graficas_por_columna.values():
             grafica.limpiar_curva_formula()
 
+        calculos = {
+            clave: calculo
+            for clave, calculo in self._calculos_formulas.items()
+            if clave != "fuerza_resultante"
+        }
+        claves = [
+            clave
+            for clave in self.formulas_activas
+            if clave != "fuerza_resultante"
+        ]
         por_grafica = formulas.preparar_curvas_formulas_por_grafica(
-            self._calculos_formulas,
-            self.formulas_activas,
+            calculos,
+            claves,
         )
         for propietario, curvas in por_grafica.items():
             grafica = self.graficas_por_columna.get(propietario)
@@ -2411,6 +2529,8 @@ class AreaCentralGraficas(QFrame):
 
     def _emitir_resultado_formula_actual(self):
         for clave in reversed(self.formulas_activas):
+            if clave == "fuerza_resultante":
+                continue
             calculo = self._calculos_formulas.get(clave)
             if calculo is not None:
                 self.resultadosFormulaCambiaron.emit(calculo["datos_panel"])
@@ -2426,10 +2546,17 @@ class AreaCentralGraficas(QFrame):
         ]
 
     def curvas_formulas_para_exportar(self, columnas=None):
-        """Curvas vigentes separadas por fórmula y por gráfica."""
+        """Curvas vigentes separadas por fórmula y por gráfica.
+
+        La fuerza resultante queda fuera: su curva vive solo en su ventana
+        independiente y no debe volcarse a la exportación como si perteneciera a
+        la señal de una gráfica original (p. ej. ``Fz - Fuerza resultante``).
+        """
         permitidas = set(columnas) if columnas is not None else None
         curvas = []
         for clave in self.formulas_activas:
+            if clave == "fuerza_resultante":
+                continue
             calculo = self._calculos_formulas.get(clave)
             if calculo is None:
                 continue
@@ -2476,7 +2603,7 @@ class AreaCentralGraficas(QFrame):
         # intervalos deben pertenecer a una señal concreta (p. ej. Potencia -> Fz).
         # No es una regla general: solo aplica a la fórmula que la declara.
         restriccion = desc.get("intervalos_en_rol")
-        if restriccion:
+        if restriccion and clave != "fuerza_resultante":
             columna_permitida = self._columna_de_rol(restriccion.get("rol"))
             mensaje = restriccion.get("mensaje")
             for intervalo in intervalos or []:
@@ -2508,6 +2635,10 @@ class AreaCentralGraficas(QFrame):
 
         roles_fijos = {}
         x_total = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
+        # Los huecos internos de la FR (frames con una componente en NaN) se cortan
+        # con un NaN para que la polilínea no los puentee; el resto de fórmulas
+        # conserva su dibujo actual.
+        separar_huecos_fr = (clave == "fuerza_resultante")
         for rol in roles_a_usar:
             columna = self._columna_de_rol(rol)
             if columna is None:
@@ -2536,6 +2667,7 @@ class AreaCentralGraficas(QFrame):
                     contexto,
                     [intervalo],
                     eleccion,
+                    separar_huecos=separar_huecos_fr,
                 )
                 resultados.extend(parciales)
                 segmentos.extend(tramos_parciales)
@@ -2543,7 +2675,13 @@ class AreaCentralGraficas(QFrame):
                     columna_salida = columna_owner
         else:
             resultados, segmentos = formulas.computar_formula(
-                clave, roles_fijos, x_total, contexto, intervalos, eleccion
+                clave,
+                roles_fijos,
+                x_total,
+                contexto,
+                intervalos,
+                eleccion,
+                separar_huecos=separar_huecos_fr,
             )
             salida = desc.get("salida_rol")
             if salida not in roles_fijos and roles_a_usar:

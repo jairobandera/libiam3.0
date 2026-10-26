@@ -121,7 +121,10 @@ class VentanaRegion(QDialog):
         layout_derecho.addWidget(self._crear_selector_subintervalos())
 
         self.panel_calculo = PanelCalculo(
-            permitir_gestion=permitir_gestion_formulas
+            permitir_gestion=permitir_gestion_formulas,
+            # La FR necesita Fx, Fy y Fz con los mismos límites; esta ventana solo
+            # recorta una señal, así que no se ofrece aquí (ver _calcular_subintervalos).
+            excluir_claves=("fuerza_resultante",),
         )
         self.panel_calculo.setMinimumWidth(286)
         # La fuente (filtrada/original) depende de si esta señal tiene filtro.

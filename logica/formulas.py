@@ -8,6 +8,8 @@ import re
 
 import numpy as np
 
+from logica.intervalos import entero_frame
+
 
 class ErrorFormula(ValueError):
     pass
@@ -193,6 +195,102 @@ def _fuerza_neta_desde(roles, contexto, eleccion=None):
         contexto["masa"],
         contexto.get("gravedad", 9.8),
     )
+
+
+def _fuerza_resultante_desde(roles, contexto, eleccion=None):
+    fx = np.asarray(roles["Fx"], dtype=float)
+    fy = np.asarray(roles["Fy"], dtype=float)
+    fz = np.asarray(roles["Fz"], dtype=float)
+    return np.sqrt(fx * fx + fy * fy + fz * fz)
+
+
+# Componentes obligatorias de la fuerza resultante. El orden importa para los
+# mensajes al usuario.
+ROLES_FUERZA_RESULTANTE = ("Fx", "Fy", "Fz")
+
+
+def _texto_faltantes(faltantes):
+    if len(faltantes) == 1:
+        return f"falta la señal {faltantes[0]}"
+    return "faltan las señales " + " y ".join(faltantes)
+
+
+def agrupar_intervalos_fuerza_resultante(intervalos, columnas_por_rol):
+    """Agrupa intervalos por límites exigiendo las tres componentes de la FR.
+
+    La fuerza resultante solo tiene sentido cuando Fx, Fy y Fz están marcadas
+    con los mismos límites de frame. Agrupar por ``(desde, hasta)`` *antes* de
+    comprobar la completitud perdería la información de qué componentes se
+    eligieron, por eso la agrupación se hace aquí, después de identificar cada
+    intervalo con su rol.
+
+    ``columnas_por_rol`` mapea cada rol ("Fx", "Fy", "Fz") a la columna real
+    del mapeo de ABS 3.0. Devuelve ``(grupos, advertencias)``:
+
+    - ``grupos``: un registro por cada ``(desde, hasta)`` con las tres
+      componentes presentes, listo para ``computar_formula``.
+    - ``advertencias``: mensajes que describen los grupos incompletos o los
+      intervalos ajenos a las componentes. Nada se descarta en silencio.
+    """
+    columnas = {
+        rol: columnas_por_rol.get(rol) for rol in ROLES_FUERZA_RESULTANTE
+    }
+    rol_por_columna = {
+        columna: rol for rol, columna in columnas.items() if columna
+    }
+
+    por_tiempo = {}
+    ajenos = set()
+    for intervalo in intervalos or ():
+        columna = intervalo.get("columna")
+        rol = rol_por_columna.get(columna)
+        if rol is None:
+            ajenos.add(columna)
+            continue
+        try:
+            desde = entero_frame(intervalo["desde"])
+            hasta = entero_frame(intervalo["hasta"])
+        except ValueError as exc:
+            raise ErrorFormula(str(exc)) from None
+        clave = (desde, hasta)
+        por_tiempo.setdefault(clave, {}).setdefault(rol, intervalo)
+
+    grupos, advertencias = [], []
+    for (desde, hasta), presentes in sorted(por_tiempo.items()):
+        faltantes = [
+            rol for rol in ROLES_FUERZA_RESULTANTE if rol not in presentes
+        ]
+        if faltantes:
+            advertencias.append(
+                f"No se calculó el intervalo Frame {desde}–{hasta}: "
+                f"{_texto_faltantes(faltantes)}."
+            )
+            continue
+        referencia = presentes["Fz"]
+        numero = referencia.get("numero")
+        grupos.append(
+            {
+                "id": f"FR::{desde}::{hasta}",
+                "desde": desde,
+                "hasta": hasta,
+                "numero": numero,
+                "nombre": referencia.get("nombre") or f"Intervalo {numero}",
+                "columna": columnas["Fz"],
+                "senal": referencia.get("senal", ""),
+                "componentes": {
+                    rol: columnas[rol] for rol in ROLES_FUERZA_RESULTANTE
+                },
+            }
+        )
+
+    if ajenos:
+        nombres = ", ".join(sorted(columna for columna in ajenos if columna))
+        advertencias.append(
+            "La fuerza resultante solo usa Fx, Fy y Fz; se ignoraron los "
+            f"intervalos de: {nombres}."
+        )
+    return grupos, advertencias
+
 
 ROLES = {
     "Fx": ("Fuerza", "eje_x"), "Fy": ("Fuerza", "eje_y"),
@@ -702,6 +800,18 @@ FORMULAS = {
         },
         "computar": _fuerza_neta_desde,
     },
+    "fuerza_resultante": {
+        "nombre": "Fuerza resultante",
+        "articulo": "la",
+        "expresion": "F_R = sqrt(Fx^2 + Fy^2 + Fz^2)",
+        "expresion_constructor": "sqrt(Fx*Fx + Fy*Fy + Fz*Fz)",
+        "unidad": "N",
+        "salida_rol": "Fz",
+        "integra_en_registro": False,
+        "requiere_roles": ("Fx", "Fy", "Fz"),
+        "requiere": {},
+        "computar": _fuerza_resultante_desde,
+    },
 }
 
 
@@ -992,7 +1102,7 @@ def _preparar_salida_personalizada(valores, x_segmento):
     return None, arreglo
 
 
-def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
+def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None, separar_huecos=False):
     desc = FORMULAS[clave]
     motivo = validar_formula(clave, contexto, set(roles))
     if motivo:
@@ -1000,6 +1110,11 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
 
     resultados, segmentos = [], []
     frecuencia = contexto.get("frecuencia")
+
+    def _tramos(lista):
+        if not separar_huecos:
+            return lista
+        return [_separar_huecos(sx, sy) for sx, sy in lista]
 
     # Se omiten las posiciones inválidas sin inventar valores intermedios.
     finito = np.isfinite(x)
@@ -1052,7 +1167,7 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
             )
             segmentos.append((x_seg, valores))
 
-        return resultados, segmentos
+        return resultados, _tramos(segmentos)
 
     # Las demás fórmulas se calculan por separado en cada intervalo.
     for datos in intervalos:
@@ -1098,7 +1213,7 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
             else (np.array([], dtype=float), np.array([], dtype=float))
         )
 
-    return resultados, segmentos
+    return resultados, _tramos(segmentos)
 
 def picos_de_resultados(resultados):
     picos = []
@@ -1117,6 +1232,32 @@ def picos_de_resultados(resultados):
                 }
             )
     return picos
+
+def _separar_huecos(x, valores):
+    """Corta la curva donde faltan frames, sin rellenar ni interpolar.
+
+    Dentro de un intervalo puede haber frames sin dato (por ejemplo, una
+    componente de la fuerza resultante con NaN). Al omitirlos, la polilínea une
+    los extremos del hueco con una recta que no existe. Insertar un NaN entre los
+    tramos separados hace que ``connect="finite"`` corte la línea y el hueco se
+    vea tal cual.
+    """
+    if valores is None or len(x) < 2:
+        return x, valores
+    saltos = np.flatnonzero(np.diff(x) > 1)
+    if saltos.size == 0:
+        return x, valores
+    trozos_x, trozos_y, inicio = [], [], 0
+    for corte in saltos:
+        trozos_x.append(x[inicio : corte + 1])
+        trozos_y.append(valores[inicio : corte + 1])
+        trozos_x.append(np.array([np.nan]))
+        trozos_y.append(np.array([np.nan]))
+        inicio = corte + 1
+    trozos_x.append(x[inicio:])
+    trozos_y.append(valores[inicio:])
+    return np.concatenate(trozos_x), np.concatenate(trozos_y)
+
 
 def concatenar_curva(segmentos):
     if not segmentos:
