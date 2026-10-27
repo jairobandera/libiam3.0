@@ -24,7 +24,7 @@ from logica.filtros_senales import (
     ErrorConfiguracionFiltro,
     aplicar_butterworth,
 )
-from logica import accesibilidad, formulas, paleta
+from logica import accesibilidad, formulas, paleta, preferencias_graficas
 from logica.formulas import ErrorFormula
 from logica.intervalos import GestorIntervalos, IntervaloSuperpuestoError
 
@@ -61,13 +61,22 @@ class EjeDecimal(pg.AxisItem):
 
 
 class ViewBoxZoom(pg.ViewBox):
-    """ViewBox con zoom horizontal centrado en la posición del cursor."""
+    """ViewBox con zoom configurable y centrado en la posición del cursor."""
 
     def wheelEvent(self, ev, axis=None):
         delta = ev.delta() if hasattr(ev, "delta") else ev.angleDelta().y()
         factor = 0.85 if delta > 0 else 1.15
         centro = self.mapSceneToView(ev.scenePos())
-        self.scaleBy(x=factor, y=1.0, center=centro)
+        modo = preferencias_graficas.modo_zoom_actual()
+        factor_x = factor if modo in (
+            preferencias_graficas.MODO_ZOOM_X,
+            preferencias_graficas.MODO_ZOOM_XY,
+        ) else 1.0
+        factor_y = factor if modo in (
+            preferencias_graficas.MODO_ZOOM_Y,
+            preferencias_graficas.MODO_ZOOM_XY,
+        ) else 1.0
+        self.scaleBy(x=factor_x, y=factor_y, center=centro)
         ev.accept()
 
 
@@ -271,9 +280,9 @@ class GraficaSenal(pg.PlotWidget):
             style=self._estilo_linea(accesibilidad.TIPO_LINEA_FILTRADA),
         )
 
-    def _pen_formula(self):
+    def _pen_formula(self, color=None):
         return pg.mkPen(
-            paleta.color_senal_formula(),
+            color or paleta.color_senal_formula(),
             width=accesibilidad.grosor_senal(accesibilidad.TIPO_LINEA_FORMULA),
             style=self._estilo_linea(accesibilidad.TIPO_LINEA_FORMULA),
         )
@@ -297,9 +306,14 @@ class GraficaSenal(pg.PlotWidget):
         if self.curva_filtrada is not None:
             self.curva_filtrada.setPen(self._pen_filtrada())
         if self._curvas_formula_dibujadas:
-            color = paleta.color_senal_formula()
             for registro in self._curvas_formula_dibujadas:
-                registro["curva"].setPen(self._pen_formula())
+                indice_color = registro.get("indice_color")
+                color = (
+                    paleta.color_intervalo(indice_color)
+                    if indice_color
+                    else paleta.color_senal_formula()
+                )
+                registro["curva"].setPen(self._pen_formula(color))
                 if registro["marcador"] is not None:
                     registro["marcador"].setBrush(pg.mkBrush(color))
                 if registro["caja"] is not None:
@@ -355,9 +369,15 @@ class GraficaSenal(pg.PlotWidget):
             )
             unidad = (datos.get("unidad") or "").strip()
             nombre = datos.get("nombre") or "Fórmula"
-            eje_propio = bool(
+            eje_propio = False if datos.get("compartir_eje") else bool(
                 datos.get("forzar_eje_derecho")
                 or self._necesita_eje_propio(y, unidad)
+            )
+            indice_color = datos.get("indice_color")
+            color_curva = (
+                paleta.color_intervalo(indice_color)
+                if indice_color
+                else datos.get("color") or color
             )
 
             vista.linkView(vista.YAxis, None)
@@ -369,7 +389,11 @@ class GraficaSenal(pg.PlotWidget):
 
             etiqueta = f"{nombre} ({unidad})" if unidad else nombre
             curva = pg.PlotDataItem(
-                x, y, pen=self._pen_formula(), name=etiqueta, connect="finite"
+                x,
+                y,
+                pen=self._pen_formula(color_curva),
+                name=etiqueta,
+                connect="finite",
             )
             curva.setZValue(10)
             vista.addItem(curva)
@@ -385,8 +409,9 @@ class GraficaSenal(pg.PlotWidget):
                 "eje_propio": eje_propio,
                 "marcador": None,
                 "caja": None,
+                "indice_color": indice_color,
             }
-            self._crear_items_formula(registro, color)
+            self._crear_items_formula(registro, color_curva)
             self._curvas_formula_dibujadas.append(registro)
             self.leyenda.addItem(curva, etiqueta)
 
@@ -975,6 +1000,7 @@ class AreaCentralGraficas(QFrame):
         self.subgestores = {}
         self.notas = {}
         self._ventanas_region = []
+        self._ventanas_resultados_fr = []
         self.columnas_filtradas = set()
         self.aplicar_corte_todas = False
         self.superposicion_habilitada = False
@@ -993,6 +1019,7 @@ class AreaCentralGraficas(QFrame):
         # Alias de compatibilidad: apunta a la aplicación más reciente.
         self.formula_activa = None
         self.masa_sujeto = None
+        self.masa_total_sujeto = None
         self.estatura_sujeto = None
         self.gravedad = 9.8
         # Descripción legible del filtro puesto en cada columna, para poder
@@ -1046,6 +1073,7 @@ class AreaCentralGraficas(QFrame):
         for ventana in self._ventanas_region:
             ventana.close()
         self._ventanas_region = []
+        self._cerrar_ventanas_resultados_fr()
         self.nombre_archivo = nombre_archivo
         self.df_original = df
         preparado, self.columna_x = self._preparar_dataframe(df)
@@ -1077,6 +1105,7 @@ class AreaCentralGraficas(QFrame):
         for ventana in list(self._ventanas_region):
             ventana.close()
         self._ventanas_region = []
+        self._cerrar_ventanas_resultados_fr()
         self.modo_seleccion_intervalo = False
         self.nombre_archivo = None
         self.df_original = None
@@ -1101,6 +1130,7 @@ class AreaCentralGraficas(QFrame):
         self._ultimo_error_formula = ""
         self.formula_activa = None
         self.masa_sujeto = None
+        self.masa_total_sujeto = None
         self.estatura_sujeto = None
         self.gravedad = 9.8
         self.fuente_calculo = FUENTE_FILTRADA
@@ -1118,7 +1148,6 @@ class AreaCentralGraficas(QFrame):
         self.mapeo_actual = mapeo
         columnas_ordenadas = self._obtener_todas_columnas_mapeo()
         orden_actual = [grafica.columna for grafica in self.graficas]
-        # Reconstruir si aparecen columnas nuevas o si cambió el orden pedido.
         graficas_recreadas = columnas_ordenadas != orden_actual
         if graficas_recreadas:
             self._crear_graficas()
@@ -1451,6 +1480,24 @@ class AreaCentralGraficas(QFrame):
         """
         self._repintar_accesibilidad()
 
+    def aplicar_colores_graficas(self):
+        """Actualiza las líneas existentes sin modificar intervalos ni cálculos."""
+        for grafica in self.graficas_por_columna.values():
+            grafica.aplicar_paleta()
+
+        self._ventanas_region = [
+            ventana for ventana in self._ventanas_region if ventana.isVisible()
+        ]
+        for ventana in self._ventanas_region:
+            ventana.aplicar_paleta()
+        self._ventanas_resultados_fr = [
+            ventana
+            for ventana in self._ventanas_resultados_fr
+            if ventana.isVisible()
+        ]
+        for ventana in self._ventanas_resultados_fr:
+            ventana.aplicar_paleta()
+
     def actualizar_formulas_abiertas(self):
         """Refresca los selectores de las ventanas de sub-intervalos ya abiertas."""
         self._ventanas_region = [
@@ -1483,6 +1530,14 @@ class AreaCentralGraficas(QFrame):
             subgestor = self.subgestores.get(getattr(ventana, "clave_subgestor", None))
             if subgestor is not None:
                 ventana.mostrar_subintervalos(subgestor.listar())
+            ventana.aplicar_paleta()
+
+        self._ventanas_resultados_fr = [
+            ventana
+            for ventana in self._ventanas_resultados_fr
+            if ventana.isVisible()
+        ]
+        for ventana in self._ventanas_resultados_fr:
             ventana.aplicar_paleta()
 
         self._emitir_intervalos()
@@ -1831,6 +1886,12 @@ class AreaCentralGraficas(QFrame):
                 f"Fórmula «{clave}» desconocida.",
                 avisar,
             )
+        if clave == "fuerza_resultante":
+            return self._rechazar_aplicacion_formula(
+                "La fuerza resultante necesita intervalos padre coincidentes "
+                "en Fx, Fy y Fz; no se calcula sobre subintervalos.",
+                avisar,
+            )
         desc = formulas.descripcion_formula(clave)
         disponibles = {
             intervalo["id"]: intervalo
@@ -1924,6 +1985,13 @@ class AreaCentralGraficas(QFrame):
         if not formulas.hay_formula(clave):
             ventana.panel_calculo.actualizar_estado(
                 False, f"Fórmula «{clave}» desconocida."
+            )
+            return
+        if clave == "fuerza_resultante":
+            ventana.panel_calculo.actualizar_estado(
+                False,
+                "La fuerza resultante necesita intervalos padre coincidentes "
+                "en Fx, Fy y Fz.",
             )
             return
         desc = formulas.descripcion_formula(clave)
@@ -2513,9 +2581,10 @@ class AreaCentralGraficas(QFrame):
         return self.df_grafica.loc[mascara, [self.columna_x, columna]].copy()
 
     def set_variables_sujeto(self, variables):
-        """Recibe masa, estatura y gravedad para las fórmulas."""
+        """Recibe las variables del sujeto y la gravedad para las fórmulas."""
         variables = variables or {}
         self.masa_sujeto = variables.get("masa")
+        self.masa_total_sujeto = variables.get("masa_total")
         self.estatura_sujeto = variables.get("estatura")
         self.gravedad = variables.get("gravedad") or self.gravedad
         # Si una fórmula depende de una variable modificada, se recalcula sola.
@@ -2584,7 +2653,12 @@ class AreaCentralGraficas(QFrame):
         if self._hay_formulas_aplicadas():
             self._recalcular_formulas_activas()
 
-    def _intervalos_seleccionados(self, identificadores, preservar_por_senal=False):
+    def _intervalos_seleccionados(
+        self,
+        identificadores,
+        preservar_por_senal=False,
+        expandir_replicados=True,
+    ):
         """Convierte los IDs marcados en el panel en intervalos de frames.
 
         Se aceptan intervalos de cualquier señal visible: todos comparten el eje de
@@ -2602,7 +2676,7 @@ class AreaCentralGraficas(QFrame):
                 continue
             intervalos.append(datos)
 
-        if preservar_por_senal:
+        if preservar_por_senal and expandir_replicados:
             visibles = []
             for candidato in self._intervalos_para_panel():
                 grafica = self.graficas_por_columna.get(candidato.get("columna"))
@@ -2735,6 +2809,7 @@ class AreaCentralGraficas(QFrame):
             )
         desc = formulas.descripcion_formula(clave)
         usa_senal_intervalo = bool(desc.get("usa_senal_intervalo"))
+        es_fuerza_resultante = clave == "fuerza_resultante"
         aplicaciones_propuestas = formulas.registrar_aplicacion_formula(
             self.formulas_activas, configuracion
         )
@@ -2743,7 +2818,12 @@ class AreaCentralGraficas(QFrame):
 
         intervalos = self._intervalos_seleccionados(
             seleccionados,
-            preservar_por_senal=usa_senal_intervalo,
+            preservar_por_senal=(
+                usa_senal_intervalo or es_fuerza_resultante
+            ),
+            # Para FR importa qué componentes eligió el usuario. Completar las
+            # réplicas automáticamente ocultaría una selección incompleta.
+            expandir_replicados=not es_fuerza_resultante,
         )
         if not intervalos:
             return self._rechazar_aplicacion_formula(
@@ -2751,6 +2831,28 @@ class AreaCentralGraficas(QFrame):
                 f"{formulas.nombre_con_articulo(desc)}.",
                 avisar,
             )
+
+        advertencias_resultante = []
+        if es_fuerza_resultante:
+            try:
+                intervalos, advertencias_resultante = (
+                    formulas.agrupar_intervalos_fuerza_resultante(
+                        intervalos,
+                        {
+                            rol: self._columna_de_rol(rol)
+                            for rol in formulas.ROLES_FUERZA_RESULTANTE
+                        },
+                    )
+                )
+            except ErrorFormula as exc:
+                return self._rechazar_aplicacion_formula(str(exc), avisar)
+            if not intervalos:
+                motivo = " ".join(advertencias_resultante) or (
+                    "Elegí los intervalos con los mismos límites en Fx, Fy y "
+                    "Fz para calcular la fuerza resultante. Podés verlos juntos "
+                    "eligiendo «Todas las señales visibles»."
+                )
+                return self._rechazar_aplicacion_formula(motivo, avisar)
 
         if usa_senal_intervalo:
             configuracion = dict(configuracion)
@@ -2765,6 +2867,28 @@ class AreaCentralGraficas(QFrame):
             )
         except ErrorFormula as exc:
             return self._rechazar_aplicacion_formula(str(exc), avisar)
+
+        if es_fuerza_resultante:
+            origenes_por_grupo = {
+                grupo.get("id"): list(grupo.get("ids_origen") or ())
+                for grupo in intervalos
+            }
+            for resultado in resultados:
+                resultado["ids_origen"] = origenes_por_grupo.get(
+                    resultado.get("id"),
+                    [],
+                )
+            ids_con_resultado = {
+                resultado.get("id") for resultado in resultados
+            }
+            for grupo in intervalos:
+                if grupo.get("id") not in ids_con_resultado:
+                    advertencias_resultante.append(
+                        f"No se calculó el intervalo Frame {grupo['desde']}–"
+                        f"{grupo['hasta']}: no hay suficientes muestras válidas "
+                        "de Fx, Fy y Fz."
+                    )
+        advertencias = list(advertencias) + advertencias_resultante
 
         if not resultados:
             return self._rechazar_aplicacion_formula(
@@ -2791,12 +2915,23 @@ class AreaCentralGraficas(QFrame):
         por_grafica = {}
         for resultado, segmento in zip(resultados, segmentos):
             intervalo = intervalo_por_id.get(resultado.get("id"), {})
-            destinos = formulas.destinos_visuales_formula(
-                intervalo,
-                columna_salida,
-                intervalos_visibles,
-                usa_senal_intervalo=usa_senal_intervalo,
-            )
+            if es_fuerza_resultante:
+                destinos = list(
+                    dict.fromkeys(
+                        columna
+                        for columna in (
+                            intervalo.get("componentes") or {}
+                        ).values()
+                        if columna
+                    )
+                )
+            else:
+                destinos = formulas.destinos_visuales_formula(
+                    intervalo,
+                    columna_salida,
+                    intervalos_visibles,
+                    usa_senal_intervalo=usa_senal_intervalo,
+                )
             for propietario in destinos:
                 grupo = por_grafica.setdefault(
                     propietario, {"resultados": [], "segmentos": []}
@@ -2804,11 +2939,18 @@ class AreaCentralGraficas(QFrame):
                 grupo["resultados"].append(resultado)
                 grupo["segmentos"].append(segmento)
 
-        fuentes = (
-            [intervalo["columna"] for intervalo in intervalos]
-            if usa_senal_intervalo
-            else [columna_salida] if columna_salida else []
-        )
+        if es_fuerza_resultante:
+            fuentes = [
+                self._columna_de_rol(rol)
+                for rol in formulas.ROLES_FUERZA_RESULTANTE
+            ]
+            fuentes = [columna for columna in fuentes if columna]
+        else:
+            fuentes = (
+                [intervalo["columna"] for intervalo in intervalos]
+                if usa_senal_intervalo
+                else [columna_salida] if columna_salida else []
+            )
         fuente, detalle = self._procedencia(fuentes)
         datos_panel = {
             "clave": clave,
@@ -2838,7 +2980,11 @@ class AreaCentralGraficas(QFrame):
 
         if actualizar_vista:
             self._redibujar_formulas_aplicadas()
-            self._emitir_resultado_formula_actual()
+            if es_fuerza_resultante:
+                self._emitir_resultado_formula_actual()
+                self._abrir_ventana_resultados_fr(datos_panel, segmentos)
+            else:
+                self._emitir_resultado_formula_actual()
             self._sincronizar_ventanas_subintervalos()
 
         if avisar:
@@ -2848,12 +2994,45 @@ class AreaCentralGraficas(QFrame):
                 if len(self.formulas_activas) > 1
                 else ""
             )
+            omitidos = (
+                " Se omitieron intervalos incompletos; revisá las advertencias."
+                if advertencias_resultante
+                else ""
+            )
             self.formulaEstadoCambiado.emit(
                 True,
                 f"Se calculó {formulas.nombre_con_articulo(desc)} en {destino}."
-                f"{conservadas}",
+                f"{conservadas}{omitidos}",
             )
         return True
+
+    def _abrir_ventana_resultados_fr(self, datos_panel, segmentos):
+        from ui.ventanaPrincipal.ventanaResultadosFR import VentanaResultadosFR
+
+        ventana = VentanaResultadosFR(
+            self.window() or self,
+            resultados_panel=datos_panel,
+            segmentos=segmentos,
+        )
+        self._ventanas_resultados_fr.append(ventana)
+        ventana.setAttribute(Qt.WA_DeleteOnClose, True)
+        ventana.finished.connect(
+            lambda _resultado=None, actual=ventana: (
+                self._olvidar_ventana_resultados_fr(actual)
+            )
+        )
+        ventana.show()
+        ventana.raise_()
+        ventana.activateWindow()
+
+    def _olvidar_ventana_resultados_fr(self, ventana):
+        if ventana in self._ventanas_resultados_fr:
+            self._ventanas_resultados_fr.remove(ventana)
+
+    def _cerrar_ventanas_resultados_fr(self):
+        for ventana in list(getattr(self, "_ventanas_resultados_fr", ())):
+            ventana.close()
+        self._ventanas_resultados_fr = []
 
     def _redibujar_formulas_aplicadas(self):
         """Dibuja solo la capa del nivel elegido, sin mezclar padres y subs."""
@@ -3005,6 +3184,8 @@ class AreaCentralGraficas(QFrame):
         permitidas = set(columnas) if columnas is not None else None
         curvas = []
         for clave in self.formulas_activas:
+            if clave == "fuerza_resultante":
+                continue
             calculo = self._calculos_formulas.get(clave)
             if calculo is None:
                 continue
@@ -3083,6 +3264,7 @@ class AreaCentralGraficas(QFrame):
 
         contexto = {
             "masa": self.masa_sujeto,
+            "masa_total": getattr(self, "masa_total_sujeto", None),
             "estatura": self.estatura_sujeto,
             "gravedad": self.gravedad,
             "frecuencia": self.frecuencia_grafica,
@@ -3093,6 +3275,7 @@ class AreaCentralGraficas(QFrame):
 
         roles_fijos = {}
         x_total = self.df_grafica_original[self.columna_x].to_numpy(dtype=float)
+        separar_huecos = clave == "fuerza_resultante"
         for rol in roles_a_usar:
             columna = self._columna_de_rol(rol)
             if columna is None:
@@ -3121,6 +3304,7 @@ class AreaCentralGraficas(QFrame):
                     contexto,
                     [intervalo],
                     eleccion,
+                    separar_huecos=separar_huecos,
                 )
                 resultados.extend(parciales)
                 segmentos.extend(tramos_parciales)
@@ -3134,6 +3318,7 @@ class AreaCentralGraficas(QFrame):
                 contexto,
                 intervalos_calculo,
                 eleccion,
+                separar_huecos=separar_huecos,
             )
             salida = desc.get("salida_rol")
             if salida not in roles_fijos and roles_a_usar:
@@ -3169,6 +3354,7 @@ class AreaCentralGraficas(QFrame):
 
     def quitar_formula(self):
         """Quita las fórmulas de intervalos padre sin tocar subintervalos."""
+        self._cerrar_ventanas_resultados_fr()
         self.formulas_activas = {}
         self._calculos_formulas = {}
         self.formula_activa = None

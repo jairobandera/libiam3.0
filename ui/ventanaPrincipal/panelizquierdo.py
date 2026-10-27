@@ -28,8 +28,8 @@ class PanelIzquierdo(QFrame):
     archivoCargado = Signal(str, object, object)
     archivoSeleccionado = Signal(str, object, object)
     modoSeleccionIntervaloCambiado = Signal(bool)
-    # Masa y estatura del archivo activo, más gravedad de la sesión: las usan
-    # las fórmulas creadas por el usuario.
+    # Variables del archivo activo, más gravedad de la sesión: las usan las
+    # fórmulas incorporadas y las creadas por el usuario.
     variablesCambiaron = Signal(object)
 
     # Gravedad en la superficie terrestre. Es una constante de sesión: se puede
@@ -48,6 +48,7 @@ class PanelIzquierdo(QFrame):
         self.alias_signal_conectado = False
         self.gravedad = self.GRAVEDAD_TIERRA
         self.masa_actual = None
+        self.masa_total_actual = None
         self.estatura_actual = None
         self._dialogo_carga = None
         self._hilo_carga = None
@@ -97,17 +98,27 @@ class PanelIzquierdo(QFrame):
         ):
             layout.setContentsMargins(margen, margen, margen, margen)
         extremo = ancho < 180
-        self.lbl_masa.setText("Masa")
+        self.lbl_masa.setText("M. corporal" if extremo else "Masa corporal")
+        self.lbl_masa_total.setText("M. total" if extremo else "Masa total")
         self.lbl_estatura.setText("Altura" if extremo else "Estatura")
         self.lbl_gravedad.setText("Grav." if extremo else "Gravedad")
+        self.lbl_masa.setToolTip("Masa corporal en kilogramos")
+        self.lbl_masa_total.setToolTip("Masa total en kilogramos")
         self.lbl_estatura.setToolTip("Estatura en metros")
         self.lbl_gravedad.setToolTip("Gravedad")
-        ancho_etiqueta = 45 if extremo else 60 if muy_compacto else 62
+        ancho_etiqueta = 64 if extremo else 78 if muy_compacto else 92
         for etiqueta in self.etiquetas_variables:
             etiqueta.setFixedWidth(ancho_etiqueta)
-        self.btn_guardar_masa.setText("Guardar")
-        self.btn_guardar_estatura.setText("Guardar")
-        self.btn_guardar_masa.setToolTip("Guardar masa")
+        texto_guardar = "✓" if muy_compacto else "Guardar"
+        ancho_guardar = 34 if muy_compacto else 70
+        self.btn_guardar_masa.setText(texto_guardar)
+        self.btn_guardar_masa_total.setText(texto_guardar)
+        self.btn_guardar_estatura.setText(texto_guardar)
+        self.btn_guardar_masa.setFixedWidth(ancho_guardar)
+        self.btn_guardar_masa_total.setFixedWidth(ancho_guardar)
+        self.btn_guardar_estatura.setFixedWidth(ancho_guardar)
+        self.btn_guardar_masa.setToolTip("Guardar masa corporal")
+        self.btn_guardar_masa_total.setToolTip("Guardar masa total")
         self.btn_guardar_estatura.setToolTip("Guardar estatura")
         if not self.input_gravedad.isReadOnly():
             self.btn_editar_gravedad.setText("Aceptar")
@@ -140,6 +151,7 @@ class PanelIzquierdo(QFrame):
         self.lbl_subframes.setText("Subframes: ---")
         self.lbl_registros.setText("Registros: ---")
         self.masa_actual = None
+        self.masa_total_actual = None
         self.estatura_actual = None
         self.gravedad = self.GRAVEDAD_TIERRA
         self.input_gravedad.setText(f"{self.GRAVEDAD_TIERRA:g}")
@@ -193,14 +205,15 @@ class PanelIzquierdo(QFrame):
         titulo.setObjectName("tituloSeccion")
         layout.addWidget(titulo)
 
-        # --- Masa (por archivo, se guarda en la BD) ---
+        # --- Masa corporal (por archivo, se guarda en la BD) ---
         fila_masa = QHBoxLayout()
         fila_masa.setSpacing(6)
 
-        lbl_masa = QLabel("Masa")
+        lbl_masa = QLabel("Masa corporal")
         self.lbl_masa = lbl_masa
         lbl_masa.setObjectName("varLabel")
-        lbl_masa.setFixedWidth(60)
+        lbl_masa.setFixedWidth(92)
+        lbl_masa.setToolTip("Masa corporal en kilogramos")
 
         self.input_masa = QLineEdit()
         self.input_masa.setObjectName("varInput")
@@ -223,6 +236,36 @@ class PanelIzquierdo(QFrame):
         self.lbl_estado_masa.setWordWrap(True)
         layout.addWidget(self.lbl_estado_masa)
 
+        # --- Masa total (por archivo, se guarda en la BD) ---
+        fila_masa_total = QHBoxLayout()
+        fila_masa_total.setSpacing(6)
+
+        self.lbl_masa_total = QLabel("Masa total")
+        self.lbl_masa_total.setObjectName("varLabel")
+        self.lbl_masa_total.setFixedWidth(92)
+        self.lbl_masa_total.setToolTip("Masa total en kilogramos")
+
+        self.input_masa_total = QLineEdit()
+        self.input_masa_total.setObjectName("varInput")
+        self.input_masa_total.setPlaceholderText("kg")
+        self.input_masa_total.setValidator(self._crear_validador_numerico())
+        self.input_masa_total.returnPressed.connect(self.guardar_masa_total)
+
+        self.btn_guardar_masa_total = QPushButton("Guardar")
+        self.btn_guardar_masa_total.setObjectName("btnGuardarVar")
+        self.btn_guardar_masa_total.setCursor(Qt.PointingHandCursor)
+        self.btn_guardar_masa_total.clicked.connect(self.guardar_masa_total)
+
+        fila_masa_total.addWidget(self.lbl_masa_total)
+        fila_masa_total.addWidget(self.input_masa_total, 1)
+        fila_masa_total.addWidget(self.btn_guardar_masa_total)
+        layout.addLayout(fila_masa_total)
+
+        self.lbl_estado_masa_total = QLabel("")
+        self.lbl_estado_masa_total.setObjectName("varEstado")
+        self.lbl_estado_masa_total.setWordWrap(True)
+        layout.addWidget(self.lbl_estado_masa_total)
+
         # --- Estatura (por archivo, en metros, se guarda en la BD) ---
         fila_estatura = QHBoxLayout()
         fila_estatura.setSpacing(6)
@@ -230,7 +273,7 @@ class PanelIzquierdo(QFrame):
         lbl_estatura = QLabel("Estatura")
         self.lbl_estatura = lbl_estatura
         lbl_estatura.setObjectName("varLabel")
-        lbl_estatura.setFixedWidth(60)
+        lbl_estatura.setFixedWidth(92)
 
         self.input_estatura = QLineEdit()
         self.input_estatura.setObjectName("varInput")
@@ -260,7 +303,7 @@ class PanelIzquierdo(QFrame):
         lbl_gravedad = QLabel("Gravedad")
         self.lbl_gravedad = lbl_gravedad
         lbl_gravedad.setObjectName("varLabel")
-        lbl_gravedad.setFixedWidth(60)
+        lbl_gravedad.setFixedWidth(92)
 
         self.input_gravedad = QLineEdit(f"{self.GRAVEDAD_TIERRA:g}")
         self.input_gravedad.setObjectName("varInput")
@@ -281,6 +324,7 @@ class PanelIzquierdo(QFrame):
         frame.setLayout(layout)
         self.etiquetas_variables = [
             self.lbl_masa,
+            self.lbl_masa_total,
             self.lbl_estatura,
             self.lbl_gravedad,
         ]
@@ -297,15 +341,19 @@ class PanelIzquierdo(QFrame):
         return QRegularExpressionValidator(expresion, self)
 
     def _set_variables_archivo_habilitadas(self, habilitada):
-        """Habilita masa y estatura únicamente cuando hay un CSV activo."""
+        """Habilita las variables asociadas al archivo cuando hay un CSV activo."""
         self.input_masa.setEnabled(habilitada)
         self.btn_guardar_masa.setEnabled(habilitada)
+        self.input_masa_total.setEnabled(habilitada)
+        self.btn_guardar_masa_total.setEnabled(habilitada)
         self.input_estatura.setEnabled(habilitada)
         self.btn_guardar_estatura.setEnabled(habilitada)
         if not habilitada:
             self.input_masa.clear()
+            self.input_masa_total.clear()
             self.input_estatura.clear()
             self.lbl_estado_masa.clear()
+            self.lbl_estado_masa_total.clear()
             self.lbl_estado_estatura.clear()
 
     def _emitir_variables(self):
@@ -313,6 +361,7 @@ class PanelIzquierdo(QFrame):
         self.variablesCambiaron.emit(
             {
                 "masa": self.masa_actual,
+                "masa_total": self.masa_total_actual,
                 "estatura": self.estatura_actual,
                 "gravedad": self.gravedad,
             }
@@ -331,6 +380,9 @@ class PanelIzquierdo(QFrame):
         self.masa_actual = self._valor_positivo(
             self.input_masa.text(), self.masa_actual
         )
+        self.masa_total_actual = self._valor_positivo(
+            self.input_masa_total.text(), self.masa_total_actual
+        )
         self.estatura_actual = self._valor_positivo(
             self.input_estatura.text(), self.estatura_actual
         )
@@ -340,6 +392,7 @@ class PanelIzquierdo(QFrame):
         self._emitir_variables()
         return {
             "masa": self.masa_actual,
+            "masa_total": self.masa_total_actual,
             "estatura": self.estatura_actual,
             "gravedad": self.gravedad,
         }
@@ -350,15 +403,20 @@ class PanelIzquierdo(QFrame):
             return
 
         masa = self._valor_positivo(variables.get("masa"))
+        masa_total = self._valor_positivo(variables.get("masa_total"))
         estatura = self._valor_positivo(variables.get("estatura"))
         gravedad = self._valor_positivo(
             variables.get("gravedad"), self.GRAVEDAD_TIERRA
         )
         self.masa_actual = masa
+        self.masa_total_actual = masa_total
         self.estatura_actual = estatura
         self.gravedad = gravedad
 
         self.input_masa.setText(f"{masa:g}" if masa is not None else "")
+        self.input_masa_total.setText(
+            f"{masa_total:g}" if masa_total is not None else ""
+        )
         self.input_estatura.setText(
             f"{estatura:g}" if estatura is not None else ""
         )
@@ -366,7 +424,11 @@ class PanelIzquierdo(QFrame):
         self.input_gravedad.setReadOnly(True)
         self.btn_editar_gravedad.setText("Editar")
         self.lbl_estado_masa.setText(
-            f"Masa restaurada: {masa:g} kg" if masa is not None else ""
+            f"Masa corporal restaurada: {masa:g} kg" if masa is not None else ""
+        )
+        self.lbl_estado_masa_total.setText(
+            f"Masa total restaurada: {masa_total:g} kg"
+            if masa_total is not None else ""
         )
         self.lbl_estado_estatura.setText(
             f"Estatura restaurada: {estatura:g} m"
@@ -375,7 +437,11 @@ class PanelIzquierdo(QFrame):
 
         ruta = self.archivo_actual.get("ruta")
         if self.db_session and ruta:
-            for nombre, valor in (("masa", masa), ("estatura", estatura)):
+            for nombre, valor in (
+                ("masa", masa),
+                ("masa_total", masa_total),
+                ("estatura", estatura),
+            ):
                 if valor is None:
                     eliminar_variable_archivo(
                         self.db_session, ruta, nombre
@@ -387,10 +453,11 @@ class PanelIzquierdo(QFrame):
         self._emitir_variables()
 
     def _cargar_variables_archivo(self):
-        """Sincroniza masa y estatura con el archivo actualmente activo."""
+        """Sincroniza las variables guardadas con el archivo actualmente activo."""
         ruta = self.archivo_actual.get("ruta") if self.archivo_actual else None
         if not ruta:
             self.masa_actual = None
+            self.masa_total_actual = None
             self.estatura_actual = None
             self._set_variables_archivo_habilitadas(False)
             self._emitir_variables()
@@ -398,12 +465,17 @@ class PanelIzquierdo(QFrame):
 
         self._set_variables_archivo_habilitadas(True)
         self.lbl_estado_masa.setText("")
+        self.lbl_estado_masa_total.setText("")
         self.lbl_estado_estatura.setText("")
 
         masa = None
+        masa_total = None
         estatura = None
         if self.db_session:
             masa = obtener_variable_archivo(self.db_session, ruta, "masa")
+            masa_total = obtener_variable_archivo(
+                self.db_session, ruta, "masa_total"
+            )
             estatura = obtener_variable_archivo(
                 self.db_session, ruta, "estatura"
             )
@@ -411,9 +483,20 @@ class PanelIzquierdo(QFrame):
         self.masa_actual = masa
         if masa is not None:
             self.input_masa.setText(f"{masa:g}")
-            self.lbl_estado_masa.setText(f"Masa guardada: {masa:g} kg")
+            self.lbl_estado_masa.setText(
+                f"Masa corporal guardada: {masa:g} kg"
+            )
         else:
             self.input_masa.clear()
+
+        self.masa_total_actual = masa_total
+        if masa_total is not None:
+            self.input_masa_total.setText(f"{masa_total:g}")
+            self.lbl_estado_masa_total.setText(
+                f"Masa total guardada: {masa_total:g} kg"
+            )
+        else:
+            self.input_masa_total.clear()
 
         self.estatura_actual = estatura
         if estatura is not None:
@@ -426,14 +509,14 @@ class PanelIzquierdo(QFrame):
         self._emitir_variables()
 
     def guardar_masa(self):
-        """Guarda la masa del archivo actual en la BD (crea o actualiza)."""
+        """Guarda la masa corporal del archivo actual."""
         ruta = self.archivo_actual.get("ruta") if self.archivo_actual else None
         if not ruta or not self.db_session:
             return
 
         texto = self.input_masa.text().strip().replace(",", ".")
         if not texto:
-            self.lbl_estado_masa.setText("Ingresá un valor de masa.")
+            self.lbl_estado_masa.setText("Ingresá la masa corporal.")
             return
 
         try:
@@ -441,13 +524,42 @@ class PanelIzquierdo(QFrame):
             if valor <= 0:
                 raise ValueError
         except ValueError:
-            self.lbl_estado_masa.setText("Valor de masa inválido.")
+            self.lbl_estado_masa.setText("Valor de masa corporal inválido.")
             return
 
         guardar_variable_archivo(self.db_session, ruta, "masa", valor)
         self.masa_actual = valor
         self.input_masa.setText(f"{valor:g}")
-        self.lbl_estado_masa.setText(f"Masa guardada: {valor:g} kg ✓")
+        self.lbl_estado_masa.setText(
+            f"Masa corporal guardada: {valor:g} kg ✓"
+        )
+        self._emitir_variables()
+
+    def guardar_masa_total(self):
+        """Guarda la masa total del archivo actual."""
+        ruta = self.archivo_actual.get("ruta") if self.archivo_actual else None
+        if not ruta or not self.db_session:
+            return
+
+        texto = self.input_masa_total.text().strip().replace(",", ".")
+        if not texto:
+            self.lbl_estado_masa_total.setText("Ingresá la masa total.")
+            return
+
+        try:
+            valor = float(texto)
+            if valor <= 0:
+                raise ValueError
+        except ValueError:
+            self.lbl_estado_masa_total.setText("Valor de masa total inválido.")
+            return
+
+        guardar_variable_archivo(self.db_session, ruta, "masa_total", valor)
+        self.masa_total_actual = valor
+        self.input_masa_total.setText(f"{valor:g}")
+        self.lbl_estado_masa_total.setText(
+            f"Masa total guardada: {valor:g} kg ✓"
+        )
         self._emitir_variables()
 
     def guardar_estatura(self):
@@ -755,7 +867,7 @@ class PanelIzquierdo(QFrame):
 
         self.archivoCargado.emit(nombre_archivo, df, info)
 
-        # Cargar masa y estatura guardadas (o dejar sus campos vacíos).
+        # Cargar las variables guardadas (o dejar sus campos vacíos).
         self._cargar_variables_archivo()
 
         if mostrar_resumen:
@@ -849,7 +961,7 @@ class PanelIzquierdo(QFrame):
 
         self.archivoSeleccionado.emit(nombre_archivo, df, info)
 
-        # Cargar masa y estatura guardadas del archivo seleccionado.
+        # Cargar las variables guardadas del archivo seleccionado.
         self._cargar_variables_archivo()
 
         # Actualizar panel derecho con los datos del archivo seleccionado

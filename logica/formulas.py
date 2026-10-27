@@ -8,6 +8,8 @@ import re
 
 import numpy as np
 
+from logica.intervalos import entero_frame
+
 
 class ErrorFormula(ValueError):
     pass
@@ -41,7 +43,7 @@ def _validar_parametros(masa, gravedad, frecuencia):
 
     if masa <= 0:
         raise ErrorFormula(
-            "Cargá la masa del sujeto en el panel izquierdo para calcular la potencia."
+            "Cargá la masa corporal en el panel izquierdo para calcular la potencia."
         )
     if gravedad <= 0:
         raise ErrorFormula("La gravedad debe ser mayor que cero.")
@@ -194,6 +196,93 @@ def _fuerza_neta_desde(roles, contexto, eleccion=None):
         contexto.get("gravedad", 9.8),
     )
 
+
+def _fuerza_resultante_desde(roles, contexto, eleccion=None):
+    """Magnitud tridimensional de la fuerza, sin modificar sus componentes."""
+    fx = np.asarray(roles["Fx"], dtype=float)
+    fy = np.asarray(roles["Fy"], dtype=float)
+    fz = np.asarray(roles["Fz"], dtype=float)
+    return np.sqrt(fx * fx + fy * fy + fz * fz)
+
+
+ROLES_FUERZA_RESULTANTE = ("Fx", "Fy", "Fz")
+
+
+def _texto_faltantes_fuerza_resultante(faltantes):
+    if len(faltantes) == 1:
+        return f"falta la señal {faltantes[0]}"
+    return "faltan las señales " + " y ".join(faltantes)
+
+
+def agrupar_intervalos_fuerza_resultante(intervalos, columnas_por_rol):
+    """Forma recortes completos con Fx, Fy y Fz en los mismos frames.
+
+    Devuelve los grupos válidos y advertencias para los recortes incompletos.
+    Las columnas reales se resuelven desde el mapeo, por lo que no dependen de
+    que el CSV use literalmente los nombres Fx, Fy y Fz.
+    """
+    columnas = {
+        rol: columnas_por_rol.get(rol) for rol in ROLES_FUERZA_RESULTANTE
+    }
+    rol_por_columna = {
+        columna: rol for rol, columna in columnas.items() if columna
+    }
+
+    por_tiempo = {}
+    ajenos = set()
+    for intervalo in intervalos or ():
+        columna = intervalo.get("columna")
+        rol = rol_por_columna.get(columna)
+        if rol is None:
+            if columna:
+                ajenos.add(str(columna))
+            continue
+        try:
+            desde = entero_frame(intervalo["desde"])
+            hasta = entero_frame(intervalo["hasta"])
+        except (KeyError, ValueError) as exc:
+            raise ErrorFormula(str(exc)) from None
+        por_tiempo.setdefault((desde, hasta), {}).setdefault(rol, intervalo)
+
+    grupos, advertencias = [], []
+    for (desde, hasta), presentes in sorted(por_tiempo.items()):
+        faltantes = [
+            rol for rol in ROLES_FUERZA_RESULTANTE if rol not in presentes
+        ]
+        if faltantes:
+            advertencias.append(
+                f"No se calculó el intervalo Frame {desde}–{hasta}: "
+                f"{_texto_faltantes_fuerza_resultante(faltantes)}."
+            )
+            continue
+
+        referencia = presentes["Fz"]
+        numero = referencia.get("numero")
+        grupos.append(
+            {
+                "id": f"FR::{desde}::{hasta}",
+                "desde": desde,
+                "hasta": hasta,
+                "numero": numero,
+                "nombre": referencia.get("nombre") or f"Intervalo {numero}",
+                "columna": columnas["Fz"],
+                "senal": "Fuerza resultante",
+                "componentes": dict(columnas),
+                "ids_origen": [
+                    presentes[rol].get("id")
+                    for rol in ROLES_FUERZA_RESULTANTE
+                    if presentes[rol].get("id") is not None
+                ],
+            }
+        )
+
+    if ajenos:
+        advertencias.append(
+            "La fuerza resultante solo usa Fx, Fy y Fz; se ignoraron los "
+            f"intervalos de: {', '.join(sorted(ajenos))}."
+        )
+    return grupos, advertencias
+
 ROLES = {
     "Fx": ("Fuerza", "eje_x"), "Fy": ("Fuerza", "eje_y"),
     "Fz": ("Fuerza", "eje_z"),
@@ -217,7 +306,8 @@ NOMBRES_ROLES = {
 # todos sus componentes pertenecen a esta lista blanca.
 VARIABLE_SENAL_INTERVALO = "senal"
 VARIABLES_CONTEXTO = {
-    "masa": "Cargá la masa del sujeto en el panel izquierdo.",
+    "masa": "Cargá la masa corporal en el panel izquierdo.",
+    "masa_total": "Cargá la masa total en el panel izquierdo.",
     "estatura": "Cargá la estatura del sujeto en el panel izquierdo.",
     "gravedad": "La gravedad debe ser mayor que cero.",
     "frecuencia": "No se pudo determinar la frecuencia de muestreo. "
@@ -253,7 +343,8 @@ def nombre_variable_constructor(variable) -> str:
     if variable in NOMBRES_ROLES:
         return f"{variable} ({NOMBRES_ROLES[variable].lower()})"
     return {
-        "masa": "masa",
+        "masa": "masa corporal",
+        "masa_total": "masa total",
         "estatura": "estatura",
         "gravedad": "gravedad",
         "frecuencia": "frecuencia",
@@ -572,7 +663,7 @@ FORMULAS = {
         "requiere_roles": ("Fz",),
         "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
-            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+            "masa": "Cargá la masa corporal en el panel izquierdo para "
                     "poder calcular la aceleración.",
             "gravedad": "La gravedad debe ser mayor que cero.",
         },
@@ -589,7 +680,7 @@ FORMULAS = {
         "requiere_roles": ("Fz",),
         "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
-            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+            "masa": "Cargá la masa corporal en el panel izquierdo para "
                     "poder calcular la velocidad.",
             "gravedad": "La gravedad debe ser mayor que cero.",
             "frecuencia": "No se pudo determinar la frecuencia de muestreo "
@@ -610,7 +701,7 @@ FORMULAS = {
         "requiere_roles": ("Fz",),
         "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
-            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+            "masa": "Cargá la masa corporal en el panel izquierdo para "
                     "poder calcular la potencia.",
             "gravedad": "La gravedad debe ser mayor que cero.",
             "frecuencia": "No se pudo determinar la frecuencia de muestreo "
@@ -629,7 +720,7 @@ FORMULAS = {
         "requiere_roles": ("Fz",),
         "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
-            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+            "masa": "Cargá la masa corporal en el panel izquierdo para "
                     "poder calcular el impulso.",
             "gravedad": "La gravedad debe ser mayor que cero.",
             "frecuencia": "No se pudo determinar la frecuencia de muestreo "
@@ -649,11 +740,23 @@ FORMULAS = {
         "requiere_roles": ("Fz",),
         "intervalos_en_rol": {"rol": "Fz"},
         "requiere": {
-            "masa": "Cargá la masa del sujeto en el panel izquierdo para "
+            "masa": "Cargá la masa corporal en el panel izquierdo para "
                     "poder calcular la fuerza neta.",
             "gravedad": "La gravedad debe ser mayor que cero.",
         },
         "computar": _fuerza_neta_desde,
+    },
+    "fuerza_resultante": {
+        "nombre": "Fuerza resultante",
+        "articulo": "la",
+        "expresion": "FR = √(Fx² + Fy² + Fz²)",
+        "expresion_constructor": "raiz(Fx*Fx + Fy*Fy + Fz*Fz)",
+        "unidad": "N",
+        "salida_rol": "Fz",
+        "integra_en_registro": False,
+        "requiere_roles": ROLES_FUERZA_RESULTANTE,
+        "requiere": {},
+        "computar": _fuerza_resultante_desde,
     },
 }
 
@@ -928,7 +1031,7 @@ def solo_ids_por_nivel_de_columna(
     permitidos = {
         intervalo.get("id", intervalo.get("numero"))
         for intervalo in intervalos or ()
-        if intervalo.get("columna", "__global__") == columna
+        if (columna is None or intervalo.get("columna", "__global__") == columna)
         and bool(intervalo.get("es_subintervalo")) == buscar_subintervalos
     }
     return [
@@ -1115,7 +1218,15 @@ def _preparar_salida_personalizada(valores, x_segmento):
     return None, arreglo
 
 
-def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
+def computar_formula(
+    clave,
+    roles,
+    x,
+    contexto,
+    intervalos,
+    eleccion=None,
+    separar_huecos=False,
+):
     desc = FORMULAS[clave]
     motivo = validar_formula(clave, contexto, set(roles))
     if motivo:
@@ -1123,6 +1234,11 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
 
     resultados, segmentos = [], []
     frecuencia = contexto.get("frecuencia")
+
+    def _tramos(lista):
+        if not separar_huecos:
+            return lista
+        return [_separar_huecos(sx, sy) for sx, sy in lista]
 
     # Se omiten las posiciones inválidas sin inventar valores intermedios.
     finito = np.isfinite(x)
@@ -1175,7 +1291,7 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
             )
             segmentos.append((x_seg, valores))
 
-        return resultados, segmentos
+        return resultados, _tramos(segmentos)
 
     # Las demás fórmulas se calculan por separado en cada intervalo.
     for datos in intervalos:
@@ -1221,7 +1337,7 @@ def computar_formula(clave, roles, x, contexto, intervalos, eleccion=None):
             else (np.array([], dtype=float), np.array([], dtype=float))
         )
 
-    return resultados, segmentos
+    return resultados, _tramos(segmentos)
 
 def picos_de_resultados(resultados):
     picos = []
@@ -1240,6 +1356,25 @@ def picos_de_resultados(resultados):
                 }
             )
     return picos
+
+
+def _separar_huecos(x, valores):
+    """Inserta cortes visuales cuando faltan frames, sin interpolarlos."""
+    if valores is None or len(x) < 2:
+        return x, valores
+    saltos = np.flatnonzero(np.diff(x) > 1)
+    if saltos.size == 0:
+        return x, valores
+    trozos_x, trozos_y, inicio = [], [], 0
+    for corte in saltos:
+        trozos_x.append(x[inicio : corte + 1])
+        trozos_y.append(valores[inicio : corte + 1])
+        trozos_x.append(np.array([np.nan]))
+        trozos_y.append(np.array([np.nan]))
+        inicio = corte + 1
+    trozos_x.append(x[inicio:])
+    trozos_y.append(valores[inicio:])
+    return np.concatenate(trozos_x), np.concatenate(trozos_y)
 
 def concatenar_curva(segmentos):
     if not segmentos:

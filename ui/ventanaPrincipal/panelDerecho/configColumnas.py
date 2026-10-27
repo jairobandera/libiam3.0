@@ -166,7 +166,6 @@ class ConfigColumnas(QFrame):
         """Carga los datos detectados del CSV en la UI."""
         deteccion = info.get("deteccion", {})
         columnas = info.get("columnas_csv", [])
-
         self.mapeo.inicializar(deteccion, columnas)
         self._orden_filas = {}
 

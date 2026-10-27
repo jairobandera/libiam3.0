@@ -14,7 +14,7 @@ class BarraBotones(QFrame):
     def __init__(self, panel_derecho):
         super().__init__()
         self.setObjectName("barraBotones")
-        self.setFixedWidth(80)
+        self.setFixedWidth(124)
         self.panel_derecho = panel_derecho
 
         # Rutas de los iconos SVG
@@ -30,51 +30,55 @@ class BarraBotones(QFrame):
 
         layout = QVBoxLayout()
         self.layout_principal = layout
-        layout.setContentsMargins(6, 12, 6, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(5, 10, 5, 10)
+        layout.setSpacing(8)
 
         # Boton toggle Mapeo de Columnas
-        self.btn_mapeo = QPushButton()
+        self.btn_mapeo = QPushButton("Variables")
         self.btn_mapeo.setObjectName("btnToggleMapeo")
-        self.btn_mapeo.setFixedSize(70, 35)
+        self.btn_mapeo.setFixedSize(114, 44)
         self.btn_mapeo.setIcon(self.icon_expandir)
         self.btn_mapeo.setIconSize(QSize(20, 20))
         self.btn_mapeo.setCursor(Qt.PointingHandCursor)
         self.btn_mapeo.setProperty("activo", "false")
-        self.btn_mapeo.setToolTip("Mapeo de columnas")
+        self.btn_mapeo.setToolTip("Configurar las variables y señales visibles")
+        self.btn_mapeo.setAccessibleName("Variables")
         self.btn_mapeo.clicked.connect(lambda: self.toggle_panel("mapeo"))
 
         # Boton toggle Filtros
-        self.btn_filtros = QPushButton()
+        self.btn_filtros = QPushButton("Filtros")
         self.btn_filtros.setObjectName("btnToggleFiltros")
-        self.btn_filtros.setFixedSize(70, 35)
+        self.btn_filtros.setFixedSize(114, 44)
         self.btn_filtros.setIcon(self.icon_expandir)
         self.btn_filtros.setIconSize(QSize(20, 20))
         self.btn_filtros.setCursor(Qt.PointingHandCursor)
         self.btn_filtros.setProperty("activo", "false")
-        self.btn_filtros.setToolTip("Filtros")
+        self.btn_filtros.setToolTip("Configurar filtros y frecuencia")
+        self.btn_filtros.setAccessibleName("Filtros")
         self.btn_filtros.clicked.connect(lambda: self.toggle_panel("filtros"))
 
         # Boton toggle Formulas
-        self.btn_formulas = QPushButton()
+        self.btn_formulas = QPushButton("Recorte y\nfórmulas")
         self.btn_formulas.setObjectName("btnToggleFormulas")
-        self.btn_formulas.setFixedSize(70, 35)
+        self.btn_formulas.setFixedSize(114, 44)
         self.btn_formulas.setIcon(self.icon_expandir)
         self.btn_formulas.setIconSize(QSize(20, 20))
         self.btn_formulas.setCursor(Qt.PointingHandCursor)
         self.btn_formulas.setProperty("activo", "false")
-        self.btn_formulas.setToolTip("Intervalos para cálculos")
+        self.btn_formulas.setToolTip("Seleccionar recortes y aplicar fórmulas")
+        self.btn_formulas.setAccessibleName("Recorte y fórmulas")
         self.btn_formulas.clicked.connect(lambda: self.toggle_panel("formulas"))
 
         # Boton toggle Detectar Cabeceras
-        self.btn_detectar_cabeceras = QPushButton()
+        self.btn_detectar_cabeceras = QPushButton("Cabeceras")
         self.btn_detectar_cabeceras.setObjectName("btnToggleDetectarCabeceras")
-        self.btn_detectar_cabeceras.setFixedSize(70, 35)
+        self.btn_detectar_cabeceras.setFixedSize(114, 44)
         self.btn_detectar_cabeceras.setIcon(self.icon_expandir)
         self.btn_detectar_cabeceras.setIconSize(QSize(20, 20))
         self.btn_detectar_cabeceras.setCursor(Qt.PointingHandCursor)
         self.btn_detectar_cabeceras.setProperty("activo", "false")
-        self.btn_detectar_cabeceras.setToolTip("Detectar cabeceras")
+        self.btn_detectar_cabeceras.setToolTip("Revisar las cabeceras detectadas")
+        self.btn_detectar_cabeceras.setAccessibleName("Cabeceras")
         self.btn_detectar_cabeceras.clicked.connect(lambda: self.toggle_panel("detectar_cabeceras"))
 
         layout.addWidget(self.btn_mapeo)
@@ -86,15 +90,15 @@ class BarraBotones(QFrame):
         self.setLayout(layout)
 
     def ajustar_modo(self, ancho, compacto=False, muy_compacto=False):
-        """Mantiene utilizables los cuatro accesos en ventanas angostas."""
-        ancho = max(40, int(ancho))
+        """Mantiene visibles los nombres de los cuatro accesos."""
+        ancho = max(100, int(ancho))
         self.setFixedWidth(ancho)
-        margen = 3 if compacto else 6
+        margen = 3 if muy_compacto else 4 if compacto else 5
         self.layout_principal.setContentsMargins(margen, 8, margen, 8)
-        self.layout_principal.setSpacing(7 if compacto else 12)
+        self.layout_principal.setSpacing(6 if compacto else 8)
         ancho_boton = max(34, ancho - 2 * margen)
-        alto_boton = 32 if muy_compacto else 35
-        icono = QSize(18, 18) if compacto else QSize(20, 20)
+        alto_boton = 42 if muy_compacto else 44
+        icono = QSize(14, 14) if compacto else QSize(16, 16)
         for boton in (
             self.btn_mapeo,
             self.btn_filtros,

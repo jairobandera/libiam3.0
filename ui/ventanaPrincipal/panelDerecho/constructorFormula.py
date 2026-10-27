@@ -45,6 +45,20 @@ PLANTILLAS = (
         "unidad": "N·s",
         "ayuda": "Usa Fz.",
     },
+    {
+        "texto": "Impacto",
+        "nombre": "Impacto personalizado",
+        "expresion": "maximo(Fz)",
+        "unidad": "N",
+        "ayuda": "Obtiene el pico máximo de Fz en cada intervalo.",
+    },
+    {
+        "texto": "Fuerza resultante",
+        "nombre": "Fuerza resultante personalizada",
+        "expresion": "raiz(Fx*Fx + Fy*Fy + Fz*Fz)",
+        "unidad": "N",
+        "ayuda": "Calcula el módulo combinado de Fx, Fy y Fz.",
+    },
 )
 
 
@@ -390,7 +404,7 @@ class ConstructorFormula(QDialog):
         self.input_expresion.setObjectName("inputExpresionFormula")
         self.input_expresion.setMaxLength(500)
         self.input_expresion.setPlaceholderText(
-            "Ej.: senal / (masa * gravedad)"
+            "Ej.: senal / (masa * gravedad) o senal / masa_total"
         )
         self.input_expresion.setClearButtonEnabled(True)
         self.input_expresion.setAccessibleName("Expresión de la fórmula")
@@ -530,7 +544,16 @@ class ConstructorFormula(QDialog):
         contexto = QGridLayout()
         contexto.setSpacing(5)
         for indice, (texto, token, ayuda) in enumerate((
-            ("Masa", "masa", "Masa cargada en el panel izquierdo"),
+            (
+                "Masa corporal",
+                "masa",
+                "Masa corporal cargada en el panel izquierdo",
+            ),
+            (
+                "Masa total",
+                "masa_total",
+                "Masa total cargada en el panel izquierdo",
+            ),
             ("Estatura", "estatura", "Estatura cargada en metros"),
             ("Gravedad", "gravedad", "Gravedad configurada"),
             ("Frecuencia", "frecuencia", "Frecuencia efectiva en Hz"),

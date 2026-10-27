@@ -25,6 +25,8 @@ cada paleta requiere su fuente o criterio documentado, no colores inventados.
 
 from __future__ import annotations
 
+import re
+
 
 MODO_ESTANDAR = "estandar"
 MODO_ROJO_VERDE = "rojo_verde"
@@ -113,6 +115,9 @@ PALETAS = {
     },
 }
 
+COLOR_ORIGINAL_PREDETERMINADO = PALETAS[MODO_ESTANDAR]["senal_original"]
+COLOR_FILTRADA_PREDETERMINADO = PALETAS[MODO_ESTANDAR]["senal_filtrada"]
+
 # Nombre humano de cada color, para la opción «mostrar el nombre del color en
 # el intervalo» (se muestra en el tooltip). Un mismo hex vale en todas las paletas.
 NOMBRES_COLOR = {
@@ -164,6 +169,10 @@ NOMBRES_COLOR = {
 
 
 _modo_actual = MODO_ESTANDAR
+_colores_senales_configurados = {
+    "senal_original": COLOR_ORIGINAL_PREDETERMINADO,
+    "senal_filtrada": COLOR_FILTRADA_PREDETERMINADO,
+}
 
 
 def modo_actual() -> str:
@@ -216,11 +225,54 @@ def color_intervalo(numero: int) -> str:
 
 
 def color_senal_original() -> str:
+    if _modo_actual == MODO_ESTANDAR:
+        return _colores_senales_configurados["senal_original"]
     return PALETAS[_modo_actual]["senal_original"]
 
 
 def color_senal_filtrada() -> str:
+    if _modo_actual == MODO_ESTANDAR:
+        return _colores_senales_configurados["senal_filtrada"]
     return PALETAS[_modo_actual]["senal_filtrada"]
+
+
+def normalizar_color(color) -> str | None:
+    """Devuelve un color ``#RRGGBB`` válido o ``None``."""
+    valor = str(color or "").strip().upper()
+    if not valor.startswith("#"):
+        valor = "#" + valor
+    if re.fullmatch(r"#[0-9A-F]{6}", valor) is None:
+        return None
+    return valor
+
+
+def colores_senales_configurados() -> dict:
+    """Colores elegidos para el modo estándar, independientemente del modo activo."""
+    return dict(_colores_senales_configurados)
+
+
+def set_colores_senales(original, filtrada) -> bool:
+    """Cambia los colores del modo estándar y devuelve si hubo una modificación."""
+    original = normalizar_color(original)
+    filtrada = normalizar_color(filtrada)
+    if original is None or filtrada is None:
+        raise ValueError("Los colores deben tener el formato #RRGGBB.")
+    nuevos = {
+        "senal_original": original,
+        "senal_filtrada": filtrada,
+    }
+    if nuevos == _colores_senales_configurados:
+        return False
+    _colores_senales_configurados.update(nuevos)
+    return True
+
+
+def restaurar_colores_senales() -> bool:
+    """Restaura azul y ámbar como colores de las señales del modo estándar."""
+    return set_colores_senales(
+        COLOR_ORIGINAL_PREDETERMINADO,
+        COLOR_FILTRADA_PREDETERMINADO,
+    )
 
 
 def color_senal_formula() -> str:

@@ -13,6 +13,21 @@ from logica import paleta
 COLORES_INTERVALOS = paleta.PALETAS[paleta.MODO_ESTANDAR]["intervalos"]
 
 
+def entero_frame(valor) -> int:
+    """Convierte un límite de frame a entero sin truncar decimales."""
+    if isinstance(valor, bool):
+        raise ValueError(f"El límite de frame «{valor}» no es un número entero.")
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"El límite de frame «{valor}» no es un número entero."
+        ) from None
+    if numero != valor:
+        raise ValueError(f"El límite de frame {valor!r} no es un número entero.")
+    return numero
+
+
 class IntervaloSuperpuestoError(ValueError):
     def __init__(self, intervalo_existente):
         self.intervalo_existente = intervalo_existente

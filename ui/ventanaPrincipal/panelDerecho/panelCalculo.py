@@ -40,9 +40,10 @@ class PanelCalculo(QFrame):
     importarFormulasSolicitado = Signal()
     exportarFormulasSolicitado = Signal()
 
-    def __init__(self, permitir_gestion=False):
+    def __init__(self, permitir_gestion=False, excluir_claves=()):
         super().__init__()
         self.permitir_gestion = bool(permitir_gestion)
+        self.excluir_claves = frozenset(excluir_claves or ())
         self.setObjectName("seccionFormulas")
         self.ultimos_resultados = None
         self.init_ui()
@@ -163,6 +164,8 @@ class PanelCalculo(QFrame):
         # El listado sale del registro ``logica.formulas.FORMULAS``: agregar una
         # fórmula allí la muestra sola, sin tocar la interfaz.
         for clave, descripcion in formulas_logica.FORMULAS.items():
+            if clave in self.excluir_claves:
+                continue
             self.cmb_formula.addItem(descripcion["nombre"], clave)
         self.cmb_formula.setCurrentIndex(0)
         self.cmb_formula.currentIndexChanged.connect(
@@ -230,6 +233,8 @@ class PanelCalculo(QFrame):
         self.cmb_formula.blockSignals(True)
         self.cmb_formula.clear()
         for clave, descripcion in formulas_logica.FORMULAS.items():
+            if clave in self.excluir_claves:
+                continue
             nombre = descripcion["nombre"]
             if descripcion.get("personalizada"):
                 nombre = f"{nombre} (propia)"
@@ -238,6 +243,15 @@ class PanelCalculo(QFrame):
         self.cmb_formula.setCurrentIndex(indice if indice >= 0 else 0)
         self.cmb_formula.blockSignals(False)
         self._actualizar_formula_seleccionada()
+
+    def set_claves_excluidas(self, claves=()):
+        """Oculta fórmulas que no son válidas en el contexto del contenedor."""
+        nuevas = frozenset(claves or ())
+        if nuevas == self.excluir_claves:
+            return
+        seleccion = self.formula_seleccionada()
+        self.excluir_claves = nuevas
+        self.recargar_formulas(seleccionar=seleccion)
 
     def _actualizar_formula_seleccionada(self, _indice=None):
         clave = self.formula_seleccionada()

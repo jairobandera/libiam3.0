@@ -286,6 +286,27 @@ class TestExportacion(unittest.TestCase):
         )
         self.assertEqual(len(calculos[0]["resultados"]), 2)
 
+    def test_fuerza_resultante_se_filtra_por_cualquiera_de_sus_componentes(self):
+        calculos = [
+            {
+                "clave": "fuerza_resultante",
+                "resultados": [
+                    {
+                        "id": "FR::10::20",
+                        "ids_origen": ["Fx::1", "Fy::1", "Fz::1"],
+                    }
+                ],
+            }
+        ]
+
+        filtrados = exportacion.filtrar_resultados_formulas(
+            calculos,
+            ["Fy::1"],
+        )
+
+        self.assertEqual(len(filtrados), 1)
+        self.assertEqual(filtrados[0]["resultados"][0]["id"], "FR::10::20")
+
     def test_csv_usa_bom_y_el_paquete_es_integro(self):
         with tempfile.TemporaryDirectory() as carpeta:
             carpeta = Path(carpeta)

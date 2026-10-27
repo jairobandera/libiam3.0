@@ -465,6 +465,7 @@ def filtrar_resultados_formulas(calculos, identificadores=None):
             resultado
             for resultado in datos.get("resultados") or ()
             if resultado.get("id") in permitidos
+            or bool(set(resultado.get("ids_origen") or ()) & permitidos)
         ]
         if not resultados:
             continue

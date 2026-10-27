@@ -23,6 +23,7 @@ if DEPENDENCIAS_UI:
         AreaCentralGraficas,
         GraficaSenal,
         ViewBoxFormula,
+        ViewBoxZoom,
     )
     from ui.ventanaPrincipal.panelDerecho.formulas import Formulas
     from ui.ventanaPrincipal.panelDerecho.configColumnas import ConfigColumnas
@@ -45,6 +46,34 @@ class TestInteraccionGrafica(unittest.TestCase):
         finally:
             grafica.close()
 
+    def test_la_rueda_respeta_zoom_x_y_o_ambos(self):
+        from logica import preferencias_graficas
+
+        vista = ViewBoxZoom()
+        vista.mapSceneToView = Mock(return_value=object())
+        vista.scaleBy = Mock()
+        evento = SimpleNamespace(
+            delta=lambda: 120,
+            scenePos=lambda: object(),
+            accept=Mock(),
+        )
+        try:
+            for modo, esperado in (
+                (preferencias_graficas.MODO_ZOOM_X, (0.85, 1.0)),
+                (preferencias_graficas.MODO_ZOOM_Y, (1.0, 0.85)),
+                (preferencias_graficas.MODO_ZOOM_XY, (0.85, 0.85)),
+            ):
+                with self.subTest(modo=modo):
+                    preferencias_graficas.guardar_modo_zoom(modo)
+                    vista.scaleBy.reset_mock()
+                    vista.wheelEvent(evento)
+                    argumentos = vista.scaleBy.call_args.kwargs
+                    self.assertEqual(
+                        (argumentos["x"], argumentos["y"]), esperado
+                    )
+        finally:
+            preferencias_graficas.restaurar_modo_zoom()
+
     def test_restaurar_mapeo_repone_orden_y_visibilidad(self):
         panel = ConfigColumnas()
         info = {
@@ -58,6 +87,7 @@ class TestInteraccionGrafica(unittest.TestCase):
                 }
             },
             "columnas_csv": ["Frame", "Fx", "Fy", "Fz"],
+            "unidades": {"Fx": "N", "Fy": "N", "Fz": "N"},
         }
         guardado = {
             "Fuerza": {
@@ -673,6 +703,93 @@ class TestInteraccionGrafica(unittest.TestCase):
             self.assertEqual(dialogo.ids_intervalos_seleccionados(), ["Fz::1"])
         finally:
             dialogo.close()
+
+    def test_selector_puede_reunir_todas_las_senales_visibles(self):
+        panel = Formulas()
+        try:
+            panel.cargar_senales(
+                [
+                    {"nombre": "Fuerza X", "columna": "Fx", "visible": True},
+                    {"nombre": "Fuerza Y", "columna": "Fy", "visible": True},
+                    {"nombre": "Fuerza Z", "columna": "Fz", "visible": True},
+                ]
+            )
+            self.assertEqual(panel.cmb_senal.itemText(0), "Todas las señales visibles")
+            self.assertIsNone(panel.cmb_senal.itemData(0))
+        finally:
+            panel.close()
+
+    def test_fuerza_resultante_agrupa_y_se_dibuja_en_fx_fy_fz(self):
+        area = AreaCentralGraficas()
+        self.addCleanup(area.close)
+        area.cargar_dataframe(
+            "fuerzas.csv",
+            pd.DataFrame(
+                {
+                    "Frame": [0, 1, 2],
+                    "Fx": [3.0, 0.0, 5.0],
+                    "Fy": [4.0, 0.0, 12.0],
+                    "Fz": [0.0, 10.0, 0.0],
+                }
+            ),
+            {
+                "deteccion": {
+                    "mapeo": {
+                        "Fuerza": {
+                            "eje_x": "Fx",
+                            "eje_y": "Fy",
+                            "eje_z": "Fz",
+                        }
+                    }
+                },
+                "unidades": {"Fx": "N", "Fy": "N", "Fz": "N"},
+            },
+        )
+        for columna in ("Fx", "Fy", "Fz"):
+            area.gestores_intervalos[columna].agregar(0, 2, indice_color=1)
+
+        self.assertTrue(
+            area.aplicar_formula(
+                {
+                    "clave": "fuerza_resultante",
+                    "intervalos": ["Fx::1", "Fy::1", "Fz::1"],
+                },
+                avisar=False,
+                actualizar_vista=False,
+            )
+        )
+        calculo = area._calculos_formulas["fuerza_resultante"]
+        self.assertEqual(len(calculo["datos_panel"]["resultados"]), 1)
+        np.testing.assert_allclose(
+            calculo["datos_panel"]["resultados"][0]["resumen"]["pico"],
+            13.0,
+        )
+        self.assertEqual(set(calculo["por_grafica"]), {"Fx", "Fy", "Fz"})
+        for columna in ("Fx", "Fy", "Fz"):
+            np.testing.assert_allclose(
+                calculo["por_grafica"][columna]["segmentos"][0][1],
+                [5.0, 10.0, 13.0],
+            )
+
+    def test_fuerza_resultante_rechaza_subintervalos(self):
+        area = SimpleNamespace(
+            df_grafica_original=object(),
+            _ultimo_error_formula="",
+            formulaEstadoCambiado=SimpleNamespace(emit=Mock()),
+        )
+        area._rechazar_aplicacion_formula = lambda mensaje, avisar: (
+            AreaCentralGraficas._rechazar_aplicacion_formula(
+                area, mensaje, avisar
+            )
+        )
+
+        resultado = AreaCentralGraficas.aplicar_formula_subintervalos(
+            area,
+            {"clave": "fuerza_resultante", "intervalos": ["Fx::1::sub::1"]},
+        )
+
+        self.assertFalse(resultado)
+        self.assertIn("intervalos padre", area._ultimo_error_formula)
 
 
 if __name__ == "__main__":

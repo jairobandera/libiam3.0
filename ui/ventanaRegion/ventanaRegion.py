@@ -147,7 +147,8 @@ class VentanaRegion(QDialog):
         seccion = self._crear_selector_subintervalos()
 
         self.panel_calculo = PanelCalculo(
-            permitir_gestion=permitir_gestion_formulas
+            permitir_gestion=permitir_gestion_formulas,
+            excluir_claves=("fuerza_resultante",),
         )
         # La fuente (filtrada/original) depende de si esta señal tiene filtro.
         self.panel_calculo.set_hay_filtro(y_filtrada is not None)

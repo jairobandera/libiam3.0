@@ -1117,10 +1117,17 @@ class TestConstructorFormulas(unittest.TestCase):
     def test_reutilizar_ofrece_las_integradas_sin_duplicados_ni_vertical(self):
         disponibles = formulas.calculos_reutilizables()
 
-        self.assertEqual(len(disponibles), 5)
+        self.assertEqual(len(disponibles), 6)
         self.assertEqual(
             {d["nombre"] for d in disponibles},
-            {"Fuerza neta", "Aceleración", "Velocidad", "Potencia", "Impulso"},
+            {
+                "Fuerza neta",
+                "Fuerza resultante",
+                "Aceleración",
+                "Velocidad",
+                "Potencia",
+                "Impulso",
+            },
         )
         for calculo in disponibles:
             with self.subTest(calculo=calculo["nombre"]):
@@ -1158,6 +1165,54 @@ class TestConstructorFormulas(unittest.TestCase):
             {"Fz": np.array([100.0, 200.0]), "estatura": 2.0},
         )
         np.testing.assert_allclose(resultado, [50.0, 100.0])
+
+    def test_masa_corporal_y_masa_total_son_variables_independientes(self):
+        analisis = formulas.analizar_expresion_personalizada(
+            "Fz / masa + Fz / masa_total"
+        )
+        self.assertIn("masa", analisis["variables"])
+        self.assertIn("masa_total", analisis["variables"])
+        self.assertEqual(
+            formulas.nombre_variable_constructor("masa"),
+            "masa corporal",
+        )
+        self.assertEqual(
+            formulas.nombre_variable_constructor("masa_total"),
+            "masa total",
+        )
+
+        resultado = formulas.evaluar_expresion_personalizada(
+            analisis["texto"],
+            {
+                "Fz": np.array([100.0, 200.0]),
+                "masa": 50.0,
+                "masa_total": 100.0,
+            },
+        )
+        np.testing.assert_allclose(resultado, [3.0, 6.0])
+
+    def test_una_formula_con_masa_total_avisa_si_el_dato_falta(self):
+        clave = "formula_masa_total_test"
+        self.addCleanup(formulas.quitar_formula_personalizada, clave)
+        formulas.registrar_formula_personalizada(
+            {
+                "clave": clave,
+                "nombre": "Fuerza por masa total",
+                "expresion": "Fz / masa_total",
+                "unidad": "N/kg",
+            }
+        )
+
+        motivo = formulas.validar_formula(
+            clave, {}, roles_disponibles=("Fz",)
+        )
+
+        self.assertIn("masa total", motivo.lower())
+        resultado = formulas.FORMULAS[clave]["computar"](
+            {"Fz": np.array([100.0, 200.0])},
+            {"masa_total": 100.0},
+        )
+        np.testing.assert_allclose(resultado, [1.0, 2.0])
 
     def test_una_formula_con_estatura_avisa_si_el_dato_falta(self):
         clave = "formula_estatura_test"
@@ -1357,6 +1412,7 @@ class TestResumenFormula(unittest.TestCase):
 class TestPaleta(unittest.TestCase):
     def tearDown(self):
         paleta.set_modo_daltonico(False)
+        paleta.restaurar_colores_senales()
 
     def test_cambia_la_paleta_y_avisa_solo_si_hubo_cambio(self):
         self.assertFalse(paleta.modo_daltonico_activo())
@@ -1372,6 +1428,29 @@ class TestPaleta(unittest.TestCase):
         colores = paleta.colores_intervalos()
         self.assertEqual(paleta.color_intervalo(1), colores[0])
         self.assertEqual(paleta.color_intervalo(len(colores) + 1), colores[0])
+
+    def test_colores_personalizados_se_normalizan_y_respetan_accesibilidad(self):
+        self.assertTrue(paleta.set_colores_senales("123abc", "#FEDCBA"))
+        self.assertEqual(paleta.color_senal_original(), "#123ABC")
+        self.assertEqual(paleta.color_senal_filtrada(), "#FEDCBA")
+
+        paleta.set_modo_visual(paleta.MODO_ROJO_VERDE)
+        self.assertEqual(
+            paleta.color_senal_original(),
+            paleta.PALETAS[paleta.MODO_ROJO_VERDE]["senal_original"],
+        )
+        self.assertEqual(
+            paleta.color_senal_filtrada(),
+            paleta.PALETAS[paleta.MODO_ROJO_VERDE]["senal_filtrada"],
+        )
+
+        paleta.set_modo_visual(paleta.MODO_ESTANDAR)
+        self.assertEqual(paleta.color_senal_original(), "#123ABC")
+        self.assertEqual(paleta.color_senal_filtrada(), "#FEDCBA")
+
+    def test_rechaza_colores_personalizados_invalidos(self):
+        with self.assertRaises(ValueError):
+            paleta.set_colores_senales("azul", "#123456")
 
     def test_recolorear_ida_y_vuelta_devuelve_los_colores_originales(self):
         gestor = GestorIntervalos()
@@ -1620,7 +1699,12 @@ class TestProyecto(unittest.TestCase):
 
     def test_ida_y_vuelta_del_estado_complementario(self):
         estado = {
-            "variables": {"masa": 72.5, "estatura": 1.81, "gravedad": 9.8},
+            "variables": {
+                "masa": 72.5,
+                "masa_total": 82.5,
+                "estatura": 1.81,
+                "gravedad": 9.8,
+            },
             "frecuencia_original": 2000.0,
             "graficas": {
                 "mapeo": {

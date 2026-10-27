@@ -25,6 +25,7 @@ class Cabecera(QFrame):
     inicioSolicitado = Signal()
     # Cambió algún ajuste de accesibilidad; el área central relee el estado.
     accesibilidadCambiada = Signal()
+    coloresGraficasCambiaron = Signal()
     # Compatibilidad durante la migración: ver ``configuracion.py``.
     modoDaltonicoCambiado = Signal(bool)
 
@@ -70,7 +71,7 @@ class Cabecera(QFrame):
         self.titulo = titulo
         titulo.setObjectName("mainTitle")
 
-        subtitulo = QLabel(app_info.LABORATORIO)
+        subtitulo = QLabel(app_info.LABORATORIO_CABECERA)
         self.subtitulo = subtitulo
         subtitulo.setObjectName("subTitle")
         subtitulo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
@@ -147,7 +148,9 @@ class Cabecera(QFrame):
         self.layout_principal.setSpacing(separacion)
         self.layout_botones.setSpacing(3 if compacto else 12)
         self.subtitulo.setText(
-            app_info.LABORATORIO_CORTO if compacto else app_info.LABORATORIO
+            app_info.LABORATORIO_CORTO
+            if compacto
+            else app_info.LABORATORIO_CABECERA
         )
         self.subtitulo.setVisible(True)
 
@@ -188,6 +191,9 @@ class Cabecera(QFrame):
             self._on_no_preguntar_cambiada
         )
         dialogo.accesibilidadCambiada.connect(self._on_accesibilidad_cambiada)
+        dialogo.coloresGraficasCambiaron.connect(
+            self.coloresGraficasCambiaron.emit
+        )
         # Compatibilidad durante la migración: el antiguo modo «daltónico» se
         # reenvía tal cual; el área central todavía lo escucha (etapa 5).
         dialogo.modoDaltonicoCambiado.connect(self.modoDaltonicoCambiado.emit)

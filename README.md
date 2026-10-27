@@ -35,8 +35,16 @@ Cuando hay subframes, ABS promedia las muestras que pertenecen al mismo frame an
 - Crea una gráfica por señal detectada y mantiene el mapeo entre Fuerza, Momento y COP.
 - Muestra la unidad en el eje vertical: `N` para fuerza, `N.mm` para momento y `mm` para centro de presión en el archivo de ejemplo.
 - Evita factores automáticos confusos en señales muy pequeñas. Por ejemplo, `Cz` se muestra como `0.000020 mm` en lugar de `20 × 10⁻⁶ mm`.
-- Permite zoom horizontal con la rueda del ratón.
+- En `Configurar > Zoom de las gráficas` se puede elegir si la rueda modifica
+  solo X, solo Y o ambos ejes. El modo predeterminado es solo X y la elección
+  se conserva al volver a abrir ABS.
 - Reduce automáticamente la cantidad de puntos dibujados cuando la vista no necesita mostrarlos todos.
+- En `Configurar > Colores de las gráficas` se pueden elegir los colores de las
+  líneas original y filtrada mediante el selector visual del sistema. La vista
+  previa y las gráficas abiertas cambian al instante, y la elección se conserva
+  al cerrar y volver a abrir ABS. `Restaurar colores` recupera azul y ámbar.
+- Mientras el modo accesible está activo se utiliza su paleta de contraste. Al
+  desactivarlo reaparecen los colores personalizados, que no se pierden.
 
 ### Filtrado
 
@@ -50,7 +58,7 @@ El campo `Frecuencia usada` se completa con la frecuencia original detectada en 
 
 El procesamiento se realiza con secciones de segundo orden y hacia adelante y hacia atrás para evitar un desplazamiento temporal apreciable de los eventos. La atenuación fuera de los límites elegidos es gradual; no se presenta como una eliminación perfecta e instantánea de todas las frecuencias exteriores.
 
-El filtrado no reemplaza visualmente los datos: la señal original permanece en azul y la filtrada se superpone en naranja. `Quitar filtro` restaura las señales seleccionadas sin modificar los filtros aplicados a otras. Mientras una curva filtrada está visible, los rangos destinados a cálculos toman sus valores filtrados.
+El filtrado no reemplaza visualmente los datos: la señal original permanece visible y la filtrada se superpone con otro color. `Quitar filtro` restaura las señales seleccionadas sin modificar los filtros aplicados a otras. Mientras una curva filtrada está visible, los rangos destinados a cálculos toman sus valores filtrados.
 
 ### Rangos para cálculos
 
@@ -69,9 +77,9 @@ El filtrado no reemplaza visualmente los datos: la señal original permanece en 
 - `Todos`, `Pares`, `Impares` y `Ninguno` actúan únicamente sobre el nivel
   visible. Para subintervalos, par o impar se determina dentro de cada padre;
   por ejemplo, se seleccionan A2, B2 y C2.
-- Al pulsar `Aplicar` se usan únicamente las casillas marcadas de la señal que
-  aparece en el selector. Las selecciones recordadas en otras señales no se
-  incluyen hasta que el usuario cambie a ellas.
+- Al pulsar `Aplicar` se usan únicamente las casillas visibles y marcadas en el
+  selector. Cada señal se puede tratar por separado; la opción `Todas las
+  señales visibles` permite reunirlas cuando una fórmula necesita más de una.
 - Cada rango y sub-rango se puede eliminar desde la cruz de su propia fila.
 - `Esc` cancela el primer punto pendiente. Si todavía no se marcó un punto,
   sale del modo de selección.
@@ -93,18 +101,38 @@ La selección se hace con dos clics sobre una gráfica después de activar `Sele
 
 ### Variables y fórmulas personalizadas
 
-- La masa en kilogramos y la estatura en metros se guardan para cada CSV.
-- `masa` y `estatura` están disponibles como datos dentro del constructor de
-  fórmulas, junto con gravedad, frecuencia y tiempo.
+- La masa corporal, la masa total (ambas en kilogramos) y la estatura en metros
+  se guardan para cada CSV.
+- `masa`, `masa_total` y `estatura` están disponibles como datos dentro del
+  constructor de fórmulas, junto con gravedad, frecuencia y tiempo. Las
+  fórmulas incorporadas conservan `masa` como masa corporal.
+- El inicio rápido del constructor incluye `Impacto`, definido como
+  `maximo(Fz)`: el pico máximo de la fuerza Z dentro de cada intervalo.
+- El inicio rápido también incluye `Fuerza resultante`, definida como
+  `raiz(Fx*Fx + Fy*Fy + Fz*Fz)`.
 - Las fórmulas creadas se pueden exportar a un `.txt` e importar en otra copia
   de ABS. Al importar se validan de nuevo, se omiten duplicados exactos y se
   renombran las coincidencias para no reemplazar fórmulas existentes.
 
+### Fuerza resultante
+
+- La fórmula incorporada `Fuerza resultante` calcula
+  `FR = √(Fx² + Fy² + Fz²)` en newtons. No usa masa, gravedad ni Fz neta.
+- Requiere un intervalo con los mismos límites en Fx, Fy y Fz. Para elegir las
+  tres copias se usa `Todas las señales visibles` en el selector del panel.
+- Los grupos incompletos no se calculan y se informa qué componente falta.
+- El resultado se superpone en las gráficas principales de Fx, Fy y Fz, se
+  muestra en el panel de resultados y también se abre en una ventana propia
+  con la curva, el promedio, el máximo y el resto del resumen por intervalo.
+  No se ofrece para subintervalos.
+- Los resúmenes quedan disponibles en la exportación de resultados. La ventana
+  de fuerza resultante también recuerda su tamaño y la división de sus paneles.
+
 ### Guardado y reapertura de proyectos
 
 - `Guardar` conserva la copia del CSV y las anotaciones, y agrega un archivo
-  de estado con masa, estatura, gravedad, frecuencia, filtros aplicados,
-  orden de las gráficas y señales visibles.
+  de estado con masa corporal, masa total, estatura, gravedad, frecuencia,
+  filtros aplicados, orden de las gráficas y señales visibles.
 - `Cargar` reconstruye ese estado después de abrir el CSV. Los proyectos de
   versiones anteriores, que no tienen archivo de estado, continúan abriendo.
 - La ventana principal y todos los diálogos propios recuerdan su tamaño y
@@ -117,6 +145,8 @@ La selección se hace con dos clics sobre una gráfica después de activar `Sele
   tamaños al espacio disponible y a la escala configurada en el sistema.
 - En ventanas angostas se reducen márgenes e iconos y los contenidos extensos
   pasan a disposición vertical o quedan accesibles mediante desplazamiento.
+- Los accesos del borde derecho muestran siempre sus nombres: `Variables`,
+  `Filtros`, `Recorte y fórmulas` y `Cabeceras`.
 - Si cambió el monitor o su resolución, una geometría guardada se limita y se
   reubica para que la ventana vuelva a quedar visible.
 - `Inicio` cierra el análisis actual y vuelve al estado anterior a cargar un
@@ -139,7 +169,10 @@ La selección se hace con dos clics sobre una gráfica después de activar `Sele
 
 ### Acerca de ABS 3.0
 
-El botón `Acerca de` muestra el nombre del programa, versión, año, institución, laboratorio, descripción y una referencia sugerida que puede copiarse al portapapeles.
+El botón `Acerca de` muestra el nombre del programa en ambos idiomas, el
+alcance de la versión, la autoría, los tutores, la institución, el laboratorio
+y las referencias sugeridas en inglés y español, que pueden copiarse al
+portapapeles.
 
 Estos datos están centralizados en `logica/app_info.py`. Para publicar otra versión, se modifica `VERSION` una sola vez; el título de la ventana, la cabecera, el diálogo y la referencia se actualizan a partir de ese valor. La autoría registrada es Jairo Bandera, Alan Ceballos y Juan Macchi.
 

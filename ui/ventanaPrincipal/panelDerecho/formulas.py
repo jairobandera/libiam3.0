@@ -59,6 +59,7 @@ class Formulas(QFrame):
         self.setObjectName("formulasPanel")
         self.checkboxes = {}
         self.intervalos = []
+        self.senales_disponibles = []
         self.estados_seleccion = {}
         self.subintervalos_colapsados = set()
         self.nivel_calculo = "intervalos"
@@ -253,6 +254,7 @@ class Formulas(QFrame):
         }
         self.modo_seleccion = None
         self.variables_formula = []
+        self.senales_disponibles = []
         self.chk_todas.blockSignals(True)
         self.chk_todas.setChecked(False)
         self.chk_todas.blockSignals(False)
@@ -261,6 +263,7 @@ class Formulas(QFrame):
         self.cmb_senal.setEnabled(False)
         self.cmb_senal.blockSignals(False)
         self.panel_calculo.reiniciar_sesion()
+        self.panel_calculo.set_claves_excluidas(())
         self._actualizar_nivel_visual()
         self._renderizar_intervalos_actuales()
         self.aplicarATodasCambiado.emit(False)
@@ -527,6 +530,9 @@ class Formulas(QFrame):
         self._guardar_estados_visibles()
         self.nivel_calculo = nivel
         self.modo_seleccion = self.modos_seleccion[nivel]
+        self.panel_calculo.set_claves_excluidas(
+            ("fuerza_resultante",) if nivel == "subintervalos" else ()
+        )
         self._actualizar_nivel_visual()
         self._renderizar_intervalos_actuales()
         self.actualizar_estado_formula(True, "")
@@ -588,6 +594,46 @@ class Formulas(QFrame):
         """Un bloque por intervalo calculado, con sus valores destacados."""
         self.panel_calculo.mostrar_resultados(datos)
 
+    def cargar_senales(self, senales):
+        """Actualiza las señales visibles sin depender de que tengan recortes."""
+        seleccion_anterior = self.cmb_senal.currentData()
+        self.senales_disponibles = [
+            senal for senal in (senales or []) if senal.get("visible", True)
+        ]
+        self._poblar_senales(seleccion_anterior)
+        self._renderizar_intervalos_actuales()
+
+    def _poblar_senales(self, preferida=None):
+        senales = list(self.senales_disponibles or [])
+        if not senales:
+            conocidas = set()
+            for intervalo in self.intervalos:
+                columna = intervalo.get("columna", "__global__")
+                if columna in conocidas:
+                    continue
+                conocidas.add(columna)
+                senales.append(
+                    {
+                        "columna": columna,
+                        "nombre": intervalo.get("senal") or str(columna),
+                    }
+                )
+
+        self.cmb_senal.blockSignals(True)
+        self.cmb_senal.clear()
+        if senales:
+            self.cmb_senal.addItem("Todas las señales visibles", None)
+            for senal in senales:
+                columna = senal.get("columna")
+                nombre = senal.get("nombre") or columna or ""
+                self.cmb_senal.addItem(nombre, columna)
+            indice = self.cmb_senal.findData(preferida)
+            self.cmb_senal.setCurrentIndex(indice if indice >= 0 else 0)
+        else:
+            self.cmb_senal.addItem("No hay señales visibles", None)
+        self.cmb_senal.setEnabled(bool(senales))
+        self.cmb_senal.blockSignals(False)
+
     def cargar_intervalos(self, intervalos):
         self._guardar_estados_visibles()
         ids_anteriores = {self._id_intervalo(intervalo) for intervalo in self.intervalos}
@@ -608,22 +654,7 @@ class Formulas(QFrame):
             if intervalos_nuevos
             else self.cmb_senal.currentData()
         )
-        senales = []
-        for intervalo in self.intervalos:
-            columna = intervalo.get("columna", "__global__")
-            if columna not in {item[0] for item in senales}:
-                senales.append((columna, intervalo.get("senal", str(columna))))
-
-        self.cmb_senal.blockSignals(True)
-        self.cmb_senal.clear()
-        for columna, nombre in senales:
-            self.cmb_senal.addItem(nombre, columna)
-        if columna_actual is not None:
-            indice = self.cmb_senal.findData(columna_actual)
-            if indice >= 0:
-                self.cmb_senal.setCurrentIndex(indice)
-        self.cmb_senal.setEnabled(bool(senales))
-        self.cmb_senal.blockSignals(False)
+        self._poblar_senales(columna_actual)
         self._renderizar_intervalos_actuales()
 
     @staticmethod
@@ -648,7 +679,10 @@ class Formulas(QFrame):
         padres_visibles = [
             intervalo
             for intervalo in self.intervalos
-            if intervalo.get("columna", "__global__") == columna_actual
+            if (
+                columna_actual is None
+                or intervalo.get("columna", "__global__") == columna_actual
+            )
             and not intervalo.get("es_subintervalo")
         ]
 
@@ -1004,7 +1038,8 @@ class Formulas(QFrame):
             else "intervalo(s)"
         )
         self.lbl_resumen.setText(
-            f"{len(seleccionados_visibles)} de {total} {sustantivo} seleccionados en esta señal."
+            f"{len(seleccionados_visibles)} de {total} {sustantivo} seleccionados "
+            + ("en las señales visibles." if self.cmb_senal.currentData() is None else "en esta señal.")
             if total
             else (
                 "No hay subintervalos en esta señal."

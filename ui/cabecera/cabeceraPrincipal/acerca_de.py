@@ -2,11 +2,14 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
 from logica import app_info
@@ -22,26 +25,35 @@ class AcercaDeDialog(QDialog):
         configurar_geometria_persistente(
             self,
             "dialogos/acerca_de/geometria",
-            ideal=(680, 460),
-            minimo=(420, 340),
+            ideal=(760, 620),
+            minimo=(480, 380),
             piso=(300, 260),
         )
 
     def _init_ui(self):
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        contenido = QWidget()
+        contenido_layout = QVBoxLayout()
+        contenido_layout.setContentsMargins(20, 20, 20, 16)
+        contenido_layout.setSpacing(12)
 
         titulo = QLabel(app_info.NOMBRE)
         titulo.setStyleSheet("font-size: 22px; font-weight: 700;")
-        nombre_completo = QLabel(app_info.NOMBRE_COMPLETO)
+        nombre_completo = QLabel(
+            f"{app_info.NOMBRE_COMPLETO}<br>"
+            f"<span style='color:#8F8F8F'>{app_info.NOMBRE_COMPLETO_ES}</span>"
+        )
         nombre_completo.setStyleSheet("font-size: 14px; color: #B0B0B0;")
         nombre_completo.setWordWrap(True)
 
         informacion = QLabel(
-            f"<b>Versión:</b> {app_info.VERSION}<br>"
-            f"<b>Año:</b> {app_info.ANIO}<br>"
+            f"<b>Versión:</b> {app_info.VERSION} "
+            f"({app_info.ALCANCE_VERSION})<br><br>"
             f"<b>Autoría:</b> {app_info.AUTORIA}<br>"
+            f"<b>Tutores:</b> {app_info.TUTORIA}<br>"
             f"<b>Institución:</b> {app_info.INSTITUCION}<br>"
             f"<b>Laboratorio:</b> {app_info.LABORATORIO}<br><br>"
             f"{app_info.DESCRIPCION}"
@@ -53,21 +65,35 @@ class AcercaDeDialog(QDialog):
         lbl_referencia.setStyleSheet("font-weight: 600;")
         self.txt_referencia = QPlainTextEdit(app_info.REFERENCIA)
         self.txt_referencia.setReadOnly(True)
-        self.txt_referencia.setMaximumHeight(90)
+        self.txt_referencia.setMinimumHeight(150)
+        self.txt_referencia.setMaximumHeight(190)
 
+        contenido_layout.addWidget(titulo)
+        contenido_layout.addWidget(nombre_completo)
+        contenido_layout.addWidget(informacion)
+        contenido_layout.addWidget(lbl_referencia)
+        contenido_layout.addWidget(self.txt_referencia)
+        contenido_layout.addStretch()
+        contenido.setLayout(contenido_layout)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(contenido)
+
+        pie = QFrame()
         botones = QHBoxLayout()
+        botones.setContentsMargins(20, 12, 20, 16)
         botones.addStretch()
         self.btn_copiar = QPushButton("Copiar referencia")
         btn_cerrar = QPushButton("Cerrar")
         botones.addWidget(self.btn_copiar)
         botones.addWidget(btn_cerrar)
+        pie.setLayout(botones)
 
-        layout.addWidget(titulo)
-        layout.addWidget(nombre_completo)
-        layout.addWidget(informacion)
-        layout.addWidget(lbl_referencia)
-        layout.addWidget(self.txt_referencia)
-        layout.addLayout(botones)
+        layout.addWidget(scroll, 1)
+        layout.addWidget(pie)
         self.setLayout(layout)
 
         self.btn_copiar.clicked.connect(self._copiar_referencia)

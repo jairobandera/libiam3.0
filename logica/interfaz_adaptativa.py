@@ -27,13 +27,13 @@ def perfil_interfaz(ancho, alto):
     cabecera_muy_compacta = ancho < 760
 
     if ancho < 760:
-        izquierdo, barra, derecho, minimo = 165, 44, 195, 170
+        izquierdo, barra, derecho, minimo = 165, 100, 195, 170
     elif muy_compacto:
-        izquierdo, barra, derecho, minimo = 195, 52, 270, 220
+        izquierdo, barra, derecho, minimo = 195, 108, 270, 220
     elif compacto:
-        izquierdo, barra, derecho, minimo = 235, 62, 315, 260
+        izquierdo, barra, derecho, minimo = 235, 116, 315, 260
     else:
-        izquierdo, barra, derecho, minimo = 280, 80, 340, 300
+        izquierdo, barra, derecho, minimo = 280, 124, 340, 300
 
     centro_minimo = 220 if ancho < 760 else 300 if muy_compacto else 360
     maximo_disponible = ancho - izquierdo - barra - centro_minimo

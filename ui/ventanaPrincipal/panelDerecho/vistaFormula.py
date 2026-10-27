@@ -314,7 +314,17 @@ class _ConstructorCajas:
                 self._texto(")", escala),
             )
         if nombre == "masa":
-            return self._texto("m", escala, cursiva=True)
+            return _CajaSubindice(
+                self._texto("m", escala, cursiva=True),
+                self._texto("c", escala * 0.68, cursiva=True),
+                escala,
+            )
+        if nombre == "masa_total":
+            return _CajaSubindice(
+                self._texto("m", escala, cursiva=True),
+                self._texto("total", escala * 0.60, cursiva=True),
+                escala,
+            )
         if nombre == "estatura":
             return self._texto("h", escala, cursiva=True)
         if nombre == "gravedad":

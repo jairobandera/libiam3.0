@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from logica.interfaz_adaptativa import (
     calcular_tamano_ventana,
@@ -35,6 +36,11 @@ class TestCalculosInterfazAdaptativa(unittest.TestCase):
                 perfil.panel_derecho,
                 perfil.panel_derecho_maximo,
             )
+
+    def test_la_navegacion_derecha_permanece_compacta(self):
+        self.assertEqual(perfil_interfaz(1920, 1080).barra_derecha, 124)
+        self.assertEqual(perfil_interfaz(1150, 647).barra_derecha, 116)
+        self.assertEqual(perfil_interfaz(800, 600).barra_derecha, 108)
 
     def test_un_dialogo_nunca_supera_el_area_disponible(self):
         self.assertEqual(
@@ -112,6 +118,9 @@ class TestVentanasAdaptativas(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        from logica import paleta
+
+        paleta.restaurar_colores_senales()
         cls.ajustes.clear()
         cls.ajustes.sync()
         cls.session.close()
@@ -210,7 +219,10 @@ class TestVentanasAdaptativas(unittest.TestCase):
 
         cabecera = Cabecera()
         cabecera.ajustar_modo(False, False)
-        self.assertEqual(cabecera.subtitulo.text(), app_info.LABORATORIO)
+        self.assertEqual(
+            cabecera.subtitulo.text(),
+            app_info.LABORATORIO_CABECERA,
+        )
         self.assertTrue(cabecera.subtitulo.isVisibleTo(cabecera))
 
         cabecera.ajustar_modo(True, True)
@@ -228,6 +240,197 @@ class TestVentanasAdaptativas(unittest.TestCase):
             ["Inicio", "Abrir", "Guardar", "Exportar"],
         )
         cabecera.close()
+
+    def test_configuracion_cambia_y_recuerda_los_colores_de_las_graficas(self):
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QColorDialog
+
+        from logica import paleta, preferencias_graficas
+        from ui.cabecera.cabeceraPrincipal.configuracion import ConfiguracionDialog
+
+        preferencias_graficas.restaurar_colores()
+        dialogo = ConfiguracionDialog()
+        cambios = []
+        dialogo.coloresGraficasCambiaron.connect(lambda: cambios.append(True))
+
+        with mock.patch.object(
+            QColorDialog,
+            "getColor",
+            return_value=QColor("#123ABC"),
+        ):
+            dialogo.btn_color_original.click()
+
+        self.assertEqual(paleta.color_senal_original(), "#123ABC")
+        self.assertEqual(dialogo.btn_color_original.text(), "#123ABC")
+        self.assertEqual(len(cambios), 1)
+        dialogo.close()
+
+        paleta.restaurar_colores_senales()
+        preferencias_graficas.cargar_colores()
+        self.assertEqual(paleta.color_senal_original(), "#123ABC")
+
+        reabierto = ConfiguracionDialog()
+        self.assertEqual(reabierto.btn_color_original.text(), "#123ABC")
+        reabierto.btn_restaurar_colores.click()
+        self.assertEqual(
+            paleta.color_senal_original(),
+            paleta.COLOR_ORIGINAL_PREDETERMINADO,
+        )
+        self.assertFalse(reabierto.btn_restaurar_colores.isEnabled())
+        reabierto.close()
+
+    def test_configuracion_recuerda_el_modo_de_zoom(self):
+        from logica import preferencias_graficas
+        from ui.cabecera.cabeceraPrincipal.configuracion import ConfiguracionDialog
+
+        preferencias_graficas.restaurar_modo_zoom()
+        primero = ConfiguracionDialog()
+        self.assertTrue(primero.radio_zoom_x.isChecked())
+        primero.radio_zoom_y.click()
+        self.assertEqual(
+            preferencias_graficas.modo_zoom_actual(),
+            preferencias_graficas.MODO_ZOOM_Y,
+        )
+        primero.close()
+
+        preferencias_graficas.cargar_modo_zoom()
+        segundo = ConfiguracionDialog()
+        self.assertTrue(segundo.radio_zoom_y.isChecked())
+        segundo.radio_zoom_xy.click()
+        segundo.close()
+
+        preferencias_graficas.cargar_modo_zoom()
+        self.assertEqual(
+            preferencias_graficas.modo_zoom_actual(),
+            preferencias_graficas.MODO_ZOOM_XY,
+        )
+        preferencias_graficas.restaurar_modo_zoom()
+
+    def test_inicio_rapido_incluye_impacto_como_pico_de_fz(self):
+        from PySide6.QtWidgets import QPushButton
+
+        from ui.ventanaPrincipal.panelDerecho.constructorFormula import (
+            ConstructorFormula,
+        )
+
+        dialogo = ConstructorFormula()
+        try:
+            boton = next(
+                boton
+                for boton in dialogo.findChildren(QPushButton)
+                if boton.text() == "Impacto"
+            )
+            boton.click()
+            self.assertEqual(dialogo.input_expresion.text(), "maximo(Fz)")
+            self.assertEqual(dialogo.input_nombre.text(), "Impacto personalizado")
+            self.assertEqual(dialogo._unidad_actual(), "N")
+            self.assertTrue(dialogo.analisis_actual["resultado_escalar"])
+        finally:
+            dialogo.close()
+
+    def test_el_cambio_de_color_repinta_curvas_ya_cargadas(self):
+        from logica import paleta
+        from ui.ventanaPrincipal.areaCentralGraficas import (
+            AreaCentralGraficas,
+            GraficaSenal,
+        )
+
+        area = AreaCentralGraficas()
+        grafica = GraficaSenal("Fuerza Z", unidad="N", columna="Fz")
+        grafica.set_datos(
+            [1, 2, 3],
+            [10, 20, 30],
+            [11, 19, 31],
+        )
+        area.graficas_por_columna = {"Fz": grafica}
+
+        try:
+            paleta.set_colores_senales("#112233", "#DDEEFF")
+            area.aplicar_colores_graficas()
+            self.assertEqual(
+                grafica.curva_original.opts["pen"].color().name().upper(),
+                "#112233",
+            )
+            self.assertEqual(
+                grafica.curva_filtrada.opts["pen"].color().name().upper(),
+                "#DDEEFF",
+            )
+        finally:
+            paleta.restaurar_colores_senales()
+            grafica.close()
+            area.close()
+
+    def test_el_menu_derecho_muestra_nombres_sin_esperar_tooltips(self):
+        from ui.ventanaPrincipal.barraBotones import BarraBotones
+        from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
+
+        panel = PanelDerecho(db_session=self.session)
+        barra = BarraBotones(panel)
+
+        self.assertEqual(
+            [
+                barra.btn_mapeo.text(),
+                barra.btn_filtros.text(),
+                barra.btn_formulas.text().replace("\n", " "),
+                barra.btn_detectar_cabeceras.text(),
+            ],
+            ["Variables", "Filtros", "Recorte y fórmulas", "Cabeceras"],
+        )
+        barra.close()
+        panel.close()
+
+    def test_acerca_de_muestra_tutores_laboratorio_y_dos_referencias(self):
+        from PySide6.QtWidgets import QLabel
+
+        from logica import app_info
+        from ui.cabecera.cabeceraPrincipal.acerca_de import AcercaDeDialog
+
+        dialogo = AcercaDeDialog()
+        textos = " ".join(
+            etiqueta.text() for etiqueta in dialogo.findChildren(QLabel)
+        )
+
+        self.assertIn("Marcelo Scotto (UTEC)", textos)
+        self.assertIn("Artur Bonezi (UdelaR)", textos)
+        self.assertIn("DCB", textos)
+        self.assertIn("Cenur Litoral Norte", textos)
+        self.assertIn(app_info.REFERENCIA_INGLES, dialogo.txt_referencia.toPlainText())
+        self.assertIn(app_info.REFERENCIA_ESPANOL, dialogo.txt_referencia.toPlainText())
+        dialogo.close()
+
+    def test_masa_corporal_y_total_se_guardan_y_aparecen_en_el_constructor(self):
+        from PySide6.QtWidgets import QAbstractButton
+
+        from logica.config_db import obtener_variable_archivo
+        from ui.ventanaPrincipal.panelDerecho.constructorFormula import (
+            ConstructorFormula,
+        )
+        from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
+
+        ruta = str(Path(self.temporal.name) / "masas.csv")
+        panel = PanelIzquierdo(db_session=self.session)
+        panel.archivo_actual = {"ruta": ruta}
+        panel._set_variables_archivo_habilitadas(True)
+        panel.input_masa.setText("72,5")
+        panel.input_masa_total.setText("82,5")
+        panel.guardar_masa()
+        panel.guardar_masa_total()
+
+        self.assertEqual(obtener_variable_archivo(self.session, ruta, "masa"), 72.5)
+        self.assertEqual(
+            obtener_variable_archivo(self.session, ruta, "masa_total"),
+            82.5,
+        )
+        self.assertEqual(panel.variables_para_proyecto()["masa_total"], 82.5)
+
+        constructor = ConstructorFormula()
+        textos = {
+            boton.text() for boton in constructor.findChildren(QAbstractButton)
+        }
+        self.assertIn("Masa corporal", textos)
+        self.assertIn("Masa total", textos)
+        constructor.close()
+        panel.close()
 
     def test_todas_las_ventanas_recuerdan_su_tamano_y_siguen_visibles(self):
         for indice, (nombre, fabrica) in enumerate(self._fabricas().items()):
@@ -275,8 +478,10 @@ class TestVentanasAdaptativas(unittest.TestCase):
         ventana.panel_izquierdo.archivos_cargados = {"prueba.csv": {"df": df}}
         ventana.panel_izquierdo.archivo_actual = {"nombre": "prueba.csv"}
         ventana.panel_izquierdo.masa_actual = 70.0
+        ventana.panel_izquierdo.masa_total_actual = 80.0
         ventana.panel_izquierdo.estatura_actual = 1.75
         ventana.panel_izquierdo.input_masa.setText("70")
+        ventana.panel_izquierdo.input_masa_total.setText("80")
         ventana.panel_izquierdo.input_estatura.setText("1.75")
         ventana.area_central.gestores_intervalos = {"Fz": object()}
         ventana.area_central.formulas_activas = {"potencia": {}}
@@ -291,8 +496,10 @@ class TestVentanasAdaptativas(unittest.TestCase):
         self.assertEqual(ventana.area_central.columnas_filtradas, set())
         self.assertEqual(ventana.panel_izquierdo.archivos_cargados, {})
         self.assertIsNone(ventana.panel_izquierdo.masa_actual)
+        self.assertIsNone(ventana.panel_izquierdo.masa_total_actual)
         self.assertIsNone(ventana.panel_izquierdo.estatura_actual)
         self.assertEqual(ventana.panel_izquierdo.input_masa.text(), "")
+        self.assertEqual(ventana.panel_izquierdo.input_masa_total.text(), "")
         self.assertEqual(ventana.panel_izquierdo.input_estatura.text(), "")
         self.assertEqual(ventana.panel_izquierdo.input_gravedad.text(), "9.8")
         self.assertFalse(ventana.panel_derecho.isVisible())

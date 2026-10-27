@@ -25,7 +25,7 @@ from ui.ventanaPrincipal.areaCentralGraficas import AreaCentralGraficas
 from ui.ventanaPrincipal.panelizquierdo import PanelIzquierdo
 from ui.ventanaPrincipal.panelDerecho.panelDerecho import PanelDerecho
 from ui.ventanaPrincipal.barraBotones import BarraBotones
-from logica import app_info, exportacion, proyecto
+from logica import app_info, exportacion, preferencias_graficas, proyecto
 from logica.interfaz_adaptativa import (
     configurar_geometria_persistente,
     guardar_geometria,
@@ -42,6 +42,8 @@ class VentanaPrincipal(QWidget):
 
         self.db_session = db_session
         self.setWindowTitle(app_info.NOMBRE)
+        preferencias_graficas.cargar_colores()
+        preferencias_graficas.cargar_modo_zoom()
 
         self.init_ui()
         self._instalar_drag_drop()
@@ -66,6 +68,11 @@ class VentanaPrincipal(QWidget):
     def closeEvent(self, event):
         """Conserva posición, tamaño y estado maximizado para la próxima sesión."""
         for ventana in getattr(self.area_central, "_ventanas_region", ()):
+            if hasattr(ventana, "guardar_geometria"):
+                ventana.guardar_geometria()
+        for ventana in getattr(
+            self.area_central, "_ventanas_resultados_fr", ()
+        ):
             if hasattr(ventana, "guardar_geometria"):
                 ventana.guardar_geometria()
         self.panel_derecho.guardar_estado()
@@ -124,6 +131,12 @@ class VentanaPrincipal(QWidget):
         self.cabecera.accesibilidadCambiada.connect(
             lambda: self.panel_derecho.filtros.aplicar_paleta()
         )
+        self.cabecera.coloresGraficasCambiaron.connect(
+            self.area_central.aplicar_colores_graficas
+        )
+        self.cabecera.coloresGraficasCambiaron.connect(
+            lambda: self.panel_derecho.filtros.aplicar_paleta()
+        )
         self.cabecera.guardarSolicitado.connect(self._guardar_proyecto)
         self.cabecera.cargarSolicitado.connect(self._cargar_proyecto)
         self.cabecera.exportarSolicitado.connect(self._exportar)
@@ -157,6 +170,9 @@ class VentanaPrincipal(QWidget):
         )
         self.area_central.senalesDisponiblesCambiaron.connect(
             self.panel_derecho.filtros.cargar_senales
+        )
+        self.area_central.senalesDisponiblesCambiaron.connect(
+            self.panel_derecho.formulas.cargar_senales
         )
         self.area_central.variablesFormulaCambiaron.connect(
             self.panel_derecho.formulas.cargar_variables_formula
